@@ -167,6 +167,30 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 - Character errors are unacceptable for personalized messages
 - Cannot ship cards that say wrong words to customers
 
+### 🔄 One-DM Training Attempt (Jan 22, 2026)
+
+**Goal:** Re-train One-DM from scratch to see if custom training improves character accuracy.
+
+**Hardware:** NVIDIA GTX 1660 Super (6GB VRAM)
+
+**Changes for 1660 Super (low VRAM):**
+- Created `configs/IAM64_small.yml` with memory-optimized settings:
+  - `SOLVER.TYPE: SGD` (instead of AdamW - lower memory footprint)
+  - `TRAIN.IMS_PER_BATCH: 2` (small batch size)
+  - `SOLVER.GRAD_L2_CLIP: 1.0` (gradient clipping)
+  - `SOLVER.WARMUP_ITERS: 5000`
+  - `DATA_LOADER.NUM_THREADS: 2`
+- Changed `SNAPSHOT_BEGIN: 1` and `SNAPSHOT_ITERS: 1` (save checkpoint after each epoch)
+- Training uses single GPU via `torchrun --nproc_per_node=1`
+
+**Status:** Successfully completed 1 epoch of training with IAM64 dataset from the One-DM repo.
+
+**Location:** `/home/server/One-DM/`
+
+**Next:** Evaluate checkpoint quality after training completes.
+
+---
+
 ### 🔄 Next Steps
 
 **Completed Evaluations:**
