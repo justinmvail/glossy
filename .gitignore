@@ -28,6 +28,7 @@ models/*.py[cod]
 models/*$py.class
 models/.Python
 models/venv/
+models/*/venv/
 models/env/
 models/ENV/
 models/.venv
@@ -95,6 +96,11 @@ models/checkpoints/
 models/data/
 models/*.onnx
 models/*.tflite
+models/*/saved/
+models/*/Generated/
+models/*/model_zoo/*.pth
+models/*/model_zoo/*.pt
+models/*/data/
 
 # Order data (sensitive)
 scripts/orders/

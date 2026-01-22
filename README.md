@@ -2,14 +2,51 @@
 
 Photo cards with AI-generated handwriting, personalized with your own writing style.
 
+## Project Status
+
+**Phase:** Model Evaluation - ✅ One-DM SUCCESS
+**Date:** Jan 21, 2026
+**Repository:** https://github.com/justinmvail/glossy
+
+### Current State
+
+✅ **Completed:**
+- Repository initialized and pushed to GitHub
+- SDT model fully tested with real English handwriting data (FAILED - illegible output)
+- One-DM repository cloned and fully configured
+- One-DM tested with IAM English dataset - **SUCCESS!**
+
+✅ **One-DM Evaluation Results:**
+- **SUCCESS:** English handwriting output is **HIGHLY LEGIBLE**
+- Tested with IAM English dataset (real handwriting samples)
+- Generated 5 words: all are clear, readable, production-quality
+- Only requires 1 style sample (vs SDT's 15)
+- **Conclusion:** One-DM is VIABLE for English handwriting
+
+### Architecture Decision
+
+**Server-Side Generation:**
+- One-DM model is 1.6 GB (too large for on-device)
+- Will run on AWS Lambda or EC2
+- User submits 1 handwriting sample + message text
+- Backend generates handwriting image with One-DM
+- Vectorization step converts raster to AxiDraw-compatible format
+
+### Next Steps
+
+1. Research image vectorization (Potrace, Autotrace, custom edge detection)
+2. Test One-DM with user-provided samples (not just dataset)
+3. Design backend architecture for server-side generation
+4. Test AxiDraw with vectorized One-DM output
+
 ## Quick Start
 
-This repository contains the full GLOSSY stack:
+This repository contains the GLOSSY development workspace:
 
-- **app/** - Flutter mobile app (iOS first)
-- **backend/** - AWS serverless backend (Lambda, API Gateway, DynamoDB, S3)
-- **models/** - SDT handwriting model integration
-- **scripts/** - Order processing and utility scripts
+- **app/** - Flutter mobile app (not started)
+- **backend/** - AWS serverless backend (not started)
+- **models/SDT/** - SDT handwriting model (setup complete, evaluation in progress)
+- **scripts/** - Order processing utilities (not started)
 - **docs/** - Additional documentation
 
 ## Overview
@@ -18,15 +55,11 @@ GLOSSY lets users send physical photo cards with personalized handwriting on the
 
 **Key Features:**
 - Custom handwriting generation (not preset fonts)
-- On-device AI processing
+- On-device AI processing (pending model viability)
 - AWS serverless backend
-- Manual fulfillment with pen plotter
+- Manual fulfillment with AxiDraw pen plotter
 
-## Project Status
-
-**Phase:** Pre-launch - Testing SDT handwriting output
-
-See [GLOSSY.md](./GLOSSY.md) for full project details, tech stack, and roadmap.
+See [GLOSSY.md](./GLOSSY.md) for full project details, technical notes, and progress log.
 
 ## Development Setup
 

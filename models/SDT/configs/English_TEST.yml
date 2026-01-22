@@ -1,0 +1,33 @@
+MODEL:
+  ENCODER_LAYERS: 2
+  WRI_DEC_LAYERS: 2
+  GLY_DEC_LAYERS: 2
+  NUM_HEAD_LAYERS: 1
+  NUM_IMGS: 15
+NUM_GPUS: 1
+SOLVER:
+  BASE_LR: 0.0002
+  MAX_ITER: 500  # Just 500 iterations for testing (vs 200k full)
+  WARMUP_ITERS: 100  # Reduced warmup
+  TYPE: Adam
+  GRAD_L2_CLIP: 5.0
+TRAIN:
+  ISTRAIN: True
+  IMS_PER_BATCH: 8  # Reduced batch size for MacBook
+  SNAPSHOT_BEGIN: 100  # Save early
+  SNAPSHOT_ITERS: 100  # Save often to monitor
+  VALIDATE_ITERS: 100  # Validate often
+  VALIDATE_BEGIN: 100
+  SEED: 1001
+  IMG_H: 64
+  IMG_W: 64
+TEST:
+  ISTRAIN: False
+  IMG_H: 64
+  IMG_W: 64
+DATA_LOADER:
+  NUM_THREADS: 0  # macOS compatibility
+  CONCAT_GRID: True
+  TYPE: ScriptDataset
+  PATH: data
+  DATASET: ENGLISH

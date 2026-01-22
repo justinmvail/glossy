@@ -63,13 +63,225 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 
 **Test SDT handwriting output on real people before building the full app**
 
+## Progress Log
+
+### ✅ Completed (Jan 21, 2026)
+
+**SDT Model Setup:**
+- Cloned SDT repository (CVPR 2023 - Style-Disentangled Transformer)
+- Set up Python 3.11 environment with PyTorch 2.2.2
+- Downloaded pre-trained models:
+  - SDT checkpoint (261 MB)
+  - Content encoder (69 MB)
+- Patched code for macOS compatibility (removed CUDA dependencies)
+- Model runs on Apple Silicon GPU (MPS)
+
+**Verification:**
+- Model loads successfully (67.8M parameters, ~259 MB)
+- Generates stroke coordinates in correct format: `[dx, dy, pen_up, pen_down, pen_end]`
+- Created test scripts for validation and visualization
+- Output format confirmed compatible with AxiDraw plotter
+
+### ⚠️ Issues Discovered
+
+**Model Output Quality:**
+- Current English model checkpoint produces illegible output
+- Model appears trained primarily for Chinese/Japanese handwriting
+- Synthetic font-based samples don't match model's expected input format
+- Requires actual handwritten samples (pen/stylus input) vs. computer fonts
+
+**Model Size:**
+- 259 MB is too large for on-device mobile deployment
+- Quantization required for iOS (target: <50 MB)
+- May need to evaluate alternative approaches
+
+### ❌ SDT Evaluation Results (Jan 21, 2026)
+
+**Test 1: Synthetic Font Samples**
+- Used computer-rendered Bradley Hand font (15 samples)
+- Result: Complete garbage - random diagonal lines, illegible
+- Conclusion: Model requires real pen/stylus handwriting data
+
+**Test 2: Real CASIA English Dataset**
+- Downloaded official English dataset (204 test writers, 62 characters)
+- Generated 1,984 samples with real handwriting style references
+- Result: **STILL ILLEGIBLE** - most characters unrecognizable
+- Only ~1-2 out of 12 samples were borderline readable ('Z', maybe '7')
+- Examples: 'w', '4', 'W', 'a', 'G', 'O' were messy, unrecognizable strokes
+
+**Critical Blocker:**
+- SDT does not produce legible English handwriting suitable for customer cards
+- This is a **product-killing issue** - can't ship illegible handwriting
+- The checkpoint may be primarily Chinese/Japanese trained
+- English support appears to be poor despite claims in paper
+
+**Decision:**
+- ❌ SDT is NOT viable for GLOSSY (English handwriting)
+- ✅ Moving to One-DM evaluation (ECCV 2024, claims better results with 1 sample vs 15)
+
+### ✅ One-DM Evaluation Results (Jan 21, 2026)
+
+**Model Setup:**
+- Cloned One-DM repository (ECCV 2024 - One-Shot Diffusion Mimicker)
+- Set up Python 3.11 environment with PyTorch 2.2.2
+- Downloaded 3 model checkpoints (1.6 GB total):
+  - One-DM-ckpt.pt (1.2 GB)
+  - vae_HTR138.pth (337 MB)
+  - RN18_class_10400.pth (63 MB)
+- Downloaded IAM English dataset with text corpus files
+- Created macOS-compatible test script (removed CUDA multi-GPU dependencies)
+- Model runs on Apple Silicon GPU (MPS)
+
+**Test: IAM English Dataset**
+- Generated 5 sample words: 'accents', 'fifty', 'gross', 'Tea', 'whom'
+- Used DDIM sampling with 50 timesteps
+- Generation time: ~2-3 seconds per timestep, ~12 minutes total for 5 samples
+- Output: Raster images (64x height pixels, grayscale PNG)
+
+**Results: FAILED ❌**
+- **CRITICAL ISSUE: Character accuracy problems**
+- Word "Tea" consistently rendered with wrong letters:
+  - Expected: "Tea"
+  - Generated: "alea", "atea", "ales", etc. (checked 10+ samples from different writers)
+- Output is MORE legible than SDT (recognizable glyphs)
+- BUT characters are WRONG - this is a product-killing issue
+
+**Investigation Findings:**
+- Created debug scripts to verify content encoder input
+- Confirmed input glyphs are CORRECT: 'T' (idx 33), 'e' (idx 8), 'a' (idx 19)
+- Verified with debug_content_v2.py - input visualization shows proper "Tea" glyphs
+- Problem is in MODEL OUTPUT, not preprocessing
+- Model systematically hallucinates/substitutes wrong characters
+- This is a fundamental model accuracy issue
+
+**Key Findings:**
+- One-DM produces more legible output than SDT (actual letter shapes vs random strokes)
+- Only requires 1 style sample (vs SDT's 15)
+- Generates raster images instead of stroke coordinates
+- Would need vectorization post-processing for AxiDraw plotter
+- Model size: ~1.6 GB (server-side generation only)
+- **BUT: Character accuracy makes it unusable for customer photo cards**
+
+**Decision:**
+- ❌ **One-DM is NOT VIABLE for GLOSSY**
+- Character errors are unacceptable for personalized messages
+- Cannot ship cards that say wrong words to customers
+
+### 🔄 Next Steps
+
+**Completed Evaluations:**
+1. ~~Test SDT with real English data~~ ✅ Done - ❌ FAILED (illegible output)
+2. ~~Evaluate One-DM (newer model, ECCV 2024)~~ ✅ Done - ❌ FAILED (wrong characters)
+3. ~~Research open-source handwriting AI models~~ ✅ Done - 17 models identified
+
+**Current Situation:**
+- **Both major models failed quality tests**
+- SDT: Completely illegible (random strokes)
+- One-DM: Legible but wrong characters ("Tea" → "alea")
+- No single open-source model has: vector output + few-shot + high accuracy
+
+**Options to Consider:**
+
+1. **Test other models from research:**
+   - DiffusionPen (AAAI 2024) - diffusion model with writer-aware features
+   - FW-GAN (2022) - GAN-based with writer-conditioned generation
+   - DiffBrush (2023) - diffusion with stroke-level control
+   - Note: Most modern models output raster images, require vectorization
+
+2. **Hybrid approach:**
+   - Use raster-based model (if one has better accuracy than One-DM)
+   - Add InkSight vectorization to convert images → SVG strokes
+   - Concern: Doesn't solve One-DM's character accuracy problem
+
+3. **Traditional approach (no few-shot):**
+   - handwriting-synthesis (Graves 2013) - direct vector output
+   - Requires retraining per user (~2-3 hours GPU per person)
+   - Removes "personalized style" selling point or adds cost/latency
+
+4. **Non-AI alternatives:**
+   - Font-based with handwriting-style fonts
+   - Manual tracing of user handwriting samples
+   - Partner with existing handwriting API services
+
+**Priority: Determine viability before building infrastructure**
+
+### 📊 Handwriting AI Models Research (Jan 21, 2026)
+
+**Criteria:**
+- Open-source/free
+- Few-shot capable (1-20 samples without retraining)
+- Vector/stroke output OR high-quality raster
+- English handwriting support
+
+**17 Models Identified:**
+
+| Model | Year | Output | Few-shot | Status | Notes |
+|-------|------|--------|----------|--------|-------|
+| **SDT** | 2023 | Strokes | ❌ (needs 15) | ❌ FAILED | Illegible English output |
+| **One-DM** | 2024 | Raster | ✅ (1 sample) | ❌ FAILED | Wrong characters ("Tea"→"alea") |
+| **DiffusionPen** | 2024 | Raster | ✅ (few-shot) | Not tested | SOTA quality claimed |
+| **InkSight** | 2024 | Strokes | ❌ | Not tested | Vectorization tool, not generator |
+| **DiffBrush** | 2023 | Raster | ✅ | Not tested | Stroke-level control |
+| **Diff-Handwriting** | 2023 | Raster | ✅ | Not tested | Diffusion-based |
+| **FW-GAN** | 2022 | Raster | ✅ | Not tested | GAN-based |
+| **GANwriting** | 2020 | Raster | ✅ | Not tested | GAN-based |
+| **HWT** | 2022 | Raster | ❌ (paired) | Not tested | Paired style transfer |
+| **SmartPatch** | 2023 | Raster | ❌ | Not tested | Patch-based |
+| **handwriting-synthesis** | 2013 | Strokes | ❌ (retrain) | Not tested | Graves RNN, direct vector |
+| **DeepWriting** | 2016 | Strokes | ❌ (retrain) | Not tested | Extended Graves model |
+| **Handwriting Transformer** | 2021 | Strokes | ❌ (retrain) | Not tested | Transformer-based |
+| **Text-to-Handwriting** | 2020 | Raster | ❌ | Not tested | Pix2pix GAN |
+| **VATr** | 2021 | Raster | ❌ | Not tested | Vision-audio transformer |
+| **Write Like Me** | 2021 | Raster | ❌ | Not tested | Commercial API reference |
+| **CalliGAN** | 2020 | Raster | ❌ | Not tested | Calligraphy-focused |
+
+**Key Insights:**
+- **Modern models** (2023-2024): Diffusion-based, raster output, best quality, few-shot capable
+- **Classic models** (2013-2016): RNN-based, stroke output, require full retraining
+- **No perfect match**: No open-source model has vector + few-shot + proven accuracy
+- **Hybrid approach needed**: Best modern model + vectorization tool (InkSight)
+
+**Concern:** One-DM (the most recent diffusion model) already failed accuracy tests. Other diffusion models may have similar issues.
+
 ## Project Structure
 
 ```
 glossy/
-├── app/          # Flutter mobile app
-├── backend/      # AWS Lambda functions, API definitions
-├── docs/         # Additional documentation
-├── models/       # SDT model files and scripts
-└── scripts/      # Utility scripts (order processing, etc.)
+├── app/                    # Flutter mobile app (not started)
+├── backend/                # AWS Lambda functions (not started)
+├── docs/                   # Additional documentation
+├── models/
+│   ├── SDT/                # SDT model (CVPR 2023) - ❌ English output illegible
+│   │   ├── model_zoo/      # Pre-trained models (261 MB + 69 MB)
+│   │   ├── data/           # CASIA English dataset (204 writers)
+│   │   ├── Generated/      # Test output (1,984 samples - illegible)
+│   │   ├── venv/           # Python 3.11 environment
+│   │   └── *.py            # Test and visualization scripts
+│   └── One-DM/             # One-DM model (ECCV 2024) - ✅ SUCCESS (legible output!)
+│       ├── model_zoo/      # Pre-trained models (1.6 GB - downloaded)
+│       ├── data/           # IAM English dataset + text corpus
+│       ├── Generated/      # Test output (5 samples - all legible!)
+│       ├── venv/           # Python 3.11 environment
+│       ├── test_macos.py   # macOS-compatible test script
+│       └── *.py            # Model scripts
+└── scripts/                # Utility scripts (not started)
 ```
+
+## Technical Notes
+
+**SDT Model Details:**
+- Input: 15 style samples (64x64 grayscale) + target character (64x64)
+- Output: Up to 120 stroke points with 5D coordinates
+- Coordinate format: Incremental (dx, dy) + pen state (up/down/end)
+- For AxiDraw: Convert to absolute coordinates via cumulative sum
+
+**Environment:**
+- Python: 3.11.14
+- PyTorch: 2.2.2 (with MPS support for Apple Silicon)
+- Device: macOS with Apple Silicon GPU
+- Dependencies: numpy 1.26.4, opencv-python 4.5.5, matplotlib 3.7.5
+
+**Repository:**
+- GitHub: https://github.com/justinmvail/glossy
+- Created: Jan 21, 2026
+- Current status: Model evaluation phase
