@@ -173,6 +173,8 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 
 **Hardware:** NVIDIA GTX 1660 Super (6GB VRAM)
 
+#### Initial Attempt (batch_size=2, no AMP)
+
 **Changes for 1660 Super (low VRAM):**
 - Created `configs/IAM64_small.yml` with memory-optimized settings:
   - `SOLVER.TYPE: SGD` (instead of AdamW - lower memory footprint)
@@ -183,11 +185,104 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 - Changed `SNAPSHOT_BEGIN: 1` and `SNAPSHOT_ITERS: 1` (save checkpoint after each epoch)
 - Training uses single GPU via `torchrun --nproc_per_node=1`
 
-**Status:** Successfully completed 1 epoch of training with IAM64 dataset from the One-DM repo.
+**Problem Discovered:** Small batch size (2) weakens NCE contrastive learning.
+- One-DM authors use 4 GPUs × batch_size=2 = effective batch_size=8
+- NCE loss requires negative pairs within each batch to learn writer style differentiation
+- With batch_size=2, often only 0-1 negative pairs available → weak style encoder training
+- Reconstruction loss (main quality metric) unaffected, but style fidelity may suffer
+
+#### Optimized Attempt with AMP (Jan 22, 2026)
+
+**Solution:** Implement AMP (Automatic Mixed Precision) to reduce VRAM and enable larger batches.
+
+**What is AMP?**
+- Uses 16-bit floats (FP16) instead of 32-bit (FP32) where possible
+- Cuts memory usage by ~50% with negligible quality impact
+- Modern GPUs have dedicated FP16 hardware for free speedup
+
+**Files Created:**
+| File | Purpose |
+|------|---------|
+| `trainer/trainer_amp.py` | AMP-enabled trainer with GradScaler and autocast |
+| `train_amp.py` | Training script using AMP trainer |
+| `configs/IAM64_amp.yml` | Config with batch_size=16, 100 epochs, AdamW |
+| `test_vram.py` | VRAM testing utility to find max batch size |
+
+**Key Code Changes in `trainer_amp.py`:**
+```python
+from torch.amp import autocast, GradScaler
+
+# Initialize scaler
+self.scaler = GradScaler('cuda')
+
+# Wrap forward pass
+with autocast('cuda'):
+    # ... forward pass and loss calculation ...
+
+# Scale loss and backward
+self.scaler.scale(loss).backward()
+self.scaler.unscale_(self.optimizer)
+torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+self.scaler.step(self.optimizer)
+self.scaler.update()
+```
+
+**VRAM Test Results (GTX 1660 Super 6GB):**
+| Batch Size | With AMP | Without AMP |
+|------------|----------|-------------|
+| 2 | 2.19 GB | 4.14 GB |
+| 8 | 2.48 GB | ~5+ GB |
+| 16 | 3.01 GB | OOM |
+| 32 | 4.04 GB | OOM |
+| 44 | 4.83 GB | OOM |
+
+**Final Config (`configs/IAM64_amp.yml`):**
+```yaml
+MODEL:
+  STYLE_ENCODER_LAYERS: 3
+  NUM_IMGS: 15
+  IN_CHANNELS: 4
+  OUT_CHANNELS: 4
+  NUM_RES_BLOCKS: 1
+  NUM_HEADS: 4
+  EMB_DIM: 512
+SOLVER:
+  BASE_LR: 0.0001
+  EPOCHS: 100
+  WARMUP_ITERS: 5000
+  TYPE: AdamW  # AMP works better with AdamW than SGD
+  GRAD_L2_CLIP: 1.0
+TRAIN:
+  TYPE: train
+  IMS_PER_BATCH: 16  # 8x original, 2x authors' effective batch
+  SNAPSHOT_BEGIN: 1
+  SNAPSHOT_ITERS: 10
+  VALIDATE_BEGIN: 5
+  VALIDATE_ITERS: 10
+  SEED: 1001
+  IMG_H: 64
+  IMG_W: 64
+```
+
+**Training Command:**
+```bash
+cd /home/server/One-DM
+CUDA_VISIBLE_DEVICES=0 python3 -m torch.distributed.run --nproc_per_node=1 \
+    train_amp.py --cfg configs/IAM64_amp.yml \
+    --feat_model model_zoo/RN18_class_10400.pth --log amp_train
+```
+
+**Benefits of AMP Optimization:**
+| Metric | Before (no AMP) | After (AMP) |
+|--------|-----------------|-------------|
+| Batch size | 2 | 16 |
+| VRAM usage | ~5.3 GB | ~3 GB |
+| NCE negative pairs | 0-1 | 15 |
+| Effective vs authors | 25% | 200% |
 
 **Location:** `/home/server/One-DM/`
 
-**Next:** Evaluate checkpoint quality after training completes.
+**Status:** Ready to start optimized training run.
 
 ---
 
