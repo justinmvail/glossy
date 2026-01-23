@@ -386,6 +386,74 @@ CUDA_VISIBLE_DEVICES=0 python3 -m torch.distributed.run --nproc_per_node=1 \
 
 ---
 
+### ✅ Vast.ai Training Results (Jan 23, 2026)
+
+**Setup Completed:**
+- Rented RTX 4090 (24GB) instance on Vast.ai
+- Uploaded optimized training files via Google Drive
+- Files committed to repo in `vast_setup/` directory
+
+**Optimization Testing:**
+
+| Configuration | Speed | GPU Util | Memory | Result |
+|---------------|-------|----------|--------|--------|
+| batch=8 (initial) | - | 7-13% | - | Too slow |
+| batch=32 | - | ~23% | - | Still slow |
+| batch=64 | ~15 min/epoch | - | - | Better |
+| batch=128 | ~7 min/epoch | 63% | 18GB | Good |
+| batch=128 + AMP | 1.94 s/it | 86% | 15.6GB | **Slower** (AMP overhead) |
+| batch=256 + AMP | - | - | OOM | Out of memory |
+| **batch=128 + TF32** | **1.20 s/it** | **100%** | **18.4GB** | **Optimal** |
+
+**Key Findings:**
+- AMP (mixed precision) was **slower** for this model (1.94 vs 1.20 s/it)
+- TF32 alone provides benefit without AMP overhead
+- torch.compile() caused hangs during graph compilation
+- Gradient checkpointing can be disabled with 24GB VRAM
+
+**Final Optimized Configuration:**
+```yaml
+# IAM64_4090.yml
+SOLVER:
+  BASE_LR: 0.0001
+  EPOCHS: 100
+  TYPE: AdamW
+  GRAD_L2_CLIP: 1.0
+TRAIN:
+  IMS_PER_BATCH: 128
+  SNAPSHOT_ITERS: 10
+DATA_LOADER:
+  NUM_THREADS: 16
+```
+
+**Performance:**
+- Speed: ~1.20 s/it (365 iterations/epoch)
+- Time per epoch: ~7.3 minutes
+- GPU utilization: 100%
+- Power draw: 262W / 400W (65%)
+- Memory: 18.4GB / 24GB (75%)
+
+**Cost Estimate (Revised):**
+- 100 epochs × 7.3 min = ~12 hours
+- RTX 4090 @ $0.40/hour = **~$5 total**
+- Much cheaper than original $15-25 estimate
+
+**Files in `vast_setup/`:**
+- `train_4090.py` - TF32 + DataLoader optimizations
+- `trainer_4090.py` - Simplified trainer (no AMP)
+- `IAM64_4090.yml` - Optimized config
+- `setup_vast.sh` - Manual setup script
+- `onstart.sh` - Fully automated on-start script
+- `QUICKSTART.md` - Documentation
+- Note: `onedm_data.tar.gz` (246MB) hosted on Google Drive
+
+**Google Drive Link:**
+https://drive.google.com/drive/folders/1UY61ytrE6ec-OBdMESZvcpD9gcVsz_ad
+
+**Status:** Training in progress on Vast.ai. Monitoring for 100 epoch completion.
+
+---
+
 ### 🔄 Next Steps
 
 **Completed Evaluations:**
