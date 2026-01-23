@@ -106,3 +106,4 @@ models/*/data/
 scripts/orders/
 scripts/processed/
 data/orders/
+vast_setup/onedm_data.tar.gz
