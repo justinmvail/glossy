@@ -242,7 +242,147 @@ CUDA_VISIBLE_DEVICES=0 python3 -m torch.distributed.run --nproc_per_node=1 \
 
 **Location:** `/home/server/One-DM/`
 
-**Status:** Training in progress (100 epochs, ~2.4 it/s, ~2.5 hours/epoch)
+**Status:** ~~Training in progress~~ Single epoch completed - see results below.
+
+---
+
+### 📊 Single Epoch Training Results (Jan 23, 2026)
+
+**Training Completed:**
+- Epochs: 1/1 (23,310 iterations)
+- Duration: ~2 hours
+- Final MSE loss: ~0.02
+- Checkpoint saved: `Saved/IAM64_small/epoch1_v2-20260122_215439/model/0-ckpt.pt` (1.2 GB)
+
+**Test Generation:**
+- Generated test words: "hello", "the", "quick", "fox"
+- Sampling: DDIM with 50 timesteps
+- Output: 64px height grayscale images
+
+**Results: Model Undertrained ⚠️**
+
+| Aspect | Status |
+|--------|--------|
+| Image generation | ✅ Works - produces grayscale output |
+| Correct dimensions | ✅ Works - width scales with word length |
+| Stroke-like patterns | ✅ Partial - some dark shapes visible |
+| Legible handwriting | ❌ Failed - abstract blobs, no letters |
+
+**Sample Outputs (1 epoch):**
+- All words produce abstract gray/white blob patterns
+- No recognizable letter shapes
+- Model has learned basic image structure but not character formation
+
+**Conclusion:**
+- 1 epoch is insufficient for diffusion model convergence
+- Need 50-100+ epochs for legible handwriting output
+- GTX 1660 Super (6GB) is too slow (~2 hours/epoch = 100-200 hours total)
+- **Cloud GPU training required for practical iteration**
+
+---
+
+### ☁️ Vast.ai Cloud Training Plan (Jan 23, 2026)
+
+**Why Cloud:**
+- Local GPU (GTX 1660 Super, 6GB) limitations:
+  - Only batch_size=2 fits in memory
+  - ~2 hours per epoch
+  - 100 epochs = 200+ hours (8+ days continuous)
+  - OOM errors during testing/inference
+- Cloud GPU benefits:
+  - Larger batch sizes (better NCE contrastive learning)
+  - 10-20x faster training
+  - More VRAM for experimentation
+
+**Selected Configuration:**
+
+| Component | Choice | Reason |
+|-----------|--------|--------|
+| Provider | Vast.ai | Cheapest GPU rentals, pay-per-hour |
+| Template | PyTorch (Vast) | Clean setup with CUDA + PyTorch pre-installed |
+| GPU | RTX 4090 (24GB) | 4x VRAM, ~5x faster than 1660, good price/performance |
+| Storage | 50GB+ | Dataset (~2GB) + checkpoints (~1.2GB each) + overhead |
+
+**Estimated Specs with RTX 4090:**
+
+| Setting | GTX 1660 (6GB) | RTX 4090 (24GB) |
+|---------|----------------|-----------------|
+| Batch size | 2 | 8-16 |
+| Time/epoch | ~2 hours | ~20-30 min |
+| 100 epochs | ~200 hours | ~35-50 hours |
+| NCE pairs/batch | 0-1 | 28-120 |
+
+**Cost Estimate:**
+- RTX 4090 on Vast.ai: ~$0.30-0.50/hour
+- 50 hours training: ~$15-25
+- With experimentation: ~$30-50 total
+
+**Setup Steps:**
+
+1. **Create Vast.ai account** at https://vast.ai
+2. **Add credits** ($25-50 recommended for experimentation)
+3. **Select instance:**
+   - Template: "PyTorch (Vast)"
+   - GPU: RTX 4090 (24GB)
+   - Disk: 50GB+
+   - Region: Any (cheapest)
+4. **Connect via SSH** (Vast.ai provides connection string)
+5. **Upload data and code:**
+   ```bash
+   # From local machine
+   scp -P <port> -r /home/server/One-DM root@<vast-ip>:/workspace/
+   scp -P <port> /home/server/One-DM/Saved/IAM64_small/epoch1_v2-*/model/0-ckpt.pt root@<vast-ip>:/workspace/One-DM/pretrained/
+   ```
+6. **Install dependencies:**
+   ```bash
+   cd /workspace/One-DM
+   pip install -r requirements.txt
+   pip install diffusers transformers accelerate
+   ```
+7. **Create optimized config** (`configs/IAM64_4090.yml`):
+   ```yaml
+   SOLVER:
+     BASE_LR: 0.0001
+     EPOCHS: 100
+     WARMUP_ITERS: 5000
+     TYPE: AdamW  # Can use AdamW with more VRAM
+     GRAD_L2_CLIP: 1.0
+   TRAIN:
+     IMS_PER_BATCH: 8  # 4x larger batch
+     SNAPSHOT_ITERS: 10  # Save every 10 epochs
+   ```
+8. **Start training:**
+   ```bash
+   CUDA_VISIBLE_DEVICES=0 python3 -m torch.distributed.run --nproc_per_node=1 \
+       -- train.py --cfg configs/IAM64_4090.yml --log cloud_run1
+   ```
+9. **Monitor progress:**
+   ```bash
+   # Watch training loss
+   tail -f /workspace/One-DM/Saved/*/tboard/loss/*/events*
+
+   # Or use TensorBoard
+   tensorboard --logdir /workspace/One-DM/Saved/ --port 6006
+   ```
+10. **Download results** when done:
+    ```bash
+    # From local machine
+    scp -P <port> root@<vast-ip>:/workspace/One-DM/Saved/*/model/*.pt ./checkpoints/
+    ```
+
+**Training Milestones to Watch:**
+- Epoch 10: Should see emerging letter shapes
+- Epoch 25: Letters should be mostly recognizable
+- Epoch 50: Good quality, may be sufficient
+- Epoch 100: Full convergence expected
+
+**Next Steps:**
+1. Create Vast.ai account and add credits
+2. Rent RTX 4090 instance with PyTorch template
+3. Upload dataset and 1-epoch checkpoint
+4. Train for 50-100 epochs
+5. Test character accuracy on validation set
+6. If successful, evaluate for production viability
 
 ---
 
