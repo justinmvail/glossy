@@ -480,6 +480,13 @@ https://drive.google.com/drive/folders/1UY61ytrE6ec-OBdMESZvcpD9gcVsz_ad
 - [ ] INT8 quantization (~1.2GB → ~300MB)
 - [ ] Build Flutter inference prototype
 
+**TODO: Explore SDT Word-Level Training (Faster Alternative)**
+- [ ] SDT outputs strokes directly (~100ms vs 2-3sec diffusion)
+- [ ] Download IAM On-Line dataset (words with stroke coordinates)
+- [ ] Modify SDT architecture for variable-length word output
+- [ ] Train SDT on English words instead of characters
+- [ ] If successful: 20-50x faster, direct AxiDraw output, runs on any phone
+
 ---
 
 ### 📱 On-Device Inference Plan (Jan 24, 2026)
