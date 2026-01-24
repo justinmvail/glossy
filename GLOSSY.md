@@ -450,47 +450,126 @@ DATA_LOADER:
 **Google Drive Link:**
 https://drive.google.com/drive/folders/1UY61ytrE6ec-OBdMESZvcpD9gcVsz_ad
 
-**Status:** Training in progress on Vast.ai. Monitoring for 100 epoch completion.
+**Status:** Training in progress on Vast.ai (~epoch 30/100 as of Jan 23, 11pm).
+
+**Actual Cost (Jan 23, 2026):**
+- Instance rate: $0.217/hr (cheaper than estimated $0.40)
+- Setup/optimization: ~$0.43 (2 hours)
+- Training: ~$2.60 (12 hours)
+- **Total: ~$3.00** for 100 epochs
 
 ---
 
-### 🔄 Next Steps
+### 🔄 Next Steps / TODO
 
-**Completed Evaluations:**
+**Completed:**
 1. ~~Test SDT with real English data~~ ✅ Done - ❌ FAILED (illegible output)
-2. ~~Evaluate One-DM (newer model, ECCV 2024)~~ ✅ Done - ❌ FAILED (wrong characters)
+2. ~~Evaluate One-DM (newer model, ECCV 2024)~~ ✅ Done - ❌ FAILED (wrong characters with pretrained)
 3. ~~Research open-source handwriting AI models~~ ✅ Done - 17 models identified
+4. ~~Set up Vast.ai cloud training~~ ✅ Done - Training in progress
+5. ~~Optimize training (batch size, TF32)~~ ✅ Done - 100% GPU utilization
 
-**Current Situation:**
-- **Both major models failed quality tests**
-- SDT: Completely illegible (random strokes)
-- One-DM: Legible but wrong characters ("Tea" → "alea")
-- No single open-source model has: vector output + few-shot + high accuracy
+**In Progress:**
+- [ ] Complete 100 epoch training on Vast.ai
+- [ ] Test trained model for character accuracy
 
-**Options to Consider:**
+**TODO After Training:**
+- [ ] Test epoch 10/20/30 checkpoints for quality
+- [ ] If quality good: proceed with deployment planning
+- [ ] Convert model to Core ML (iOS) / TFLite (Android)
+- [ ] INT8 quantization (~1.2GB → ~300MB)
+- [ ] Build Flutter inference prototype
 
-1. **Test other models from research:**
-   - DiffusionPen (AAAI 2024) - diffusion model with writer-aware features
-   - FW-GAN (2022) - GAN-based with writer-conditioned generation
-   - DiffBrush (2023) - diffusion with stroke-level control
-   - Note: Most modern models output raster images, require vectorization
+---
 
-2. **Hybrid approach:**
-   - Use raster-based model (if one has better accuracy than One-DM)
-   - Add InkSight vectorization to convert images → SVG strokes
-   - Concern: Doesn't solve One-DM's character accuracy problem
+### 📱 On-Device Inference Plan (Jan 24, 2026)
 
-3. **Traditional approach (no few-shot):**
-   - handwriting-synthesis (Graves 2013) - direct vector output
-   - Requires retraining per user (~2-3 hours GPU per person)
-   - Removes "personalized style" selling point or adds cost/latency
+**Concept: "Magic Reveal" UX**
 
-4. **Non-AI alternatives:**
-   - Font-based with handwriting-style fonts
-   - Manual tracing of user handwriting samples
-   - Partner with existing handwriting API services
+Instead of hiding inference behind a spinner, show the diffusion process live:
+1. User sees word emerge from noise (step by step)
+2. Each DDIM step updates the display in real-time
+3. Vectorization animates pen drawing over final image
+4. Word flies into position on card
 
-**Priority: Determine viability before building infrastructure**
+**Why this is better:**
+- 4-8 second inference feels instant when user watches it happen
+- Unique UX differentiator vs competitors
+- "Magic moment" creates emotional connection
+
+**Technical Requirements:**
+
+| Component | Original | Quantized (INT8) |
+|-----------|----------|------------------|
+| UNet | 1.2 GB | ~300 MB |
+| VAE Decoder | 337 MB | ~85 MB |
+| **Total** | **1.6 GB** | **~400 MB** |
+
+**Expected Performance (on-device):**
+
+| Device | Per Step | 20 Steps Total |
+|--------|----------|----------------|
+| iPhone 15 Pro | ~200ms | ~4 sec |
+| iPhone 13 | ~400ms | ~8 sec |
+| Pixel 8 Pro | ~300ms | ~6 sec |
+| Mid-range (2022+) | ~800ms | ~16 sec |
+
+**Implementation Steps:**
+1. Export trained model to ONNX
+2. Convert to Core ML (iOS) / TFLite (Android)
+3. Quantize to INT8
+4. Flutter plugin for native inference
+5. Build step-by-step preview UI
+
+**Alternative: Server-Side with Streaming**
+
+If on-device is too slow/large, use server with WebSocket streaming:
+- AWS SageMaker Async Inference (scales to zero)
+- Replicate.com (easiest, ~$0.02/generation)
+- Modal.com (Python-native serverless GPU)
+
+Stream each diffusion step to frontend for same "magic reveal" effect.
+
+---
+
+### 💡 Architecture Decision (Pending)
+
+**Option A: On-Device (Preferred)**
+```
+┌─────────────────────────────────────────┐
+│              Flutter App                │
+│  ┌─────────────┐    ┌────────────────┐ │
+│  │ Style Input │───▶│ On-Device Model│ │
+│  │ (15 chars)  │    │ (Core ML/TFLite)│ │
+│  └─────────────┘    └───────┬────────┘ │
+│                             │           │
+│                    ┌────────▼────────┐ │
+│                    │ Live Preview UI │ │
+│                    │ (step-by-step)  │ │
+│                    └────────┬────────┘ │
+│                             │           │
+│                    ┌────────▼────────┐ │
+│                    │  Vectorization  │ │
+│                    │  + Animation    │ │
+│                    └─────────────────┘ │
+└─────────────────────────────────────────┘
+```
+- Pros: Works offline, no server costs, lower latency
+- Cons: ~400MB download, flagship phones only
+
+**Option B: Server-Side with Streaming**
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│ Flutter App  │────▶│  API Gateway │────▶│  GPU Server  │
+│              │◀────│  (WebSocket) │◀────│  (SageMaker) │
+└──────────────┘     └──────────────┘     └──────────────┘
+     Live preview          Stream            Inference
+     animation           each step           (~2-3 sec)
+```
+- Pros: Works on any phone, smaller app
+- Cons: Requires internet, server costs (~$0.02/word)
+
+**Decision:** Test on-device first after training completes. Fall back to server if performance insufficient.
 
 ### 📊 Handwriting AI Models Research (Jan 21, 2026)
 
