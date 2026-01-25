@@ -1,0 +1,28 @@
+# Training data (large)
+data/
+sdt_data/
+sdt_data_*/
+
+# Checkpoints (large)
+checkpoints/*.pt
+checkpoints/samples_*/
+
+# Downloaded/converted fonts
+fonts/
+
+# Logs
+*.log
+monitor.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Numpy files
+*.npy
+
+# Scores/outputs
+*_scores.json
+
+# Test outputs
+synthetic_writers/test_output/

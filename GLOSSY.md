@@ -7,8 +7,9 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 
 ### App
 - **Platform:** Flutter (iOS first)
-- **AI Model:** SDT (CVPR 2023) - outputs stroke coordinates, runs quantized on-device
+- **AI Model:** One-DM (ECCV 2024) - diffusion-based, raster output, requires server or on-device quantization
 - **Handwriting Input:** ~15 characters on-screen → rendered to 64x64 PNGs
+- **Note:** SDT (CVPR 2023) was evaluated but has no English checkpoint (Chinese/Japanese only)
 
 ### Backend
 - **Cloud:** AWS free tier
@@ -28,9 +29,10 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 ## How it Works
 
 1. User draws ~15 characters on-screen → rendered to 64x64 PNGs
-2. SDT encodes style, generates stroke coordinates for any message
-3. Order sent to backend (strokes JSON + photo + address)
-4. Justin pulls orders, plots on AxiDraw, mails cards
+2. One-DM encodes style, generates handwriting image for any message
+3. Vectorize raster output for AxiDraw (or use "Magic Reveal" streaming UX)
+4. Order sent to backend (image/strokes + photo + address)
+5. Justin pulls orders, plots on AxiDraw, mails cards
 
 ## Key Decisions
 
@@ -56,12 +58,12 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 ## Strengths
 
 - ~$700 startup cost
-- Technical moat (SDT on-device)
+- Technical moat (custom-trained One-DM)
 - Pivot optionality to B2B
 
 ## First Priority
 
-**Test SDT handwriting output on real people before building the full app**
+**Complete One-DM training and test handwriting output on real people before building the full app**
 
 ## Progress Log
 
@@ -85,10 +87,10 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 ### ⚠️ Issues Discovered
 
 **Model Output Quality:**
-- Current English model checkpoint produces illegible output
-- Model appears trained primarily for Chinese/Japanese handwriting
-- Synthetic font-based samples don't match model's expected input format
-- Requires actual handwritten samples (pen/stylus input) vs. computer fonts
+- **SDT has NO English checkpoint** (confirmed via [GitHub Issue #102](https://github.com/dailenson/SDT/issues/102))
+- Pre-trained models are Chinese and Japanese ONLY
+- Maintainer explicitly points English users to One-DM instead
+- Testing with Chinese/Japanese checkpoint on English data produces garbage
 
 **Model Size:**
 - 259 MB is too large for on-device mobile deployment
@@ -112,12 +114,13 @@ Consumer app for sending photo cards with the user's own handwriting on the back
 **Critical Blocker:**
 - SDT does not produce legible English handwriting suitable for customer cards
 - This is a **product-killing issue** - can't ship illegible handwriting
-- The checkpoint may be primarily Chinese/Japanese trained
-- English support appears to be poor despite claims in paper
+- **Root cause: No English checkpoint exists** ([GitHub Issue #102](https://github.com/dailenson/SDT/issues/102))
+- Pre-trained SDT only supports Chinese and Japanese
+- Maintainer's response: "The English checkpoint is in this repository: https://github.com/dailenson/One-DM"
 
 **Decision:**
-- ❌ SDT is NOT viable for GLOSSY (English handwriting)
-- ✅ Moving to One-DM evaluation (ECCV 2024, claims better results with 1 sample vs 15)
+- ❌ SDT is NOT viable for GLOSSY (no English model available)
+- ✅ Moving to One-DM evaluation (ECCV 2024, has English support)
 
 ### ✅ One-DM Evaluation Results (Jan 21, 2026)
 
@@ -480,12 +483,13 @@ https://drive.google.com/drive/folders/1UY61ytrE6ec-OBdMESZvcpD9gcVsz_ad
 - [ ] INT8 quantization (~1.2GB → ~300MB)
 - [ ] Build Flutter inference prototype
 
-**TODO: Explore SDT Word-Level Training (Faster Alternative)**
-- [ ] SDT outputs strokes directly (~100ms vs 2-3sec diffusion)
-- [ ] Download IAM On-Line dataset (words with stroke coordinates)
-- [ ] Modify SDT architecture for variable-length word output
-- [ ] Train SDT on English words instead of characters
-- [ ] If successful: 20-50x faster, direct AxiDraw output, runs on any phone
+**❌ SDT Word-Level Training (Evaluated Jan 24, 2026 - NOT VIABLE)**
+- SDT has no English checkpoint ([GitHub Issue #102](https://github.com/dailenson/SDT/issues/102))
+- Architecture is hardcoded for single 64x64 character input
+- Content encoder uses mean pooling → cannot represent multiple characters
+- Would require significant architecture modifications, not just training data
+- IAM-OnDB has word-level stroke data (86K words, 221 writers) but SDT can't use it as-is
+- **Decision:** Stick with One-DM training (already handles variable-length words)
 
 ---
 
@@ -658,3 +662,46 @@ glossy/
 - GitHub: https://github.com/justinmvail/glossy
 - Created: Jan 21, 2026
 - Current status: Model evaluation phase
+
+---
+
+### ✅ WordSDT Training (Jan 25, 2026 - IN PROGRESS)
+
+**Pivot:** Instead of using the original SDT checkpoint, we're training a custom word-level model from scratch on synthetic font data.
+
+**Architecture - WordSDT (58.6M params):**
+- Variable-width content encoder (ResNet + Transformer)
+- Style encoder with writer/glyph heads  
+- GMM-based stroke decoder (20 mixtures)
+- Outputs: (dx, dy, pen_state) for pen plotter
+
+**Data Pipeline:**
+1. Downloaded 52 Google Fonts (handwriting category)
+2. Converted to single-line via skeletonization
+3. Combined with 41 existing EMS/Hershey fonts = 93 base fonts
+4. Applied style transforms (slant, jitter, tremor) to create 1000 synthetic writers
+5. Generated 146,988 training samples
+
+**Current Training:**
+- Dataset: 10,742 samples (small initial run)
+- Epoch: ~70/100
+- Best val loss: -0.7518 (epoch 62)
+- Hardware: GTX 1660 Super (6GB)
+
+**Key Files:**
+- Model: `/home/server/glossy/sdt_word/models/word_model.py`
+- Training: `/home/server/glossy/sdt_word/train.py`
+- Pipeline docs: `/home/server/glossy/sdt_word/PIPELINE.md`
+
+**Next Steps:**
+1. Complete current training run
+2. Test generation quality
+3. Retrain on larger 147K dataset
+4. Scale up cloud training if promising
+
+**Why This Might Work:**
+- Single-line fonts already have stroke data (no vectorization needed)
+- Style transforms create realistic variation from limited fonts
+- Word-level output matches our use case
+- Can control data quality (vs relying on IAM-OnDB access)
+

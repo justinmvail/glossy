@@ -1,0 +1,13 @@
+# Downloaded fonts (large files)
+fonts/
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# Metadata from scraping runs
+*_metadata.json
+summary.json
+
+# Test outputs
+test_*/

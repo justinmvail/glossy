@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg">
+<font>
+  <glyph unicode="A" d="M 10 90 L 50 10 L 90 90 M 25 60 L 75 60" horiz-adv-x="100"/>
+  <glyph unicode="B" d="M 20 10 L 20 90 M 20 10 L 60 10 Q 80 25 60 50 L 20 50 L 60 50 Q 80 75 60 90 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="C" d="M 80 25 Q 50 10 25 25 Q 10 50 25 75 Q 50 90 80 75" horiz-adv-x="100"/>
+  <glyph unicode="D" d="M 20 10 L 20 90 M 20 10 L 50 10 Q 90 50 50 90 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="E" d="M 70 10 L 20 10 L 20 90 L 70 90 M 20 50 L 60 50" horiz-adv-x="100"/>
+  <glyph unicode="F" d="M 70 10 L 20 10 L 20 90 M 20 50 L 60 50" horiz-adv-x="100"/>
+  <glyph unicode="G" d="M 80 25 Q 50 10 25 25 Q 10 50 25 75 Q 50 90 80 75 L 80 50 L 50 50" horiz-adv-x="100"/>
+  <glyph unicode="H" d="M 20 10 L 20 90 M 80 10 L 80 90 M 20 50 L 80 50" horiz-adv-x="100"/>
+  <glyph unicode="I" d="M 30 10 L 70 10 M 50 10 L 50 90 M 30 90 L 70 90" horiz-adv-x="100"/>
+  <glyph unicode="J" d="M 30 10 L 70 10 M 50 10 L 50 75 Q 50 90 30 90 Q 15 90 15 75" horiz-adv-x="100"/>
+  <glyph unicode="K" d="M 20 10 L 20 90 M 80 10 L 20 50 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="L" d="M 20 10 L 20 90 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="M" d="M 10 90 L 10 10 L 50 50 L 90 10 L 90 90" horiz-adv-x="100"/>
+  <glyph unicode="N" d="M 20 90 L 20 10 L 80 90 L 80 10" horiz-adv-x="100"/>
+  <glyph unicode="O" d="M 50 10 Q 10 10 10 50 Q 10 90 50 90 Q 90 90 90 50 Q 90 10 50 10" horiz-adv-x="100"/>
+  <glyph unicode="P" d="M 20 90 L 20 10 L 60 10 Q 85 10 85 30 Q 85 50 60 50 L 20 50" horiz-adv-x="100"/>
+  <glyph unicode="Q" d="M 50 10 Q 10 10 10 50 Q 10 90 50 90 Q 90 90 90 50 Q 90 10 50 10 M 60 70 L 90 100" horiz-adv-x="100"/>
+  <glyph unicode="R" d="M 20 90 L 20 10 L 60 10 Q 85 10 85 30 Q 85 50 60 50 L 20 50 M 50 50 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="S" d="M 80 25 Q 50 10 25 25 Q 10 40 50 50 Q 90 60 75 75 Q 50 90 20 75" horiz-adv-x="100"/>
+  <glyph unicode="T" d="M 10 10 L 90 10 M 50 10 L 50 90" horiz-adv-x="100"/>
+  <glyph unicode="U" d="M 20 10 L 20 70 Q 20 90 50 90 Q 80 90 80 70 L 80 10" horiz-adv-x="100"/>
+  <glyph unicode="V" d="M 10 10 L 50 90 L 90 10" horiz-adv-x="100"/>
+  <glyph unicode="W" d="M 10 10 L 30 90 L 50 50 L 70 90 L 90 10" horiz-adv-x="100"/>
+  <glyph unicode="X" d="M 20 10 L 80 90 M 80 10 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="Y" d="M 20 10 L 50 50 L 80 10 M 50 50 L 50 90" horiz-adv-x="100"/>
+  <glyph unicode="Z" d="M 20 10 L 80 10 L 20 90 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="a" d="M 10 90 L 50 10 L 90 90 M 25 60 L 75 60" horiz-adv-x="100"/>
+  <glyph unicode="b" d="M 20 10 L 20 90 M 20 10 L 60 10 Q 80 25 60 50 L 20 50 L 60 50 Q 80 75 60 90 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="c" d="M 80 25 Q 50 10 25 25 Q 10 50 25 75 Q 50 90 80 75" horiz-adv-x="100"/>
+  <glyph unicode="d" d="M 20 10 L 20 90 M 20 10 L 50 10 Q 90 50 50 90 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="e" d="M 70 10 L 20 10 L 20 90 L 70 90 M 20 50 L 60 50" horiz-adv-x="100"/>
+  <glyph unicode="f" d="M 70 10 L 20 10 L 20 90 M 20 50 L 60 50" horiz-adv-x="100"/>
+  <glyph unicode="g" d="M 80 25 Q 50 10 25 25 Q 10 50 25 75 Q 50 90 80 75 L 80 50 L 50 50" horiz-adv-x="100"/>
+  <glyph unicode="h" d="M 20 10 L 20 90 M 80 10 L 80 90 M 20 50 L 80 50" horiz-adv-x="100"/>
+  <glyph unicode="i" d="M 30 10 L 70 10 M 50 10 L 50 90 M 30 90 L 70 90" horiz-adv-x="100"/>
+  <glyph unicode="j" d="M 30 10 L 70 10 M 50 10 L 50 75 Q 50 90 30 90 Q 15 90 15 75" horiz-adv-x="100"/>
+  <glyph unicode="k" d="M 20 10 L 20 90 M 80 10 L 20 50 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="l" d="M 20 10 L 20 90 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="m" d="M 10 90 L 10 10 L 50 50 L 90 10 L 90 90" horiz-adv-x="100"/>
+  <glyph unicode="n" d="M 20 90 L 20 10 L 80 90 L 80 10" horiz-adv-x="100"/>
+  <glyph unicode="o" d="M 50 10 Q 10 10 10 50 Q 10 90 50 90 Q 90 90 90 50 Q 90 10 50 10" horiz-adv-x="100"/>
+  <glyph unicode="p" d="M 20 90 L 20 10 L 60 10 Q 85 10 85 30 Q 85 50 60 50 L 20 50" horiz-adv-x="100"/>
+  <glyph unicode="q" d="M 50 10 Q 10 10 10 50 Q 10 90 50 90 Q 90 90 90 50 Q 90 10 50 10 M 60 70 L 90 100" horiz-adv-x="100"/>
+  <glyph unicode="r" d="M 20 90 L 20 10 L 60 10 Q 85 10 85 30 Q 85 50 60 50 L 20 50 M 50 50 L 80 90" horiz-adv-x="100"/>
+  <glyph unicode="s" d="M 80 25 Q 50 10 25 25 Q 10 40 50 50 Q 90 60 75 75 Q 50 90 20 75" horiz-adv-x="100"/>
+  <glyph unicode="t" d="M 10 10 L 90 10 M 50 10 L 50 90" horiz-adv-x="100"/>
+  <glyph unicode="u" d="M 20 10 L 20 70 Q 20 90 50 90 Q 80 90 80 70 L 80 10" horiz-adv-x="100"/>
+  <glyph unicode="v" d="M 10 10 L 50 90 L 90 10" horiz-adv-x="100"/>
+  <glyph unicode="w" d="M 10 10 L 30 90 L 50 50 L 70 90 L 90 10" horiz-adv-x="100"/>
+  <glyph unicode="x" d="M 20 10 L 80 90 M 80 10 L 20 90" horiz-adv-x="100"/>
+  <glyph unicode="y" d="M 20 10 L 50 50 L 80 10 M 50 50 L 50 90" horiz-adv-x="100"/>
+  <glyph unicode="z" d="M 20 10 L 80 10 L 20 90 L 80 90" horiz-adv-x="100"/>
+</font>
+</svg>
