@@ -9,14 +9,17 @@ Pipeline:
 1. Render font character/word as image
 2. Run InkSight inference to get stroke tokens
 3. Post-process: filter artifacts, smooth, connect gaps
+4. Validate with OCR (TrOCR) - only keep results that are readable
 
 Requirements:
     conda activate inksight  # or micromamba
     # TensorFlow 2.15-2.17, tensorflow-text
+    pip install transformers  # for TrOCR validation
 
 Usage:
     python inksight_vectorizer.py --font path/to/font.ttf --output output_dir
     python inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --show
+    python inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --validate
 """
 
 import argparse
@@ -526,6 +529,199 @@ class InkSightVectorizer:
         }
 
 
+class OCRValidator:
+    """
+    Validate vectorization results using TrOCR handwriting recognition.
+
+    If TrOCR can read the rendered strokes and match the expected word,
+    the vectorization is considered successful.
+    """
+
+    def __init__(self, model_name: str = "microsoft/trocr-base-handwritten"):
+        """
+        Initialize the OCR validator.
+
+        Args:
+            model_name: HuggingFace model name for TrOCR
+                Options:
+                - "microsoft/trocr-base-handwritten" (default, good balance)
+                - "microsoft/trocr-large-handwritten" (more accurate, slower)
+                - "microsoft/trocr-small-handwritten" (faster, less accurate)
+        """
+        self.model_name = model_name
+        self.processor = None
+        self.model = None
+
+    def load_model(self):
+        """Load TrOCR model and processor."""
+        if self.model is not None:
+            return
+
+        import torch
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+
+        print(f"Loading TrOCR model: {self.model_name}...")
+        self.processor = TrOCRProcessor.from_pretrained(self.model_name)
+        # Run on CPU to avoid GPU conflicts with TensorFlow
+        self.model = VisionEncoderDecoderModel.from_pretrained(self.model_name)
+        self.model = self.model.to('cpu')
+        self.model.eval()
+        self.device = 'cpu'
+        print("TrOCR loaded (CPU).")
+
+    def render_strokes(
+        self,
+        strokes: List[Stroke],
+        size: int = 384,
+        stroke_width: int = 3,
+        padding: int = 20
+    ) -> Image.Image:
+        """
+        Render strokes to an image for OCR.
+
+        Args:
+            strokes: List of Stroke objects
+            size: Output image size
+            stroke_width: Line thickness
+            padding: Padding around strokes
+
+        Returns:
+            PIL Image with rendered strokes
+        """
+        # Get bounding box of all strokes
+        all_points = np.vstack([s.points for s in strokes if len(s.points) > 0])
+        min_x, min_y = all_points.min(axis=0)
+        max_x, max_y = all_points.max(axis=0)
+
+        # Scale to fit in image with padding
+        stroke_width_px = max_x - min_x
+        stroke_height_px = max_y - min_y
+
+        available = size - 2 * padding
+        scale = min(available / max(stroke_width_px, 1), available / max(stroke_height_px, 1))
+
+        # Create image
+        img = Image.new('RGB', (size, size), 'white')
+        draw = ImageDraw.Draw(img)
+
+        # Center offset
+        scaled_w = stroke_width_px * scale
+        scaled_h = stroke_height_px * scale
+        offset_x = (size - scaled_w) / 2 - min_x * scale
+        offset_y = (size - scaled_h) / 2 - min_y * scale
+
+        # Draw strokes
+        for stroke in strokes:
+            if len(stroke.points) < 2:
+                continue
+            pts = stroke.points * scale + np.array([offset_x, offset_y])
+            pts_list = [(p[0], p[1]) for p in pts]
+            draw.line(pts_list, fill='black', width=stroke_width)
+
+        return img
+
+    def recognize(self, image: Image.Image) -> str:
+        """
+        Run OCR on an image.
+
+        Args:
+            image: PIL Image to recognize
+
+        Returns:
+            Recognized text string
+        """
+        import torch
+        self.load_model()
+
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # Process image
+        pixel_values = self.processor(image, return_tensors="pt").pixel_values.to(self.device)
+
+        # Generate text
+        with torch.no_grad():
+            generated_ids = self.model.generate(pixel_values, max_length=64)
+        text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+
+        return text.strip()
+
+    def validate(
+        self,
+        result: InkResult,
+        threshold: float = 0.8,
+        case_sensitive: bool = False
+    ) -> Tuple[bool, str, float]:
+        """
+        Validate an InkResult by checking if OCR can read it.
+
+        Args:
+            result: InkResult to validate
+            threshold: Minimum similarity ratio (0-1) to pass
+            case_sensitive: Whether comparison is case-sensitive
+
+        Returns:
+            Tuple of (passed, recognized_text, similarity_score)
+        """
+        from difflib import SequenceMatcher
+
+        # Render strokes to image
+        stroke_img = self.render_strokes(result.strokes)
+
+        # Run OCR
+        recognized = self.recognize(stroke_img)
+
+        # Compare
+        expected = result.word
+        if not case_sensitive:
+            recognized = recognized.lower()
+            expected = expected.lower()
+
+        # Calculate similarity
+        similarity = SequenceMatcher(None, expected, recognized).ratio()
+
+        passed = similarity >= threshold
+
+        return passed, recognized, similarity
+
+    def filter_results(
+        self,
+        results: List[InkResult],
+        threshold: float = 0.8,
+        verbose: bool = True
+    ) -> List[InkResult]:
+        """
+        Filter a list of results, keeping only those that pass OCR validation.
+
+        Args:
+            results: List of InkResult objects
+            threshold: Minimum similarity to pass
+            verbose: Print progress
+
+        Returns:
+            Filtered list of InkResult objects that passed validation
+        """
+        self.load_model()
+
+        passed = []
+        for i, result in enumerate(results):
+            is_valid, recognized, score = self.validate(result, threshold)
+
+            if verbose:
+                status = "PASS" if is_valid else "FAIL"
+                print(f"  [{i+1}/{len(results)}] '{result.word}' -> '{recognized}' "
+                      f"({score:.1%}) [{status}]")
+
+            if is_valid:
+                passed.append(result)
+
+        if verbose:
+            print(f"\nPassed: {len(passed)}/{len(results)} ({len(passed)/len(results):.1%})")
+
+        return passed
+
+
 def visualize(result: InkResult, output_path: str = None, show: bool = False):
     """
     Visualize InkSight result.
@@ -599,6 +795,10 @@ def main():
                         help='Show visualization')
     parser.add_argument('--charset', action='store_true',
                         help='Process full charset instead of word')
+    parser.add_argument('--validate', '-v', action='store_true',
+                        help='Validate results with TrOCR (filters bad results)')
+    parser.add_argument('--threshold', type=float, default=0.8,
+                        help='OCR validation threshold (default: 0.8)')
 
     args = parser.parse_args()
 
@@ -614,6 +814,20 @@ def main():
             max_extension=args.extend
         )
         print(f"Processed {len(results)} characters")
+
+        # Validate with OCR if requested
+        if args.validate:
+            print("\nValidating with TrOCR...")
+            validator = OCRValidator()
+            valid_results = {}
+            for char, result in results.items():
+                passed, recognized, score = validator.validate(result, threshold=args.threshold)
+                status = "PASS" if passed else "FAIL"
+                print(f"  '{char}' -> '{recognized}' ({score:.1%}) [{status}]")
+                if passed:
+                    valid_results[char] = result
+            print(f"\nPassed: {len(valid_results)}/{len(results)} characters")
+            results = valid_results
 
         if args.output:
             output_dir = Path(args.output)
@@ -642,6 +856,15 @@ def main():
             max_extension=args.extend
         )
         print(f"Got {len(result.strokes)} strokes")
+
+        # Validate with OCR if requested
+        if args.validate:
+            validator = OCRValidator()
+            passed, recognized, score = validator.validate(result, threshold=args.threshold)
+            status = "PASS" if passed else "FAIL"
+            print(f"OCR: '{recognized}' (similarity: {score:.1%}) [{status}]")
+            if not passed:
+                print("Result failed OCR validation - strokes may not be readable")
 
         if args.output:
             output_dir = Path(args.output)

@@ -23,6 +23,9 @@ app/android/captures/
 app/android/key.properties
 
 # Python
+__pycache__/
+*.py[cod]
+*$py.class
 models/__pycache__/
 models/*.py[cod]
 models/*$py.class

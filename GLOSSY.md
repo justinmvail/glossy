@@ -705,3 +705,64 @@ glossy/
 - Word-level output matches our use case
 - Can control data quality (vs relying on IAM-OnDB access)
 
+---
+
+### 🖊️ InkSight Font Vectorizer (Jan 26, 2026)
+
+**Purpose:** Convert outline fonts to single-line vector strokes for use in handwriting generation and pen plotting.
+
+**How it Works:**
+1. Render font word as image (PIL)
+2. Run Google's InkSight model (offline-to-online handwriting converter)
+3. Post-process strokes: filter artifacts, Gaussian smoothing, extend endpoints to connect gaps
+4. Optionally validate with TrOCR OCR (if readable = good vectorization)
+
+**InkSight Model:**
+- Google Research model for converting handwriting images to digital ink
+- Token format: 450 = start stroke, 0-224 = x coord, 225-449 = y coord
+- Location: `/home/server/inksight/model/` (TensorFlow SavedModel)
+
+**Post-Processing Pipeline:**
+- `smart_filter()`: Remove single-point edge artifacts
+- `smooth_gaussian()`: scipy.ndimage gaussian_filter1d (sigma=1.5)
+- `extend_to_connect()`: Ray-cast from endpoints to connect nearby strokes (max 8px)
+
+**OCR Validation (Optional):**
+- Uses Microsoft TrOCR (`trocr-base-handwritten`)
+- Renders strokes as image, runs OCR, compares to expected word
+- Threshold: 80% similarity = PASS
+- Note: Slow on CPU (~5 min/sample due to TF/PyTorch GPU conflict)
+
+**Usage:**
+```bash
+conda activate inksight
+cd /home/server/glossy
+
+# Single word with visualization
+python font_scraper/inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --show
+
+# With OCR validation
+python font_scraper/inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --validate
+
+# Process full charset
+python font_scraper/inksight_vectorizer.py --font path/to/font.ttf --charset --output ./output/
+```
+
+**Key Files:**
+- `font_scraper/inksight_vectorizer.py` - Main vectorizer + OCR validator
+- Classes: `InkSightVectorizer`, `OCRValidator`, `Stroke`, `InkResult`
+
+**Test Results (10 fonts × 10 words):**
+- Clean fonts (Great Wishes, Bristol, Daydreamer): Excellent results
+- Script fonts: Good with some gaps
+- Decorative/signature fonts: Variable quality
+- OCR validation filters out unreadable results
+
+**Dependencies:**
+```
+tensorflow>=2.15
+tensorflow-text
+transformers  # for TrOCR validation
+torch         # for TrOCR validation
+```
+
