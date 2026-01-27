@@ -766,3 +766,115 @@ transformers  # for TrOCR validation
 torch         # for TrOCR validation
 ```
 
+---
+
+### 🖥️ GPU Setup for TensorFlow + PyTorch (Jan 26, 2026)
+
+**Problem:** TensorFlow and PyTorch have conflicting CUDA library requirements:
+- TensorFlow 2.18 needs cuDNN 9.3+
+- PyTorch 2.6 (CUDA 12.4) ships with cuDNN 9.1
+
+**Solution:** Install PyTorch with CUDA 12.4, then upgrade cuDNN to satisfy TensorFlow.
+
+**⚠️ Important:** TensorFlow and PyTorch cannot be loaded in the same Python process (segfault). Use subprocess isolation for OCR validation.
+
+#### Prerequisites
+
+- NVIDIA GPU with compute capability 7.5+ (tested on GTX 1660 Super)
+- NVIDIA driver 535+ installed
+- Python 3.12
+
+#### Step-by-Step Setup
+
+```bash
+# 1. Install TensorFlow 2.18 (for InkSight)
+pip install --break-system-packages tensorflow==2.18.0 tensorflow-text
+
+# 2. Install PyTorch with CUDA 12.4 (for TrOCR)
+pip install --break-system-packages torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# 3. Upgrade cuDNN to satisfy TensorFlow (PyTorch installs 9.1, TF needs 9.3+)
+pip install --break-system-packages 'nvidia-cudnn-cu12>=9.3.0'
+
+# 4. Fix numpy version (PyTorch installs 2.x, TF needs <2.1)
+pip install --break-system-packages 'numpy<2.1.0,>=1.26.0'
+
+# 5. Install transformers for TrOCR
+pip install --break-system-packages transformers
+```
+
+#### Verification
+
+```bash
+# Test TensorFlow GPU (run separately)
+python3 -c "
+import tensorflow as tf
+print('TensorFlow:', tf.__version__)
+print('GPU:', tf.config.list_physical_devices('GPU'))
+"
+# Expected: GPU: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+
+# Test PyTorch GPU (run separately)
+python3 -c "
+import torch
+print('PyTorch:', torch.__version__)
+print('CUDA:', torch.cuda.is_available())
+print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')
+"
+# Expected: CUDA: True, GPU: NVIDIA GeForce GTX 1660 SUPER
+```
+
+#### Final Package Versions (Working Configuration)
+
+```
+tensorflow==2.18.0
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+transformers==5.0.0
+numpy==2.0.2
+nvidia-cublas-cu12==12.4.5.8
+nvidia-cuda-cupti-cu12==12.4.127
+nvidia-cuda-nvrtc-cu12==12.4.127
+nvidia-cuda-runtime-cu12==12.4.127
+nvidia-cudnn-cu12==9.18.1.3  # Upgraded from PyTorch's 9.1.0
+nvidia-cufft-cu12==11.2.1.3
+nvidia-curand-cu12==10.3.5.147
+nvidia-cusolver-cu12==11.6.1.9
+nvidia-cusparse-cu12==12.3.1.170
+nvidia-nvjitlink-cu12==12.4.127
+```
+
+#### Subprocess Isolation for OCR
+
+TensorFlow and PyTorch crash when loaded together. The `OCRValidator` class in `inksight_vectorizer.py` uses subprocess isolation:
+
+1. Main process: Loads TensorFlow for InkSight vectorization
+2. Subprocess: Loads PyTorch for TrOCR OCR validation
+3. Communication: Base64-encoded images over stdin/stdout
+
+This allows both frameworks to use GPU without conflicts.
+
+#### Troubleshooting
+
+**"Cannot dlopen some GPU libraries"**
+- cuDNN version mismatch. Run: `pip install --break-system-packages 'nvidia-cudnn-cu12>=9.3.0'`
+
+**"Loaded runtime CuDNN library: 9.1.0 but source was compiled with: 9.3.0"**
+- Same fix as above.
+
+**Segmentation fault when importing both TF and PyTorch**
+- Expected behavior. Use separate processes (subprocess isolation already implemented).
+
+**PyTorch "Illegal instruction" crash**
+- CPU doesn't support required instructions. Use GPU PyTorch (cu124) instead of CPU-only version.
+
+#### Hardware Tested
+
+| Component | Spec |
+|-----------|------|
+| GPU | NVIDIA GeForce GTX 1660 SUPER (6GB) |
+| Driver | 535.x |
+| CUDA | 12.4 (via pip nvidia packages) |
+| cuDNN | 9.18.1.3 |
+| OS | Ubuntu 24.04 (Linux 6.8.0) |
+
