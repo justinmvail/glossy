@@ -25,6 +25,7 @@ Usage:
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
@@ -535,9 +536,11 @@ class OCRValidator:
 
     If TrOCR can read the rendered strokes and match the expected word,
     the vectorization is considered successful.
+
+    Uses subprocess isolation to avoid TensorFlow/PyTorch GPU conflicts.
     """
 
-    def __init__(self, model_name: str = "microsoft/trocr-base-handwritten"):
+    def __init__(self, model_name: str = "microsoft/trocr-base-handwritten", use_subprocess: bool = True):
         """
         Initialize the OCR validator.
 
@@ -547,13 +550,19 @@ class OCRValidator:
                 - "microsoft/trocr-base-handwritten" (default, good balance)
                 - "microsoft/trocr-large-handwritten" (more accurate, slower)
                 - "microsoft/trocr-small-handwritten" (faster, less accurate)
+            use_subprocess: If True, run OCR in separate process (avoids GPU conflicts)
         """
         self.model_name = model_name
+        self.use_subprocess = use_subprocess
         self.processor = None
         self.model = None
+        self.device = None
 
     def load_model(self):
-        """Load TrOCR model and processor."""
+        """Load TrOCR model and processor (only if not using subprocess)."""
+        if self.use_subprocess:
+            return  # Model loaded in subprocess
+
         if self.model is not None:
             return
 
@@ -562,7 +571,6 @@ class OCRValidator:
 
         print(f"Loading TrOCR model: {self.model_name}...")
         self.processor = TrOCRProcessor.from_pretrained(self.model_name)
-        # Run on CPU to avoid GPU conflicts with TensorFlow
         self.model = VisionEncoderDecoderModel.from_pretrained(self.model_name)
         self.model = self.model.to('cpu')
         self.model.eval()
@@ -630,6 +638,13 @@ class OCRValidator:
         Returns:
             Recognized text string
         """
+        if self.use_subprocess:
+            return self._recognize_subprocess(image)
+        else:
+            return self._recognize_direct(image)
+
+    def _recognize_direct(self, image: Image.Image) -> str:
+        """Run OCR directly in this process."""
         import torch
         self.load_model()
 
@@ -646,6 +661,110 @@ class OCRValidator:
         text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
         return text.strip()
+
+    _worker_process = None
+    _worker_stdin = None
+    _worker_stdout = None
+
+    def _start_worker(self):
+        """Start persistent OCR worker process."""
+        import subprocess
+
+        if OCRValidator._worker_process is not None:
+            return
+
+        # Worker code that stays running and processes requests
+        worker_code = f'''
+import sys
+import warnings
+warnings.filterwarnings("ignore")
+import base64
+from io import BytesIO
+from PIL import Image
+import torch
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+
+# Load model once
+processor = TrOCRProcessor.from_pretrained("{self.model_name}")
+model = VisionEncoderDecoderModel.from_pretrained("{self.model_name}")
+model.eval()
+print("READY", flush=True)
+
+# Process requests
+while True:
+    try:
+        line = sys.stdin.readline().strip()
+        if not line or line == "QUIT":
+            break
+
+        # Decode image
+        img_data = base64.b64decode(line)
+        image = Image.open(BytesIO(img_data)).convert("RGB")
+
+        # Run OCR
+        pixel_values = processor(image, return_tensors="pt").pixel_values
+        with torch.no_grad():
+            generated_ids = model.generate(pixel_values, max_length=64)
+        text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        print(text.strip(), flush=True)
+    except Exception as e:
+        print(f"ERROR: {{e}}", flush=True)
+'''
+
+        print("Starting OCR worker process...")
+        OCRValidator._worker_process = subprocess.Popen(
+            [sys.executable, '-c', worker_code],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+
+        # Wait for READY signal
+        ready = OCRValidator._worker_process.stdout.readline().strip()
+        if ready != "READY":
+            raise RuntimeError(f"Worker failed to start: {ready}")
+        print("OCR worker ready.")
+
+    def _recognize_subprocess(self, image: Image.Image) -> str:
+        """Run OCR via persistent worker process."""
+        import base64
+        from io import BytesIO
+
+        self._start_worker()
+
+        # Convert image to base64
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        buffer = BytesIO()
+        image.save(buffer, format='PNG')
+        img_b64 = base64.b64encode(buffer.getvalue()).decode()
+
+        # Send to worker
+        OCRValidator._worker_process.stdin.write(img_b64 + '\n')
+        OCRValidator._worker_process.stdin.flush()
+
+        # Get result
+        result = OCRValidator._worker_process.stdout.readline().strip()
+
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+        return result
+
+    @classmethod
+    def shutdown_worker(cls):
+        """Shutdown the persistent OCR worker."""
+        if cls._worker_process is not None:
+            try:
+                cls._worker_process.stdin.write("QUIT\n")
+                cls._worker_process.stdin.flush()
+                cls._worker_process.wait(timeout=5)
+            except:
+                cls._worker_process.kill()
+            cls._worker_process = None
+            print("OCR worker stopped.")
 
     def validate(
         self,
