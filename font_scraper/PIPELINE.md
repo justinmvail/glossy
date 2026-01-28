@@ -409,6 +409,31 @@ pipeline.run(
 
 ---
 
+## Stroke Editor
+
+Web-based tool for viewing and manually editing InkSight stroke data (`stroke_editor.py`).
+
+```bash
+python3 stroke_editor.py
+# Open http://localhost:5000
+```
+
+**Features:**
+- Browse fonts → character grid → per-character canvas editor
+- Strokes overlaid on semi-transparent rendered font character (224×224 coord space)
+- Select/drag/add/delete points, add/delete strokes, shift+click for range selection
+- Dot strokes rendered distinctly (stored as 2-point strokes for SDT compatibility)
+- Server-side processing: extend_to_connect (gap closing), Gaussian smoothing (adaptive sigma)
+- Dedup tool to remove overlapping artifact strokes from InkSight
+- All actions have both toolbar buttons and keyboard shortcuts
+- Undo stack, unsaved change warnings, save to DB
+
+**Shortcuts:** `V` select, `A` add stroke, `X` delete stroke, `D` dedup, `C` connect, `G` smooth+connect, `R` revert, `Del` delete point(s), `Shift+click` range select, `Ctrl+S` save, `Ctrl+Z` undo, `[`/`]` prev/next char
+
+**Files:** `stroke_editor.py`, `templates/font_list.html`, `templates/char_grid.html`, `templates/editor.html`
+
+---
+
 ## Goal
 
 Find fonts with highest `quality_score` = least hand correction needed for SDT training.

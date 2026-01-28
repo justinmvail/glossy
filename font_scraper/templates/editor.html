@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Edit {{ char }} - {{ font.name }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 15px; background: #1a1a2e; color: #eee; }
+  a { color: #7eb8f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .nav { margin-bottom: 10px; font-size: 14px; }
+  .header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
+  .header h1 { margin: 0; font-size: 22px; }
+  .header .charLabel { font-size: 28px; background: #222; padding: 2px 14px; border-radius: 4px; }
+
+  .main { display: flex; gap: 20px; }
+  .canvas-wrap { position: relative; }
+  canvas { background: #fff; border-radius: 4px; cursor: crosshair; }
+  .sidebar { min-width: 220px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+  .toolbar button {
+    padding: 5px 10px; border: 1px solid #444; background: #222; color: #eee;
+    border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;
+  }
+  .toolbar button:hover { background: #333; }
+  .toolbar button.active { background: #335; border-color: #7eb8f7; }
+  .toolbar button.save { background: #254; border-color: #4a8; }
+  .toolbar button.save:hover { background: #365; }
+  .toolbar button.process { background: #352; border-color: #a84; }
+  .toolbar button.process:hover { background: #463; }
+
+  .section-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;
+    margin-top: 8px; margin-bottom: 4px; }
+
+  .stroke-list { font-size: 13px; max-height: 250px; overflow-y: auto; }
+  .stroke-item {
+    padding: 4px 8px; border-radius: 3px; margin-bottom: 2px;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+  }
+  .stroke-item:hover { background: #2a2a3e; }
+  .stroke-item.selected { background: #2a2a4e; }
+  .stroke-color { width: 12px; height: 12px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+  .stroke-delete { margin-left: auto; color: #a55; cursor: pointer; font-size: 16px; }
+  .stroke-delete:hover { color: #f66; }
+
+  .status { font-size: 12px; color: #888; margin-top: 10px; }
+  .status.saved { color: #4a8; }
+
+  .help { font-size: 11px; color: #555; margin-top: 12px; line-height: 1.7; }
+  .help kbd {
+    background: #333; padding: 1px 4px; border-radius: 3px; border: 1px solid #444;
+    font-family: inherit; font-size: 10px; min-width: 16px; display: inline-block; text-align: center;
+  }
+  .help .row { display: flex; gap: 6px; }
+  .help .key { min-width: 70px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="nav">
+  <a href="/">&larr; Fonts</a> &middot; <a href="/font/{{ font.id }}">{{ font.name }}</a>
+</div>
+<div class="header">
+  <h1>{{ font.name }}</h1>
+  <span class="charLabel">{{ char }}</span>
+</div>
+<div class="main">
+  <div class="canvas-wrap">
+    <canvas id="canvas" width="512" height="512"></canvas>
+  </div>
+  <div class="sidebar">
+    <div class="section-label">Mode</div>
+    <div class="toolbar">
+      <button id="btnSelect" class="active" onclick="setMode('select')"><kbd>V</kbd> Select</button>
+      <button id="btnAddStroke" onclick="setMode('addStroke')"><kbd>A</kbd> + Stroke</button>
+      <button id="btnDeleteStroke" onclick="setMode('deleteStroke')"><kbd>X</kbd> - Stroke</button>
+    </div>
+    <div class="section-label">Edit</div>
+    <div class="toolbar">
+      <button id="btnDeletePoint" onclick="deleteSelectedPoint()"><kbd>Del</kbd> Del Point</button>
+      <button id="btnUndo" onclick="undo()"><kbd>Z</kbd> Undo</button>
+      <button id="btnReload" onclick="reloadChar()"><kbd>R</kbd> Revert</button>
+    </div>
+    <div class="section-label">Process</div>
+    <div class="toolbar">
+      <button id="btnDedup" class="process" onclick="runDedup()"><kbd>D</kbd> Dedup</button>
+      <button id="btnConnect" class="process" onclick="runConnect()"><kbd>C</kbd> Connect</button>
+      <button id="btnSmooth" class="process" onclick="runSmooth()"><kbd>G</kbd> Smooth+Connect</button>
+    </div>
+    <div class="section-label">Navigate</div>
+    <div class="toolbar">
+      <button id="prevChar" onclick="navigateChar(-1)"><kbd>[</kbd> Prev</button>
+      <button id="nextChar" onclick="navigateChar(1)"><kbd>]</kbd> Next</button>
+      <button id="btnSave" class="save" onclick="save()"><kbd>S</kbd> Save</button>
+    </div>
+
+    <div class="section-label">Strokes</div>
+    <div id="strokeList" class="stroke-list"></div>
+    <div id="status" class="status"></div>
+
+    <div class="help">
+      <strong>All Shortcuts</strong>
+      <div class="row"><span class="key"><kbd>V</kbd></span> Select mode</div>
+      <div class="row"><span class="key"><kbd>A</kbd></span> Add stroke mode</div>
+      <div class="row"><span class="key"><kbd>X</kbd></span> Delete stroke mode</div>
+      <div class="row"><span class="key"><kbd>Del</kbd></span> Delete point(s)</div>
+      <div class="row"><span class="key"><kbd>Shift</kbd>+click</span> Select range</div>
+      <div class="row"><span class="key"><kbd>Ctrl</kbd>+<kbd>Z</kbd></span> Undo</div>
+      <div class="row"><span class="key"><kbd>R</kbd></span> Revert (reload from DB)</div>
+      <div class="row"><span class="key"><kbd>D</kbd></span> Dedup overlapping strokes</div>
+      <div class="row"><span class="key"><kbd>C</kbd></span> Connect strokes</div>
+      <div class="row"><span class="key"><kbd>G</kbd></span> Smooth + connect</div>
+      <div class="row"><span class="key"><kbd>Ctrl</kbd>+<kbd>S</kbd></span> Save</div>
+      <div class="row"><span class="key"><kbd>Enter</kbd></span> Finish new stroke</div>
+      <div class="row"><span class="key"><kbd>Esc</kbd></span> Cancel / deselect</div>
+      <div class="row"><span class="key"><kbd>[</kbd> <kbd>]</kbd></span> Prev / Next char</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const FONT_ID = {{ font.id }};
+const CHAR = {{ char|tojson }};
+const CHAR_LIST = {{ char_list|tojson }};
+const CANVAS_SIZE = 512;
+const COORD_SIZE = 224;
+const SCALE = CANVAS_SIZE / COORD_SIZE;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const COLORS = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#a65628','#f781bf','#999999'];
+
+let state = {
+  strokes: [],
+  selectedStroke: -1,
+  selectedPoint: -1,
+  selectedPointEnd: -1,  // -1 = single point, >= 0 = range end (inclusive)
+  mode: 'select',
+  newStrokePoints: [],
+  dirty: false
+};
+
+let bgImage = null;
+let undoStack = [];
+let dragging = false;
+let dragStartX = 0, dragStartY = 0;
+
+// --- Data loading ---
+
+function load() {
+  fetch(`/api/char/${FONT_ID}?c=${encodeURIComponent(CHAR)}`)
+    .then(r => r.json())
+    .then(data => {
+      state.strokes = data.strokes || [];
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.dirty = false;
+      undoStack = [];
+
+      if (data.image) {
+        const img = new Image();
+        img.onload = () => { bgImage = img; draw(); };
+        img.src = 'data:image/png;base64,' + data.image;
+      } else {
+        bgImage = null;
+        draw();
+      }
+      updateStrokeList();
+      setStatus('Loaded');
+    });
+}
+
+function save() {
+  fetch(`/api/char/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strokes: state.strokes})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      state.dirty = false;
+      setStatus('Saved', true);
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+  });
+}
+
+function reloadChar() {
+  if (state.dirty && !confirm('Discard unsaved changes?')) return;
+  load();
+}
+
+// --- Undo ---
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(state.strokes));
+  if (undoStack.length > 50) undoStack.shift();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  state.strokes = JSON.parse(undoStack.pop());
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+  setStatus('Undone');
+}
+
+// --- Processing (server-side) ---
+
+function runConnect() {
+  pushUndo();
+  setStatus('Connecting...');
+  fetch(`/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strokes: state.strokes, max_extension: 8.0, smooth: false})
+  }).then(r => r.json()).then(d => {
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      setStatus('Connected');
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+  });
+}
+
+function runSmooth() {
+  pushUndo();
+  setStatus('Smoothing...');
+  fetch(`/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strokes: state.strokes, max_extension: 8.0, smooth: true, smooth_sigma: 1.5})
+  }).then(r => r.json()).then(d => {
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      setStatus('Smoothed + connected');
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+  });
+}
+
+function runDedup() {
+  // Remove duplicate strokes that overlap at the same position.
+  // Two strokes are duplicates if every point in the shorter one is within
+  // a threshold distance of the nearest point in the other.
+  const THRESH = 3.0;  // coord-space units (~3 pixels in 224 space)
+  const before = state.strokes.length;
+  const keep = [];
+  const removed = [];
+
+  for (let i = 0; i < state.strokes.length; i++) {
+    let dominated = false;
+    for (let j = 0; j < keep.length; j++) {
+      if (strokesOverlap(state.strokes[i], state.strokes[keep[j]], THRESH)) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) keep.push(i);
+    else removed.push(i);
+  }
+
+  if (removed.length === 0) {
+    setStatus('No duplicates found');
+    return;
+  }
+
+  pushUndo();
+  state.strokes = keep.map(i => state.strokes[i]);
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedPointEnd = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+  setStatus(`Removed ${removed.length} duplicate strokes (${before} -> ${state.strokes.length})`);
+}
+
+function strokesOverlap(a, b, thresh) {
+  // Check if the shorter stroke is fully covered by the longer one
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+
+  for (let i = 0; i < shorter.length; i++) {
+    let minDist = Infinity;
+    for (let j = 0; j < longer.length; j++) {
+      const dx = shorter[i][0] - longer[j][0];
+      const dy = shorter[i][1] - longer[j][1];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < minDist) minDist = d;
+    }
+    if (minDist > thresh) return false;
+  }
+  return true;
+}
+
+// --- Dot detection ---
+
+function isDot(stroke) {
+  if (stroke.length === 1) return true;
+  if (stroke.length === 2) {
+    const dx = stroke[1][0] - stroke[0][0];
+    const dy = stroke[1][1] - stroke[0][1];
+    return Math.sqrt(dx * dx + dy * dy) < 1.0;
+  }
+  return false;
+}
+
+// --- Drawing ---
+
+function draw() {
+  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+  // Background: font character image (semi-transparent)
+  if (bgImage) {
+    ctx.globalAlpha = 0.25;
+    ctx.drawImage(bgImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.globalAlpha = 1.0;
+  }
+
+  // Draw strokes
+  for (let si = 0; si < state.strokes.length; si++) {
+    const stroke = state.strokes[si];
+    const color = COLORS[si % COLORS.length];
+    const selected = (si === state.selectedStroke);
+
+    if (isDot(stroke)) {
+      const cx = stroke[0][0] * SCALE;
+      const cy = stroke[0][1] * SCALE;
+      const isSelected = (si === state.selectedStroke);
+      const r = isSelected ? 9 : 7;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = isSelected ? '#ff0' : '#000';
+      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.stroke();
+    } else if (stroke.length >= 2) {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = selected ? 3 : 2;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      for (let pi = 0; pi < stroke.length; pi++) {
+        const cx = stroke[pi][0] * SCALE;
+        const cy = stroke[pi][1] * SCALE;
+        if (pi === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+
+      for (let pi = 0; pi < stroke.length; pi++) {
+        const cx = stroke[pi][0] * SCALE;
+        const cy = stroke[pi][1] * SCALE;
+        const isSingle = (si === state.selectedStroke && pi === state.selectedPoint && state.selectedPointEnd < 0);
+        const inRange = (si === state.selectedStroke && state.selectedPointEnd >= 0 &&
+                         pi >= state.selectedPoint && pi <= state.selectedPointEnd);
+        const highlight = isSingle || inRange;
+        ctx.beginPath();
+        ctx.arc(cx, cy, highlight ? 6 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = inRange ? '#f80' : (isSingle ? '#fff' : color);
+        ctx.fill();
+        ctx.strokeStyle = highlight ? '#ff0' : '#000';
+        ctx.lineWidth = highlight ? 2 : 1;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw new stroke being added
+  if (state.mode === 'addStroke' && state.newStrokePoints.length > 0) {
+    const pts = state.newStrokePoints;
+    ctx.beginPath();
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    for (let i = 0; i < pts.length; i++) {
+      const cx = pts[i][0] * SCALE;
+      const cy = pts[i][1] * SCALE;
+      if (i === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (let i = 0; i < pts.length; i++) {
+      const cx = pts[i][0] * SCALE;
+      const cy = pts[i][1] * SCALE;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#0f0';
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}
+
+// --- UI helpers ---
+
+function updateStrokeList() {
+  const el = document.getElementById('strokeList');
+  let html = '';
+  for (let i = 0; i < state.strokes.length; i++) {
+    const c = COLORS[i % COLORS.length];
+    const sel = i === state.selectedStroke ? ' selected' : '';
+    const pts = state.strokes[i].length;
+    const label = isDot(state.strokes[i]) ? 'dot' : `${pts} pts`;
+    html += `<div class="stroke-item${sel}" onclick="selectStroke(${i})">
+      <span class="stroke-color" style="background:${c}"></span>
+      Stroke ${i+1} (${label})
+      <span class="stroke-delete" onclick="event.stopPropagation();deleteStroke(${i})">&times;</span>
+    </div>`;
+  }
+  el.innerHTML = html;
+
+  // Show range info in status
+  if (state.selectedStroke >= 0 && state.selectedPointEnd >= 0) {
+    const count = state.selectedPointEnd - state.selectedPoint + 1;
+    setStatus(`${count} points selected (${state.selectedPoint}-${state.selectedPointEnd})`);
+  }
+}
+
+function selectStroke(i) {
+  state.selectedStroke = i;
+  state.selectedPoint = -1;
+  state.selectedPointEnd = -1;
+  draw();
+  updateStrokeList();
+}
+
+function deleteStroke(i) {
+  pushUndo();
+  state.strokes.splice(i, 1);
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+}
+
+function deleteSelectedPoint() {
+  if (state.selectedStroke < 0 || state.selectedPoint < 0) return;
+  pushUndo();
+  const si = state.selectedStroke;
+  const s = state.strokes[si];
+  const start = state.selectedPoint;
+  const count = state.selectedPointEnd >= 0 ? (state.selectedPointEnd - start + 1) : 1;
+  s.splice(start, count);
+  if (s.length === 0) {
+    state.strokes.splice(si, 1);
+    state.selectedStroke = -1;
+  }
+  state.selectedPoint = -1;
+  state.selectedPointEnd = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  state.newStrokePoints = [];
+  document.getElementById('btnSelect').classList.toggle('active', mode === 'select');
+  document.getElementById('btnAddStroke').classList.toggle('active', mode === 'addStroke');
+  document.getElementById('btnDeleteStroke').classList.toggle('active', mode === 'deleteStroke');
+  canvas.style.cursor = mode === 'select' ? 'crosshair' : mode === 'addStroke' ? 'copy' : 'not-allowed';
+  draw();
+}
+
+function setStatus(msg, saved) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status' + (saved ? ' saved' : '');
+}
+
+// --- Hit testing ---
+
+function findPoint(mx, my, threshold) {
+  threshold = threshold || 10;
+  for (let si = 0; si < state.strokes.length; si++) {
+    for (let pi = 0; pi < state.strokes[si].length; pi++) {
+      const px = state.strokes[si][pi][0] * SCALE;
+      const py = state.strokes[si][pi][1] * SCALE;
+      const d = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+      if (d < threshold) return {stroke: si, point: pi, dist: d};
+    }
+  }
+  return null;
+}
+
+function findNearestSegment(mx, my, threshold) {
+  threshold = threshold || 12;
+  let best = null;
+  for (let si = 0; si < state.strokes.length; si++) {
+    const s = state.strokes[si];
+    for (let pi = 0; pi < s.length - 1; pi++) {
+      const ax = s[pi][0] * SCALE, ay = s[pi][1] * SCALE;
+      const bx = s[pi+1][0] * SCALE, by = s[pi+1][1] * SCALE;
+      const d = distToSegment(mx, my, ax, ay, bx, by);
+      if (d < threshold && (!best || d < best.dist)) {
+        best = {stroke: si, after: pi, dist: d};
+      }
+    }
+  }
+  return best;
+}
+
+function distToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2);
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const nx = ax + t * dx, ny = ay + t * dy;
+  return Math.sqrt((px - nx) ** 2 + (py - ny) ** 2);
+}
+
+// --- Mouse handlers ---
+
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (CANVAS_SIZE / rect.width);
+  const my = (e.clientY - rect.top) * (CANVAS_SIZE / rect.height);
+
+  if (state.mode === 'select') {
+    const hit = findPoint(mx, my);
+    if (hit) {
+      // Shift+click: extend selection to range on same stroke
+      if (e.shiftKey && state.selectedStroke === hit.stroke && state.selectedPoint >= 0) {
+        const a = state.selectedPoint;
+        const b = hit.point;
+        state.selectedPoint = Math.min(a, b);
+        state.selectedPointEnd = Math.max(a, b);
+        draw();
+        updateStrokeList();
+        return;
+      }
+      pushUndo();
+      state.selectedStroke = hit.stroke;
+      state.selectedPoint = hit.point;
+      state.selectedPointEnd = -1;
+      dragging = true;
+      dragStartX = mx;
+      dragStartY = my;
+      draw();
+      updateStrokeList();
+      return;
+    }
+
+    const seg = findNearestSegment(mx, my);
+    if (seg) {
+      pushUndo();
+      const coordX = mx / SCALE;
+      const coordY = my / SCALE;
+      state.strokes[seg.stroke].splice(seg.after + 1, 0, [coordX, coordY]);
+      state.selectedStroke = seg.stroke;
+      state.selectedPoint = seg.after + 1;
+      state.selectedPointEnd = -1;
+      state.dirty = true;
+      dragging = true;
+      draw();
+      updateStrokeList();
+      return;
+    }
+
+    state.selectedStroke = -1;
+    state.selectedPoint = -1;
+    state.selectedPointEnd = -1;
+    draw();
+    updateStrokeList();
+
+  } else if (state.mode === 'addStroke') {
+    const coordX = mx / SCALE;
+    const coordY = my / SCALE;
+    state.newStrokePoints.push([coordX, coordY]);
+    draw();
+
+  } else if (state.mode === 'deleteStroke') {
+    const hit = findPoint(mx, my, 15);
+    if (hit) {
+      pushUndo();
+      state.strokes.splice(hit.stroke, 1);
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      setMode('select');
+      return;
+    }
+    const seg = findNearestSegment(mx, my, 15);
+    if (seg) {
+      pushUndo();
+      state.strokes.splice(seg.stroke, 1);
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      setMode('select');
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (CANVAS_SIZE / rect.width);
+  const my = (e.clientY - rect.top) * (CANVAS_SIZE / rect.height);
+
+  if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
+    const coordX = Math.max(0, Math.min(COORD_SIZE, mx / SCALE));
+    const coordY = Math.max(0, Math.min(COORD_SIZE, my / SCALE));
+    state.strokes[state.selectedStroke][state.selectedPoint] = [coordX, coordY];
+    state.dirty = true;
+    draw();
+  }
+});
+
+canvas.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('mouseleave', () => { dragging = false; });
+
+// --- Keyboard handlers ---
+
+document.addEventListener('keydown', e => {
+  // Ignore hotkeys when a modifier is held (except specific combos)
+  const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
+
+  // Ctrl/Cmd combos
+  if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    save();
+    return;
+  }
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    undo();
+    return;
+  }
+
+  // Don't process single-key hotkeys if modifier held
+  if (hasModifier) return;
+
+  switch (e.key) {
+    case 'Delete':
+    case 'Backspace':
+      if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
+        e.preventDefault();
+        deleteSelectedPoint();
+      }
+      break;
+
+    case 'Escape':
+      if (state.mode === 'addStroke') {
+        state.newStrokePoints = [];
+        setMode('select');
+      } else {
+        state.selectedStroke = -1;
+        state.selectedPoint = -1;
+        state.selectedPointEnd = -1;
+        draw();
+        updateStrokeList();
+      }
+      break;
+
+    case 'Enter':
+      if (state.mode === 'addStroke') {
+        if (state.newStrokePoints.length >= 1) {
+          pushUndo();
+          if (state.newStrokePoints.length === 1) {
+            const p = state.newStrokePoints[0];
+            state.newStrokePoints.push([p[0], p[1]]);
+          }
+          state.strokes.push(state.newStrokePoints);
+          state.dirty = true;
+          updateStrokeList();
+        }
+        state.newStrokePoints = [];
+        setMode('select');
+      }
+      break;
+
+    case 'v': setMode('select'); break;
+    case 'a': setMode('addStroke'); break;
+    case 'x': setMode('deleteStroke'); break;
+    case 'd': runDedup(); break;
+    case 'c': runConnect(); break;
+    case 'g': runSmooth(); break;
+    case 'r': reloadChar(); break;
+    case '[': navigateChar(-1); break;
+    case ']': navigateChar(1); break;
+  }
+});
+
+// --- Navigation ---
+
+function navigateChar(dir) {
+  const idx = CHAR_LIST.indexOf(CHAR);
+  if (idx < 0) return;
+  const next = idx + dir;
+  if (next < 0 || next >= CHAR_LIST.length) return;
+  if (state.dirty && !confirm('Unsaved changes. Continue?')) return;
+  window.location.href = `/edit/${FONT_ID}?c=${encodeURIComponent(CHAR_LIST[next])}`;
+}
+
+// --- Init ---
+load();
+</script>
+</body>
+</html>

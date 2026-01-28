@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stroke Editor - Font Browser</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+  h1 { margin-bottom: 5px; }
+  .subtitle { color: #888; margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; max-width: 900px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; }
+  th { color: #888; font-weight: 600; }
+  a { color: #7eb8f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .count { color: #888; }
+  .source { font-size: 0.85em; color: #666; }
+  input[type=text] { padding: 6px 10px; border: 1px solid #444; background: #222; color: #eee;
+    border-radius: 4px; width: 300px; margin-bottom: 15px; }
+</style>
+</head>
+<body>
+<h1>Stroke Editor</h1>
+<p class="subtitle">{{ fonts|length }} fonts with stroke data</p>
+<input type="text" id="search" placeholder="Filter fonts..." oninput="filterFonts()">
+<table>
+  <thead><tr><th>Font</th><th>Source</th><th>Characters</th></tr></thead>
+  <tbody id="fontTable">
+  {% for f in fonts %}
+    <tr data-name="{{ f.name|lower }}">
+      <td><a href="/font/{{ f.id }}">{{ f.name }}</a></td>
+      <td class="source">{{ f.source or '' }}</td>
+      <td class="count">{{ f.char_count }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<script>
+function filterFonts() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('#fontTable tr').forEach(tr => {
+    tr.style.display = tr.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

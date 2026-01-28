@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ font.name }} - Character Grid</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+  a { color: #7eb8f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .nav { margin-bottom: 15px; }
+  h1 { margin-bottom: 5px; }
+  .subtitle { color: #888; margin-bottom: 20px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 8px; max-width: 900px; }
+  .cell {
+    width: 64px; height: 64px; background: #222; border: 1px solid #333;
+    border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; cursor: pointer; position: relative; transition: border-color 0.15s;
+  }
+  .cell:hover { border-color: #7eb8f7; }
+  .cell .label { position: absolute; top: 2px; right: 4px; font-size: 10px; color: #555; }
+  .cell .pts { position: absolute; bottom: 2px; right: 4px; font-size: 9px; color: #555; }
+</style>
+</head>
+<body>
+<div class="nav"><a href="/">&larr; All Fonts</a></div>
+<h1>{{ font.name }}</h1>
+<p class="subtitle">{{ chars|length }} characters with stroke data. Click to edit.</p>
+<div class="grid">
+{% for c in chars %}
+  <a href="/edit/{{ font.id }}?c={{ c.char|urlencode }}" style="text-decoration:none;color:inherit">
+    <div class="cell">
+      {{ c.char }}
+      <span class="pts">{{ c.point_count or '' }}</span>
+    </div>
+  </a>
+{% endfor %}
+</div>
+</body>
+</html>
