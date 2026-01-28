@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Visualize stroke data from database."""
+
+import sqlite3
+import json
+from PIL import Image, ImageDraw
+
+conn = sqlite3.connect('fonts.db')
+conn.row_factory = sqlite3.Row
+cursor = conn.cursor()
+
+# Get a few different letters from first font
+cursor.execute("""
+    SELECT f.name, c.char, c.strokes_raw
+    FROM characters c
+    JOIN fonts f ON c.font_id = f.id
+    WHERE c.strokes_raw IS NOT NULL
+      AND c.char IN ('A', 'B', 'C', 'a', 'b', 'c', 'H', 'e', 'l', 'o')
+    ORDER BY f.id, c.char
+    LIMIT 10
+""")
+
+rows = cursor.fetchall()
+font_name = rows[0]['name']
+
+# Create image grid
+cell_size = 150
+cols = 5
+rows_count = 2
+img = Image.new('RGB', (cols * cell_size, rows_count * cell_size), 'white')
+draw = ImageDraw.Draw(img)
+
+for i, row in enumerate(rows):
+    col = i % cols
+    r = i // cols
+
+    x_off = col * cell_size
+    y_off = r * cell_size
+
+    # Draw border
+    draw.rectangle([x_off, y_off, x_off + cell_size - 1, y_off + cell_size - 1], outline='lightgray')
+
+    # Draw label
+    draw.text((x_off + 5, y_off + 5), f"'{row['char']}'", fill='gray')
+
+    # Parse strokes
+    strokes = json.loads(row['strokes_raw'])
+
+    if not strokes:
+        continue
+
+    # Find bounds
+    all_points = []
+    for stroke in strokes:
+        all_points.extend(stroke)
+
+    if not all_points:
+        continue
+
+    xs = [p[0] for p in all_points]
+    ys = [p[1] for p in all_points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    # Scale to fit cell (with padding)
+    padding = 25
+    available = cell_size - 2 * padding
+
+    width = max_x - min_x if max_x > min_x else 1
+    height = max_y - min_y if max_y > min_y else 1
+    scale = min(available / width, available / height)
+
+    # Center in cell
+    scaled_w = width * scale
+    scaled_h = height * scale
+    offset_x = x_off + padding + (available - scaled_w) / 2
+    offset_y = y_off + padding + (available - scaled_h) / 2
+
+    # Draw strokes
+    colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628']
+
+    for si, stroke in enumerate(strokes):
+        if len(stroke) < 2:
+            continue
+
+        color = colors[si % len(colors)]
+        points = []
+        for p in stroke:
+            px = offset_x + (p[0] - min_x) * scale
+            py = offset_y + (p[1] - min_y) * scale
+            points.append((px, py))
+
+        draw.line(points, fill=color, width=2)
+
+# Save
+output = 'stroke_preview.png'
+img.save(output)
+print(f"Saved to {output}")
+print(f"Font: {font_name}")
+
+conn.close()
+
+# Open it
+import subprocess
+subprocess.run(['xdg-open', output])
