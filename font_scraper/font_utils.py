@@ -260,15 +260,25 @@ class CursiveDetector:
 
             # Expected components for separated letters
             # "minimum" has 7 letters, but 'i' has 2 parts each (dot + stem)
-            # So expected ~9 components for print, ~1-2 for cursive
+            # So expected ~9 components for print, ~1-3 for true cursive
             expected_components = len(test_word) + test_word.count('i') + test_word.count('j')
 
-            # Connectivity score: 1 = fully connected, 0 = all separate
+            # Connectivity score:
+            # - 1.0 = fully connected (1 component for whole word)
+            # - 0.5 = partially connected
+            # - 0.0 = all letters separate (components ≈ expected)
+            # - Fragmented fonts (components >> expected) also score ~0
             if num_components == 0:
                 connectivity_score = 0.0
+            elif num_components <= 3:
+                # Very few components = truly connected cursive
+                connectivity_score = 1.0 - (num_components - 1) / expected_components
+            elif num_components < expected_components:
+                # Fewer than expected = some letters connecting
+                connectivity_score = (expected_components - num_components) / expected_components
             else:
-                # Fewer components = more connected
-                connectivity_score = max(0.0, 1.0 - (num_components / expected_components))
+                # At or above expected = print or fragmented
+                connectivity_score = 0.0
 
             is_cursive = connectivity_score >= self.threshold
 
