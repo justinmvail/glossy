@@ -121,3 +121,36 @@ results = inksight.batch_process('fonts/dafont/MyFont.ttf',
 # Or manually
 python docker/test_inksight.py
 ```
+
+## Training Pipeline
+
+For the full font-to-stroke training pipeline (scraping, filtering, vectorization, validation), see **[PIPELINE.md](PIPELINE.md)**.
+
+### Utilities
+
+```python
+from font_utils import (
+    FontDeduplicator,  # Find duplicate fonts via perceptual hash
+    FontScorer,        # Score fonts on quality metrics
+    CursiveDetector,   # Detect connected/cursive fonts
+    CompletenessChecker,  # Check character coverage
+    CharacterRenderer,    # Render individual characters
+)
+
+# Quick test on a font
+python font_utils.py /path/to/font.ttf
+```
+
+### Database
+
+```python
+from db_schema import init_db, FontDB
+
+# Initialize
+init_db('fonts.db')
+
+# Use helper class
+with FontDB('fonts.db') as db:
+    font_id = db.add_font('MyFont', '/path/to/font.ttf', source='dafont')
+    db.update_checks(font_id, completeness_score=0.95, is_cursive=False)
+```
