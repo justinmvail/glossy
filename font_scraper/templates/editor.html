@@ -66,7 +66,7 @@
 </div>
 <div class="main">
   <div class="canvas-wrap">
-    <canvas id="canvas" width="512" height="512"></canvas>
+    <canvas id="canvas" width="768" height="768"></canvas>
   </div>
   <div class="sidebar">
     <div class="section-label">Mode</div>
@@ -78,6 +78,9 @@
     <div class="section-label">Edit</div>
     <div class="toolbar">
       <button id="btnDeletePoint" onclick="deleteSelectedPoint()"><kbd>Del</kbd> Del Point</button>
+      <button id="btnSplit" onclick="splitStroke()"><kbd>B</kbd> Split</button>
+      <button id="btnVertex" onclick="toggleVertex()"><kbd>T</kbd> Vertex</button>
+      <button id="btnJoin" onclick="startJoin()"><kbd>J</kbd> Join</button>
       <button id="btnUndo" onclick="undo()"><kbd>Z</kbd> Undo</button>
       <button id="btnReload" onclick="reloadChar()"><kbd>R</kbd> Revert</button>
     </div>
@@ -85,7 +88,13 @@
     <div class="toolbar">
       <button id="btnDedup" class="process" onclick="runDedup()"><kbd>D</kbd> Dedup</button>
       <button id="btnConnect" class="process" onclick="runConnect()"><kbd>C</kbd> Connect</button>
-      <button id="btnSmooth" class="process" onclick="runSmooth()"><kbd>G</kbd> Smooth+Connect</button>
+      <button id="btnSmooth" class="process" onclick="runSmooth()"><kbd>G</kbd> Smooth</button>
+      <button id="btnSnap" class="process" onclick="runSnap()"><kbd>N</kbd> Snap to Outline</button>
+      <button id="btnCenterBorders" class="process" onclick="runCenterBorders()"><kbd>M</kbd> Center in Stroke</button>
+      <button id="btnCenter" class="process" onclick="runCenter()"><kbd>O</kbd> Center BBox</button>
+      <button id="btnResample" class="process" onclick="runResample()"><kbd>E</kbd> Resample</button>
+      <button id="btnScaleUp" class="process" onclick="runScale(1.03)"><kbd>+</kbd> Scale Up</button>
+      <button id="btnScaleDn" class="process" onclick="runScale(1/1.03)"><kbd>-</kbd> Scale Down</button>
     </div>
     <div class="section-label">Navigate</div>
     <div class="toolbar">
@@ -103,13 +112,23 @@
       <div class="row"><span class="key"><kbd>V</kbd></span> Select mode</div>
       <div class="row"><span class="key"><kbd>A</kbd></span> Add stroke mode</div>
       <div class="row"><span class="key"><kbd>X</kbd></span> Delete stroke mode</div>
+      <div class="row"><span class="key"><kbd>&larr;</kbd> <kbd>&rarr;</kbd></span> Prev / next point</div>
       <div class="row"><span class="key"><kbd>Del</kbd></span> Delete point(s)</div>
+      <div class="row"><span class="key"><kbd>T</kbd></span> Toggle vertex (locked)</div>
+      <div class="row"><span class="key"><kbd>B</kbd></span> Split stroke at point</div>
+      <div class="row"><span class="key"><kbd>J</kbd></span> Join two strokes</div>
       <div class="row"><span class="key"><kbd>Shift</kbd>+click</span> Select range</div>
+      <div class="row"><span class="key">Drag empty</span> Marquee select</div>
       <div class="row"><span class="key"><kbd>Ctrl</kbd>+<kbd>Z</kbd></span> Undo</div>
       <div class="row"><span class="key"><kbd>R</kbd></span> Revert (reload from DB)</div>
       <div class="row"><span class="key"><kbd>D</kbd></span> Dedup overlapping strokes</div>
       <div class="row"><span class="key"><kbd>C</kbd></span> Connect strokes</div>
-      <div class="row"><span class="key"><kbd>G</kbd></span> Smooth + connect</div>
+      <div class="row"><span class="key"><kbd>N</kbd></span> Snap to outline</div>
+      <div class="row"><span class="key"><kbd>M</kbd></span> Center in stroke width</div>
+      <div class="row"><span class="key"><kbd>O</kbd></span> Center bbox on glyph</div>
+      <div class="row"><span class="key"><kbd>E</kbd></span> Resample (adaptive)</div>
+      <div class="row"><span class="key"><kbd>G</kbd></span> Smooth</div>
+      <div class="row"><span class="key"><kbd>+</kbd> <kbd>-</kbd></span> Scale up / down (3%)</div>
       <div class="row"><span class="key"><kbd>Ctrl</kbd>+<kbd>S</kbd></span> Save</div>
       <div class="row"><span class="key"><kbd>Enter</kbd></span> Finish new stroke</div>
       <div class="row"><span class="key"><kbd>Esc</kbd></span> Cancel / deselect</div>
@@ -122,7 +141,7 @@
 const FONT_ID = {{ font.id }};
 const CHAR = {{ char|tojson }};
 const CHAR_LIST = {{ char_list|tojson }};
-const CANVAS_SIZE = 512;
+const CANVAS_SIZE = 768;
 const COORD_SIZE = 224;
 const SCALE = CANVAS_SIZE / COORD_SIZE;
 
@@ -136,15 +155,19 @@ let state = {
   selectedStroke: -1,
   selectedPoint: -1,
   selectedPointEnd: -1,  // -1 = single point, >= 0 = range end (inclusive)
+  selectedMulti: [],     // [{stroke, point}, ...] for marquee selection
   mode: 'select',
   newStrokePoints: [],
+  joinFirst: null,  // {stroke, point} - first clicked point for join
   dirty: false
 };
 
 let bgImage = null;
 let undoStack = [];
 let dragging = false;
+let multiDragging = false;  // true when dragging a multi-selection
 let dragStartX = 0, dragStartY = 0;
+let marquee = null;  // {x1, y1, x2, y2} in canvas coords, or null
 
 // --- Data loading ---
 
@@ -175,7 +198,7 @@ function save() {
   fetch(`/api/char/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({strokes: state.strokes})
+    body: JSON.stringify({strokes: stripVertices(state.strokes)})
   }).then(r => r.json()).then(d => {
     if (d.ok) {
       state.dirty = false;
@@ -211,48 +234,46 @@ function undo() {
 
 // --- Processing (server-side) ---
 
-function runConnect() {
+function serverProcess(url, payload, statusMsg, doneMsg) {
+  // Generic server call that preserves vertex points
   pushUndo();
-  setStatus('Connecting...');
-  fetch(`/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+  setStatus(statusMsg);
+  const saved = saveVertexPositions(state.strokes);
+  const body = Object.assign({strokes: stripVertices(state.strokes)}, payload);
+  fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({strokes: state.strokes, max_extension: 8.0, smooth: false})
+    body: JSON.stringify(body)
   }).then(r => r.json()).then(d => {
     if (d.strokes) {
       state.strokes = d.strokes;
+      restoreVertices(state.strokes, saved);
       state.selectedStroke = -1;
       state.selectedPoint = -1;
       state.dirty = true;
       draw();
       updateStrokeList();
-      setStatus('Connected');
+      setStatus(doneMsg);
     } else {
       setStatus('Error: ' + (d.error || 'unknown'));
     }
   });
 }
 
+function runConnect() {
+  serverProcess(
+    `/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`,
+    {max_extension: 8.0, smooth: false},
+    'Connecting...', 'Connected'
+  );
+}
+
 function runSmooth() {
-  pushUndo();
-  setStatus('Smoothing...');
-  fetch(`/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({strokes: state.strokes, max_extension: 8.0, smooth: true, smooth_sigma: 1.5})
-  }).then(r => r.json()).then(d => {
-    if (d.strokes) {
-      state.strokes = d.strokes;
-      state.selectedStroke = -1;
-      state.selectedPoint = -1;
-      state.dirty = true;
-      draw();
-      updateStrokeList();
-      setStatus('Smoothed + connected');
-    } else {
-      setStatus('Error: ' + (d.error || 'unknown'));
-    }
-  });
+  serverProcess(
+    `/api/process/${FONT_ID}?c=${encodeURIComponent(CHAR)}`,
+    {smooth: true, smooth_sigma: 1.5, connect: false},
+    'Smoothing...', 'Smoothed'
+  );
 }
 
 function runDedup() {
@@ -310,6 +331,243 @@ function strokesOverlap(a, b, thresh) {
   return true;
 }
 
+function resampleAdaptive(stroke, baseSpacing) {
+  // Resample a stroke with curvature-adaptive spacing.
+  // Straight sections get fewer points (up to 2x baseSpacing),
+  // curved sections get more points (down to 0.5x baseSpacing).
+  if (stroke.length < 2) return stroke;
+
+  // Step 1: compute cumulative arc length and per-segment curvature
+  const cumLen = [0];
+  for (let i = 1; i < stroke.length; i++) {
+    const dx = stroke[i][0] - stroke[i-1][0];
+    const dy = stroke[i][1] - stroke[i-1][1];
+    cumLen.push(cumLen[i-1] + Math.sqrt(dx * dx + dy * dy));
+  }
+  const totalLen = cumLen[cumLen.length - 1];
+  if (totalLen === 0) return [stroke[0], stroke[0]];
+
+  // Estimate curvature at each original point (angle change per unit length)
+  const curvature = new Array(stroke.length).fill(0);
+  for (let i = 1; i < stroke.length - 1; i++) {
+    const ax = stroke[i][0] - stroke[i-1][0], ay = stroke[i][1] - stroke[i-1][1];
+    const bx = stroke[i+1][0] - stroke[i][0], by = stroke[i+1][1] - stroke[i][1];
+    const lenA = Math.sqrt(ax*ax + ay*ay);
+    const lenB = Math.sqrt(bx*bx + by*by);
+    if (lenA > 0.01 && lenB > 0.01) {
+      // Angle between consecutive segments
+      const dot = (ax*bx + ay*by) / (lenA * lenB);
+      const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+      curvature[i] = angle / ((lenA + lenB) / 2);
+    }
+  }
+
+  // Step 2: walk along the stroke, placing points with adaptive spacing
+  const result = [[stroke[0][0], stroke[0][1]]];
+  let accumulated = 0;
+  let segIdx = 0;
+
+  // Interpolate position at a given arc length
+  function interpAt(len) {
+    while (segIdx < cumLen.length - 2 && cumLen[segIdx + 1] < len) segIdx++;
+    const segLen = cumLen[segIdx + 1] - cumLen[segIdx];
+    const t = segLen > 0 ? (len - cumLen[segIdx]) / segLen : 0;
+    return [
+      stroke[segIdx][0] + t * (stroke[segIdx + 1][0] - stroke[segIdx][0]),
+      stroke[segIdx][1] + t * (stroke[segIdx + 1][1] - stroke[segIdx][1])
+    ];
+  }
+
+  // Sample curvature at a given arc length (interpolate from original points)
+  function curvAt(len) {
+    let si = 0;
+    while (si < cumLen.length - 2 && cumLen[si + 1] < len) si++;
+    const segLen = cumLen[si + 1] - cumLen[si];
+    const t = segLen > 0 ? (len - cumLen[si]) / segLen : 0;
+    return curvature[si] * (1 - t) + curvature[Math.min(si + 1, curvature.length - 1)] * t;
+  }
+
+  let pos = 0;
+  while (pos < totalLen) {
+    // Local curvature determines spacing: high curvature = tighter spacing
+    const k = curvAt(pos);
+    // Map curvature to spacing multiplier: 0 curvature -> 2x, high curvature -> 0.5x
+    const mult = Math.max(0.5, 2.0 - k * 15);
+    const step = baseSpacing * mult;
+    pos += step;
+    if (pos >= totalLen) break;
+    segIdx = 0;  // reset for interpAt search
+    result.push(interpAt(pos));
+  }
+
+  // Always include the last point
+  const last = stroke[stroke.length - 1];
+  result.push([last[0], last[1]]);
+  return result;
+}
+
+function runResample() {
+  if (state.strokes.length === 0) return;
+
+  // Base spacing in coordinate units (224 space).
+  // SDT training: median ~19 pts for typical chars spanning ~100-150 coord units of stroke.
+  // That's roughly 6-8 coord units per point. Use 7 as base spacing.
+  const BASE_SPACING = 7;
+
+  pushUndo();
+  const before = state.strokes.reduce((a, s) => a + s.length, 0);
+  const result = [];
+  for (let i = 0; i < state.strokes.length; i++) {
+    const s = state.strokes[i];
+    if (isDot(s)) {
+      result.push(s);
+      continue;
+    }
+    // Save vertex positions before resampling
+    const verts = [];
+    for (let pi = 0; pi < s.length; pi++) {
+      if (isVertex(s[pi])) verts.push({t: pi / (s.length - 1), x: s[pi][0], y: s[pi][1]});
+    }
+    const resampled = resampleAdaptive(s, BASE_SPACING);
+    // Re-insert vertex points at their nearest position
+    for (const v of verts) {
+      let bestIdx = 0, bestDist = Infinity;
+      for (let ri = 0; ri < resampled.length; ri++) {
+        const dx = resampled[ri][0] - v.x, dy = resampled[ri][1] - v.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) { bestDist = d; bestIdx = ri; }
+      }
+      resampled[bestIdx] = [v.x, v.y, 1];
+    }
+    result.push(resampled);
+  }
+  state.strokes = result;
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedPointEnd = -1;
+  state.selectedMulti = [];
+  state.dirty = true;
+  const after = state.strokes.reduce((a, s) => a + s.length, 0);
+  draw();
+  updateStrokeList();
+  setStatus(`Resampled: ${before} → ${after} points`);
+}
+
+function runScale(factor) {
+  if (state.strokes.length === 0) return;
+  pushUndo();
+
+  // Compute centroid of all points
+  let cx = 0, cy = 0, n = 0;
+  for (const s of state.strokes) {
+    for (const p of s) {
+      cx += p[0]; cy += p[1]; n++;
+    }
+  }
+  cx /= n; cy /= n;
+
+  // Scale non-vertex points around centroid, clamped to coord space
+  for (const s of state.strokes) {
+    for (const p of s) {
+      if (isVertex(p)) continue;
+      p[0] = Math.max(0, Math.min(COORD_SIZE, cx + (p[0] - cx) * factor));
+      p[1] = Math.max(0, Math.min(COORD_SIZE, cy + (p[1] - cy) * factor));
+    }
+  }
+
+  state.dirty = true;
+  draw();
+  const pct = Math.round((factor - 1) * 100);
+  setStatus(`Scaled ${pct > 0 ? '+' : ''}${pct}%`);
+}
+
+function runSnap() {
+  if (state.strokes.length === 0) return;
+  serverProcess(
+    `/api/snap/${FONT_ID}?c=${encodeURIComponent(CHAR)}`,
+    {}, 'Snapping...', 'Snapped to outline'
+  );
+}
+
+function runCenterBorders() {
+  if (state.strokes.length === 0) return;
+  serverProcess(
+    `/api/center-borders/${FONT_ID}?c=${encodeURIComponent(CHAR)}`,
+    {}, 'Centering in strokes...', 'Centered between borders'
+  );
+}
+
+function runCenter() {
+  if (state.strokes.length === 0) return;
+  serverProcess(
+    `/api/center/${FONT_ID}?c=${encodeURIComponent(CHAR)}`,
+    {}, 'Centering...', 'Centered on glyph'
+  );
+}
+
+// --- Vertex helpers ---
+
+function isVertex(point) {
+  return point.length >= 3 && point[2] === 1;
+}
+
+function toggleVertex() {
+  // Toggle vertex on selected point(s)
+  if (state.selectedMulti.length > 0) {
+    pushUndo();
+    for (const m of state.selectedMulti) {
+      const p = state.strokes[m.stroke][m.point];
+      p[2] = isVertex(p) ? 0 : 1;
+    }
+    state.dirty = true;
+    draw();
+    setStatus('Toggled vertex on selected points');
+    return;
+  }
+  if (state.selectedStroke < 0 || state.selectedPoint < 0) {
+    setStatus('Select a point first');
+    return;
+  }
+  pushUndo();
+  const si = state.selectedStroke;
+  const start = state.selectedPoint;
+  const end = state.selectedPointEnd >= 0 ? state.selectedPointEnd : start;
+  for (let pi = start; pi <= end; pi++) {
+    const p = state.strokes[si][pi];
+    p[2] = isVertex(p) ? 0 : 1;
+  }
+  state.dirty = true;
+  draw();
+  setStatus('Toggled vertex');
+}
+
+// Strip vertex flags for DB/server, return clean [x,y] arrays
+function stripVertices(strokes) {
+  return strokes.map(s => s.map(p => [p[0], p[1]]));
+}
+
+// Save vertex positions from current strokes, return a map
+function saveVertexPositions(strokes) {
+  const verts = [];
+  for (let si = 0; si < strokes.length; si++) {
+    for (let pi = 0; pi < strokes[si].length; pi++) {
+      if (isVertex(strokes[si][pi])) {
+        verts.push({stroke: si, point: pi, x: strokes[si][pi][0], y: strokes[si][pi][1]});
+      }
+    }
+  }
+  return verts;
+}
+
+// Restore vertex positions and flags after a server operation
+function restoreVertices(strokes, saved) {
+  for (const v of saved) {
+    if (v.stroke < strokes.length && v.point < strokes[v.stroke].length) {
+      strokes[v.stroke][v.point] = [v.x, v.y, 1];
+    }
+  }
+}
+
 // --- Dot detection ---
 
 function isDot(stroke) {
@@ -339,11 +597,14 @@ function draw() {
     const stroke = state.strokes[si];
     const color = COLORS[si % COLORS.length];
     const selected = (si === state.selectedStroke);
+    const isJoinSource = (state.mode === 'joinStroke' && state.joinFirst && si === state.joinFirst.stroke);
+
+    const inMulti = state.selectedMulti.some(m => m.stroke === si);
 
     if (isDot(stroke)) {
       const cx = stroke[0][0] * SCALE;
       const cy = stroke[0][1] * SCALE;
-      const isSelected = (si === state.selectedStroke);
+      const isSelected = (si === state.selectedStroke) || inMulti;
       const r = isSelected ? 9 : 7;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -353,9 +614,24 @@ function draw() {
       ctx.lineWidth = isSelected ? 2.5 : 1.5;
       ctx.stroke();
     } else if (stroke.length >= 2) {
+      // Draw glow for join source stroke
+      if (isJoinSource) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#ff0';
+        ctx.lineWidth = 6;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        for (let pi = 0; pi < stroke.length; pi++) {
+          const cx = stroke[pi][0] * SCALE;
+          const cy = stroke[pi][1] * SCALE;
+          if (pi === 0) ctx.moveTo(cx, cy);
+          else ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.strokeStyle = color;
-      ctx.lineWidth = selected ? 3 : 2;
+      ctx.lineWidth = selected || isJoinSource ? 3 : 2;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       for (let pi = 0; pi < stroke.length; pi++) {
@@ -369,17 +645,46 @@ function draw() {
       for (let pi = 0; pi < stroke.length; pi++) {
         const cx = stroke[pi][0] * SCALE;
         const cy = stroke[pi][1] * SCALE;
+        const vert = isVertex(stroke[pi]);
         const isSingle = (si === state.selectedStroke && pi === state.selectedPoint && state.selectedPointEnd < 0);
         const inRange = (si === state.selectedStroke && state.selectedPointEnd >= 0 &&
                          pi >= state.selectedPoint && pi <= state.selectedPointEnd);
-        const highlight = isSingle || inRange;
-        ctx.beginPath();
-        ctx.arc(cx, cy, highlight ? 6 : 4, 0, Math.PI * 2);
-        ctx.fillStyle = inRange ? '#f80' : (isSingle ? '#fff' : color);
-        ctx.fill();
-        ctx.strokeStyle = highlight ? '#ff0' : '#000';
-        ctx.lineWidth = highlight ? 2 : 1;
-        ctx.stroke();
+        const isJoinPt = (state.mode === 'joinStroke' && state.joinFirst &&
+                          si === state.joinFirst.stroke && pi === state.joinFirst.point);
+        const isMulti = state.selectedMulti.some(m => m.stroke === si && m.point === pi);
+        const highlight = isSingle || inRange || isJoinPt || isMulti;
+        const r = highlight ? 6 : 4;
+        const fill = isJoinPt ? '#0ff' : (inRange || isMulti) ? '#f80' : (isSingle ? '#fff' : color);
+        const border = highlight ? '#ff0' : (vert ? '#0ff' : '#000');
+        const lw = highlight ? 2 : (vert ? 2 : 1);
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = border;
+        ctx.lineWidth = lw;
+        if (vert) {
+          // Square for vertex points
+          ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+          ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      // Start/End labels
+      if (stroke.length >= 2) {
+        const sx = stroke[0][0] * SCALE, sy = stroke[0][1] * SCALE;
+        const ex = stroke[stroke.length-1][0] * SCALE, ey = stroke[stroke.length-1][1] * SCALE;
+        ctx.font = 'bold 10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Start: green "S"
+        ctx.fillStyle = '#0a0';
+        ctx.fillText('S', sx, sy - 10);
+        // End: red "E"
+        ctx.fillStyle = '#d00';
+        ctx.fillText('E', ex, ey - 10);
       }
     }
   }
@@ -411,6 +716,17 @@ function draw() {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+  }
+
+  // Draw marquee selection rectangle
+  if (marquee) {
+    ctx.strokeStyle = '#7eb8f7';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(marquee.x1, marquee.y1, marquee.x2 - marquee.x1, marquee.y2 - marquee.y1);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(126, 184, 247, 0.1)';
+    ctx.fillRect(marquee.x1, marquee.y1, marquee.x2 - marquee.x1, marquee.y2 - marquee.y1);
   }
 }
 
@@ -450,24 +766,13 @@ function selectStroke(i) {
 function deleteStroke(i) {
   pushUndo();
   state.strokes.splice(i, 1);
-  state.selectedStroke = -1;
-  state.selectedPoint = -1;
-  state.dirty = true;
-  draw();
-  updateStrokeList();
-}
-
-function deleteSelectedPoint() {
-  if (state.selectedStroke < 0 || state.selectedPoint < 0) return;
-  pushUndo();
-  const si = state.selectedStroke;
-  const s = state.strokes[si];
-  const start = state.selectedPoint;
-  const count = state.selectedPointEnd >= 0 ? (state.selectedPointEnd - start + 1) : 1;
-  s.splice(start, count);
-  if (s.length === 0) {
-    state.strokes.splice(si, 1);
+  // Focus the next stroke, or the previous if we deleted the last one
+  if (state.strokes.length === 0) {
     state.selectedStroke = -1;
+  } else if (i < state.strokes.length) {
+    state.selectedStroke = i;
+  } else {
+    state.selectedStroke = state.strokes.length - 1;
   }
   state.selectedPoint = -1;
   state.selectedPointEnd = -1;
@@ -476,13 +781,155 @@ function deleteSelectedPoint() {
   updateStrokeList();
 }
 
+function deleteSelectedPoint() {
+  // Handle multi-selection deletion (marquee)
+  if (state.selectedMulti.length > 0) {
+    pushUndo();
+    // Group by stroke index, sorted descending so splice doesn't shift indices
+    const byStroke = {};
+    for (const m of state.selectedMulti) {
+      if (!byStroke[m.stroke]) byStroke[m.stroke] = [];
+      byStroke[m.stroke].push(m.point);
+    }
+    // Process strokes in reverse order
+    const strokeIndices = Object.keys(byStroke).map(Number).sort((a, b) => b - a);
+    for (const si of strokeIndices) {
+      const pts = byStroke[si].sort((a, b) => b - a);  // reverse order
+      for (const pi of pts) {
+        state.strokes[si].splice(pi, 1);
+      }
+      if (state.strokes[si].length === 0) {
+        state.strokes.splice(si, 1);
+      }
+    }
+    state.selectedMulti = [];
+    state.selectedStroke = -1;
+    state.selectedPoint = -1;
+    state.selectedPointEnd = -1;
+    state.dirty = true;
+    draw();
+    updateStrokeList();
+    return;
+  }
+
+  if (state.selectedStroke < 0 || state.selectedPoint < 0) return;
+  pushUndo();
+  const si = state.selectedStroke;
+  const s = state.strokes[si];
+  const start = state.selectedPoint;
+  const count = state.selectedPointEnd >= 0 ? (state.selectedPointEnd - start + 1) : 1;
+  s.splice(start, count);
+  if (s.length === 0) {
+    // Stroke is now empty, remove it and focus adjacent stroke
+    state.strokes.splice(si, 1);
+    if (state.strokes.length === 0) {
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+    } else if (si < state.strokes.length) {
+      state.selectedStroke = si;
+      state.selectedPoint = -1;
+    } else {
+      state.selectedStroke = state.strokes.length - 1;
+      state.selectedPoint = -1;
+    }
+  } else {
+    // Focus the next point, or the previous if we deleted the last one(s)
+    if (start < s.length) {
+      state.selectedPoint = start;
+    } else {
+      state.selectedPoint = s.length - 1;
+    }
+  }
+  state.selectedPointEnd = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+}
+
+function splitStroke() {
+  if (state.selectedStroke < 0 || state.selectedPoint < 0) {
+    setStatus('Select a point to split at');
+    return;
+  }
+  const si = state.selectedStroke;
+  const pi = state.selectedPoint;
+  const s = state.strokes[si];
+
+  if (pi === 0 || pi >= s.length - 1) {
+    setStatus('Select a mid-stroke point to split at');
+    return;
+  }
+
+  pushUndo();
+  const first = s.slice(0, pi + 1);
+  const second = s.slice(pi);
+
+  state.strokes.splice(si, 1, first, second);
+  state.selectedStroke = si + 1;
+  state.selectedPoint = 0;
+  state.selectedPointEnd = -1;
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+  setStatus(`Split into ${first.length} + ${second.length} points`);
+}
+
+function startJoin() {
+  state.joinFirst = null;
+  setMode('joinStroke');
+  setStatus('Click a point on the first stroke');
+}
+
+function joinStrokes(firstHit, secondHit) {
+  // firstHit/secondHit = {stroke, point}
+  if (firstHit.stroke === secondHit.stroke) {
+    setStatus('Must pick points on different strokes');
+    return;
+  }
+
+  pushUndo();
+  const si1 = firstHit.stroke, pi1 = firstHit.point;
+  const si2 = secondHit.stroke, pi2 = secondHit.point;
+  const s1 = state.strokes[si1];
+  const s2 = state.strokes[si2];
+
+  // Orient stroke 1 so clicked point (pi1) is at the END
+  // If pi1 is closer to start, reverse the stroke
+  const a = pi1 <= s1.length - 1 - pi1 ? [...s1].reverse() : [...s1];
+
+  // Orient stroke 2 so clicked point (pi2) is at the START
+  // If pi2 is closer to end, reverse the stroke
+  const b = pi2 >= s2.length - 1 - pi2 ? [...s2].reverse() : [...s2];
+
+  const joined = a.concat(b).map(p => [p[0], p[1]]);
+
+  // Remove both originals (higher index first)
+  const hi = Math.max(si1, si2);
+  const lo = Math.min(si1, si2);
+  state.strokes.splice(hi, 1);
+  state.strokes.splice(lo, 1);
+  state.strokes.splice(lo, 0, joined);
+
+  state.selectedStroke = lo;
+  state.selectedPoint = -1;
+  state.selectedPointEnd = -1;
+  state.joinFirst = null;
+  state.dirty = true;
+  setMode('select');
+  draw();
+  updateStrokeList();
+  setStatus(`Joined strokes (${joined.length} points)`);
+}
+
 function setMode(mode) {
   state.mode = mode;
   state.newStrokePoints = [];
+  if (mode !== 'joinStroke') state.joinFirst = null;
   document.getElementById('btnSelect').classList.toggle('active', mode === 'select');
   document.getElementById('btnAddStroke').classList.toggle('active', mode === 'addStroke');
   document.getElementById('btnDeleteStroke').classList.toggle('active', mode === 'deleteStroke');
-  canvas.style.cursor = mode === 'select' ? 'crosshair' : mode === 'addStroke' ? 'copy' : 'not-allowed';
+  document.getElementById('btnJoin').classList.toggle('active', mode === 'joinStroke');
+  canvas.style.cursor = mode === 'select' ? 'crosshair' : mode === 'addStroke' ? 'copy' : mode === 'joinStroke' ? 'alias' : 'not-allowed';
   draw();
 }
 
@@ -554,10 +1001,22 @@ canvas.addEventListener('mousedown', e => {
         updateStrokeList();
         return;
       }
+      // If clicking a point that's in the multi-selection, start multi-drag
+      if (state.selectedMulti.length > 0 &&
+          state.selectedMulti.some(m => m.stroke === hit.stroke && m.point === hit.point)) {
+        pushUndo();
+        multiDragging = true;
+        dragging = true;
+        dragStartX = mx;
+        dragStartY = my;
+        return;
+      }
       pushUndo();
       state.selectedStroke = hit.stroke;
       state.selectedPoint = hit.point;
       state.selectedPointEnd = -1;
+      state.selectedMulti = [];
+      multiDragging = false;
       dragging = true;
       dragStartX = mx;
       dragStartY = my;
@@ -575,6 +1034,7 @@ canvas.addEventListener('mousedown', e => {
       state.selectedStroke = seg.stroke;
       state.selectedPoint = seg.after + 1;
       state.selectedPointEnd = -1;
+      state.selectedMulti = [];
       state.dirty = true;
       dragging = true;
       draw();
@@ -582,9 +1042,13 @@ canvas.addEventListener('mousedown', e => {
       return;
     }
 
+    // Start marquee selection on empty space
     state.selectedStroke = -1;
     state.selectedPoint = -1;
     state.selectedPointEnd = -1;
+    state.selectedMulti = [];
+    marquee = {x1: mx, y1: my, x2: mx, y2: my};
+    dragging = true;
     draw();
     updateStrokeList();
 
@@ -597,22 +1061,36 @@ canvas.addEventListener('mousedown', e => {
   } else if (state.mode === 'deleteStroke') {
     const hit = findPoint(mx, my, 15);
     if (hit) {
-      pushUndo();
-      state.strokes.splice(hit.stroke, 1);
-      state.dirty = true;
-      draw();
-      updateStrokeList();
+      deleteStroke(hit.stroke);
       setMode('select');
       return;
     }
     const seg = findNearestSegment(mx, my, 15);
     if (seg) {
-      pushUndo();
-      state.strokes.splice(seg.stroke, 1);
-      state.dirty = true;
+      deleteStroke(seg.stroke);
+      setMode('select');
+    }
+
+  } else if (state.mode === 'joinStroke') {
+    const hit = findPoint(mx, my);
+    if (!hit) return;
+
+    if (!state.joinFirst) {
+      // First click: remember the point
+      state.joinFirst = {stroke: hit.stroke, point: hit.point};
+      state.selectedStroke = hit.stroke;
+      state.selectedPoint = hit.point;
+      state.selectedPointEnd = -1;
       draw();
       updateStrokeList();
-      setMode('select');
+      setStatus('Now click a point on the second stroke');
+    } else {
+      // Second click: join
+      if (hit.stroke === state.joinFirst.stroke) {
+        setStatus('Must pick a point on a different stroke');
+        return;
+      }
+      joinStrokes(state.joinFirst, hit);
     }
   }
 });
@@ -623,6 +1101,28 @@ canvas.addEventListener('mousemove', e => {
   const mx = (e.clientX - rect.left) * (CANVAS_SIZE / rect.width);
   const my = (e.clientY - rect.top) * (CANVAS_SIZE / rect.height);
 
+  if (marquee) {
+    marquee.x2 = mx;
+    marquee.y2 = my;
+    draw();
+    return;
+  }
+
+  if (multiDragging && state.selectedMulti.length > 0) {
+    const dx = (mx - dragStartX) / SCALE;
+    const dy = (my - dragStartY) / SCALE;
+    for (const m of state.selectedMulti) {
+      const p = state.strokes[m.stroke][m.point];
+      p[0] = Math.max(0, Math.min(COORD_SIZE, p[0] + dx));
+      p[1] = Math.max(0, Math.min(COORD_SIZE, p[1] + dy));
+    }
+    dragStartX = mx;
+    dragStartY = my;
+    state.dirty = true;
+    draw();
+    return;
+  }
+
   if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
     const coordX = Math.max(0, Math.min(COORD_SIZE, mx / SCALE));
     const coordY = Math.max(0, Math.min(COORD_SIZE, my / SCALE));
@@ -632,8 +1132,52 @@ canvas.addEventListener('mousemove', e => {
   }
 });
 
-canvas.addEventListener('mouseup', () => { dragging = false; });
-canvas.addEventListener('mouseleave', () => { dragging = false; });
+canvas.addEventListener('mouseup', () => {
+  if (marquee) {
+    // Normalize rectangle bounds
+    const left = Math.min(marquee.x1, marquee.x2) / SCALE;
+    const right = Math.max(marquee.x1, marquee.x2) / SCALE;
+    const top = Math.min(marquee.y1, marquee.y2) / SCALE;
+    const bottom = Math.max(marquee.y1, marquee.y2) / SCALE;
+
+    // Only select if dragged a meaningful distance (> 5 canvas pixels)
+    const w = Math.abs(marquee.x2 - marquee.x1);
+    const h = Math.abs(marquee.y2 - marquee.y1);
+    if (w > 5 || h > 5) {
+      // Find all points inside the rectangle
+      const multi = [];
+      for (let si = 0; si < state.strokes.length; si++) {
+        for (let pi = 0; pi < state.strokes[si].length; pi++) {
+          const px = state.strokes[si][pi][0];
+          const py = state.strokes[si][pi][1];
+          if (px >= left && px <= right && py >= top && py <= bottom) {
+            multi.push({stroke: si, point: pi});
+          }
+        }
+      }
+      state.selectedMulti = multi;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedPointEnd = -1;
+      if (multi.length > 0) {
+        setStatus(`${multi.length} points selected`);
+      }
+    }
+    marquee = null;
+    draw();
+    updateStrokeList();
+  }
+  dragging = false;
+  multiDragging = false;
+});
+canvas.addEventListener('mouseleave', () => {
+  if (marquee) {
+    marquee = null;
+    draw();
+  }
+  dragging = false;
+  multiDragging = false;
+});
 
 // --- Keyboard handlers ---
 
@@ -657,9 +1201,36 @@ document.addEventListener('keydown', e => {
   if (hasModifier) return;
 
   switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
+        e.preventDefault();
+        const s1 = state.strokes[state.selectedStroke];
+        if (state.selectedPoint < s1.length - 1) {
+          state.selectedPoint++;
+          state.selectedPointEnd = -1;
+          draw();
+          updateStrokeList();
+        }
+      }
+      break;
+
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
+        e.preventDefault();
+        if (state.selectedPoint > 0) {
+          state.selectedPoint--;
+          state.selectedPointEnd = -1;
+          draw();
+          updateStrokeList();
+        }
+      }
+      break;
+
     case 'Delete':
     case 'Backspace':
-      if (state.selectedStroke >= 0 && state.selectedPoint >= 0) {
+      if (state.selectedMulti.length > 0 || (state.selectedStroke >= 0 && state.selectedPoint >= 0)) {
         e.preventDefault();
         deleteSelectedPoint();
       }
@@ -673,6 +1244,7 @@ document.addEventListener('keydown', e => {
         state.selectedStroke = -1;
         state.selectedPoint = -1;
         state.selectedPointEnd = -1;
+        state.selectedMulti = [];
         draw();
         updateStrokeList();
       }
@@ -698,10 +1270,20 @@ document.addEventListener('keydown', e => {
     case 'v': setMode('select'); break;
     case 'a': setMode('addStroke'); break;
     case 'x': setMode('deleteStroke'); break;
+    case 'b': splitStroke(); break;
+    case 't': toggleVertex(); break;
+    case 'j': startJoin(); break;
+    case 'n': runSnap(); break;
+    case 'm': runCenterBorders(); break;
+    case 'o': runCenter(); break;
     case 'd': runDedup(); break;
     case 'c': runConnect(); break;
     case 'g': runSmooth(); break;
+    case 'e': runResample(); break;
     case 'r': reloadChar(); break;
+    case '=':
+    case '+': runScale(1.03); break;
+    case '-': runScale(1/1.03); break;
     case '[': navigateChar(-1); break;
     case ']': navigateChar(1); break;
   }
