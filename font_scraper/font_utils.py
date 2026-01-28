@@ -211,15 +211,24 @@ class FontScorer:
 
 
 class CursiveDetector:
-    """Detect connected/cursive fonts using stroke connectivity analysis."""
+    """
+    Detect connected/cursive fonts using multiple methods:
+    1. Stroke connectivity analysis - counts connected components
+    2. Contextual glyph comparison - compares isolated vs in-word characters
 
-    def __init__(self, threshold: float = 0.7):
+    Fonts with contextual alternates (different glyphs based on position)
+    are problematic for single-character training even if letters don't
+    visually connect.
+    """
+
+    def __init__(self, connectivity_threshold: float = 0.7, context_threshold: float = 0.15):
         """
         Args:
-            threshold: Connectivity score above this = cursive.
-                       0 = all letters separate, 1 = all letters connected.
+            connectivity_threshold: Score above this = cursive (connectivity method)
+            context_threshold: Difference above this = has contextual alternates
         """
-        self.threshold = threshold
+        self.connectivity_threshold = connectivity_threshold
+        self.context_threshold = context_threshold
 
     def check(self, font_path: str, test_word: str = "minimum") -> Tuple[bool, float]:
         """
@@ -280,12 +289,257 @@ class CursiveDetector:
                 # At or above expected = print or fragmented
                 connectivity_score = 0.0
 
-            is_cursive = connectivity_score >= self.threshold
+            is_cursive = connectivity_score >= self.connectivity_threshold
 
             return is_cursive, connectivity_score
 
         except Exception:
             return False, 0.0
+
+    def check_contextual(
+        self,
+        font_path: str,
+        test_chars: str = "aeimnou"
+    ) -> Tuple[bool, float, Dict[str, float]]:
+        """
+        Detect contextual alternates by comparing isolated vs in-word glyphs.
+
+        Cursive fonts often have different glyphs depending on position:
+        - Initial (start of word)
+        - Medial (middle of word)
+        - Final (end of word)
+        - Isolated
+
+        Args:
+            font_path: Path to font file
+            test_chars: Characters to test (lowercase letters common in cursive)
+
+        Returns:
+            Tuple of (has_contextual, avg_difference, per_char_differences)
+        """
+        try:
+            font = ImageFont.truetype(font_path, 64)
+        except Exception:
+            return False, 0.0, {}
+
+        differences = {}
+
+        for char in test_chars:
+            try:
+                diff = self._compare_glyph_contexts(font, char)
+                if diff is not None:
+                    differences[char] = diff
+            except Exception:
+                continue
+
+        if not differences:
+            return False, 0.0, {}
+
+        avg_diff = sum(differences.values()) / len(differences)
+        has_contextual = avg_diff >= self.context_threshold
+
+        return has_contextual, avg_diff, differences
+
+    def _compare_glyph_contexts(self, font: ImageFont.FreeTypeFont, char: str) -> Optional[float]:
+        """
+        Compare a character in two different word contexts.
+
+        For print fonts, 'a' in "oao" should look identical to 'a' in "nan".
+        For cursive fonts with contextual alternates, they'll differ based on
+        surrounding characters.
+
+        Returns normalized difference (0 = identical, 1 = completely different)
+        """
+        size = 64
+        padding = 10
+
+        # Use two different surrounding contexts
+        # Context 1: surrounded by round letters
+        context1 = f"o{char}o"
+        # Context 2: surrounded by letters with vertical strokes
+        context2 = f"n{char}n"
+
+        img1 = self._extract_char_from_word(font, context1, 1, size, padding)
+        if img1 is None:
+            return None
+
+        img2 = self._extract_char_from_word(font, context2, 1, size, padding)
+        if img2 is None:
+            return None
+
+        # Compare the same character in different contexts
+        diff = self._image_difference(img1, img2)
+
+        return diff
+
+    def _render_char_isolated(
+        self,
+        font: ImageFont.FreeTypeFont,
+        char: str,
+        size: int,
+        padding: int
+    ) -> Optional[np.ndarray]:
+        """Render a single character in isolation."""
+        try:
+            # Get bounds
+            temp_img = Image.new('L', (size * 2, size * 2), 255)
+            temp_draw = ImageDraw.Draw(temp_img)
+            bbox = temp_draw.textbbox((0, 0), char, font=font)
+
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+
+            if width <= 0 or height <= 0:
+                return None
+
+            # Render centered in a square
+            img_size = max(width, height) + padding * 2
+            img = Image.new('L', (img_size, img_size), 255)
+            draw = ImageDraw.Draw(img)
+
+            x = (img_size - width) // 2 - bbox[0]
+            y = (img_size - height) // 2 - bbox[1]
+            draw.text((x, y), char, font=font, fill=0)
+
+            # Normalize to standard size
+            img = img.resize((size, size), Image.LANCZOS)
+
+            return np.array(img)
+
+        except Exception:
+            return None
+
+    def _extract_char_from_word(
+        self,
+        font: ImageFont.FreeTypeFont,
+        word: str,
+        char_index: int,
+        size: int,
+        padding: int
+    ) -> Optional[np.ndarray]:
+        """Extract a specific character from a rendered word."""
+        try:
+            # Get full word bounds for rendering
+            temp_img = Image.new('L', (500, 200), 255)
+            temp_draw = ImageDraw.Draw(temp_img)
+            word_bbox = temp_draw.textbbox((0, 0), word, font=font)
+
+            # Use getlength() for accurate advance width positioning
+            prefix = word[:char_index]
+            target_char = word[char_index]
+
+            # Calculate positions using advance widths
+            prefix_width = font.getlength(prefix) if prefix else 0
+            char_width = font.getlength(target_char)
+
+            # Render full word
+            word_width = int(font.getlength(word)) + padding * 2
+            word_height = word_bbox[3] - word_bbox[1] + padding * 2
+
+            img = Image.new('L', (word_width, word_height), 255)
+            draw = ImageDraw.Draw(img)
+            draw.text((padding - word_bbox[0], padding - word_bbox[1]), word, font=font, fill=0)
+
+            # Calculate character bounds using advance widths
+            # Offset by word_bbox[0] to account for left bearing
+            char_left = int(prefix_width) + padding - word_bbox[0]
+            char_right = int(prefix_width + char_width) + padding - word_bbox[0]
+
+            # Small margin for safety
+            margin = 1
+            char_left = max(0, char_left - margin)
+            char_right = min(word_width, char_right + margin)
+
+            # Extract character region
+            char_img = img.crop((char_left, 0, char_right, word_height))
+
+            # Find actual ink bounds
+            arr = np.array(char_img)
+            ink_rows = np.any(arr < 200, axis=1)
+            ink_cols = np.any(arr < 200, axis=0)
+
+            if not np.any(ink_rows) or not np.any(ink_cols):
+                return None
+
+            row_min, row_max = np.where(ink_rows)[0][[0, -1]]
+            col_min, col_max = np.where(ink_cols)[0][[0, -1]]
+
+            # Crop to ink bounds with padding
+            pad = 2
+            row_min = max(0, row_min - pad)
+            row_max = min(arr.shape[0], row_max + pad + 1)
+            col_min = max(0, col_min - pad)
+            col_max = min(arr.shape[1], col_max + pad + 1)
+
+            cropped = arr[row_min:row_max, col_min:col_max]
+
+            # Resize to standard size
+            cropped_img = Image.fromarray(cropped)
+            cropped_img = cropped_img.resize((size, size), Image.LANCZOS)
+
+            return np.array(cropped_img)
+
+        except Exception:
+            return None
+
+    def _image_difference(self, img1: np.ndarray, img2: np.ndarray) -> float:
+        """
+        Calculate normalized difference between two images using perceptual hash.
+
+        Returns value from 0 (identical) to 1 (very different).
+        Uses imagehash for robust comparison that handles scale/position differences.
+        """
+        # Convert to PIL images
+        pil1 = Image.fromarray(img1)
+        pil2 = Image.fromarray(img2)
+
+        # Compute perceptual hashes
+        hash1 = imagehash.phash(pil1, hash_size=16)
+        hash2 = imagehash.phash(pil2, hash_size=16)
+
+        # Hamming distance (0 = identical, 256 = completely different for hash_size=16)
+        distance = hash1 - hash2
+
+        # Normalize to 0-1 range
+        # hash_size=16 means 256 bits, so max distance is 256
+        max_distance = 16 * 16
+        normalized = distance / max_distance
+
+        return normalized
+
+    def check_all(self, font_path: str) -> Dict:
+        """
+        Run all cursive detection methods and return combined result.
+
+        Returns dict with:
+            - is_cursive: bool (True if ANY method flags it)
+            - connectivity_score: float
+            - contextual_score: float
+            - contextual_details: dict per-character differences
+            - method: which method(s) flagged it
+        """
+        # Run connectivity check
+        is_cursive_conn, conn_score = self.check(font_path)
+
+        # Run contextual check
+        has_contextual, ctx_score, ctx_details = self.check_contextual(font_path)
+
+        # Combine results
+        is_cursive = is_cursive_conn or has_contextual
+
+        methods = []
+        if is_cursive_conn:
+            methods.append('connectivity')
+        if has_contextual:
+            methods.append('contextual')
+
+        return {
+            'is_cursive': is_cursive,
+            'connectivity_score': conn_score,
+            'contextual_score': ctx_score,
+            'contextual_details': ctx_details,
+            'methods': methods
+        }
 
 
 class CompletenessChecker:
@@ -452,12 +706,20 @@ def quick_test():
     if missing:
         print(f"Missing ({len(missing)}): {missing[:10]}{'...' if len(missing) > 10 else ''}")
 
-    # Cursive detection
+    # Cursive detection (both methods)
     print("\n=== Cursive Detection ===")
     detector = CursiveDetector()
-    is_cursive, connectivity = detector.check(font_path)
-    print(f"Connectivity: {connectivity:.2f}")
-    print(f"Is cursive: {is_cursive}")
+    result = detector.check_all(font_path)
+    print(f"Connectivity score: {result['connectivity_score']:.2f}")
+    print(f"Contextual score: {result['contextual_score']:.2f}")
+    if result['contextual_details']:
+        details = ', '.join(f"{k}:{v:.2f}" for k, v in list(result['contextual_details'].items())[:5])
+        print(f"  Per-char: {details}")
+    print(f"Is cursive: {result['is_cursive']}", end="")
+    if result['methods']:
+        print(f" (flagged by: {', '.join(result['methods'])})")
+    else:
+        print()
 
     # Scoring
     print("\n=== Font Scoring ===")
