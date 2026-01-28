@@ -48,9 +48,27 @@ Some characters have suspiciously few points - InkSight failed to trace them pro
 3. Re-run failed characters with different settings
 4. Use quality_score field to track
 
+### Inconsistent Coordinate Sizes
+InkSight outputs vary significantly in bounding box size:
+
+**Examples:**
+- 'B' ranges from 2×15 (failed) to 123×35 (good)
+- Same font: 'A'=24×34, 'B'=121×31, 'O'=23×123
+
+**Problems:**
+- No consistent normalization to 0-224 space
+- Tiny bounding boxes indicate tracing failures
+- Makes training data inconsistent
+
+**Solutions:**
+1. Normalize all strokes to consistent coordinate space (0-224)
+2. Filter characters with bounding box < 10×10 as failed
+3. Flag characters where width/height ratio is extreme
+
 ### Post-Processing Quality Checks
 - Filter space character (shows 508 pts of noise - should be empty)
 - Validate stroke count makes sense for character
+- Validate bounding box size is reasonable
 - OCR validation on rendered strokes
 
 ## Next Steps After Current Run
