@@ -69,3 +69,55 @@ Each scraper creates:
 - **FontSpace**: Mixed - many free for personal use
 
 For commercial use, filter to fonts with appropriate licenses.
+
+## Docker-based InkSight Vectorization
+
+For GPU-accelerated font vectorization using InkSight, use the Docker containers. This isolates TensorFlow (InkSight) and PyTorch (TrOCR) to avoid dependency conflicts.
+
+### Setup
+
+```bash
+# Build both containers (requires NVIDIA Docker runtime)
+./docker/build.sh
+
+# Or build individually
+docker build -t inksight:latest docker/inksight
+docker build -t trocr:latest docker/trocr
+```
+
+### Usage
+
+```python
+from docker.inksight_docker import InkSightDocker
+
+# Initialize (checks Docker availability)
+inksight = InkSightDocker()
+
+# Process single word
+result = inksight.process('fonts/dafont/MyFont.ttf', 'hello')
+print(f"Strokes: {result['num_strokes']}, Points: {result['total_points']}")
+
+# Save visualization
+result = inksight.process('fonts/dafont/MyFont.ttf', 'hello',
+                          output_image='output.png')
+
+# Batch process (more efficient for multiple words)
+results = inksight.batch_process('fonts/dafont/MyFont.ttf',
+                                  ['hello', 'world', 'test'])
+```
+
+### Requirements
+
+- Docker with NVIDIA runtime (`nvidia-docker2`)
+- GPU with CUDA support
+- InkSight model at `/home/server/inksight/model` (or specify custom path)
+
+### Testing
+
+```bash
+# Quick test
+./docker/run_test.sh
+
+# Or manually
+python docker/test_inksight.py
+```
