@@ -221,7 +221,7 @@ class CursiveDetector:
     visually connect.
     """
 
-    def __init__(self, connectivity_threshold: float = 0.7, context_threshold: float = 0.15):
+    def __init__(self, connectivity_threshold: float = 0.7, context_threshold: float = 0.10):
         """
         Args:
             connectivity_threshold: Score above this = cursive (connectivity method)

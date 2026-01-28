@@ -34,6 +34,22 @@ CREATE TABLE IF NOT EXISTS fonts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Removal reasons lookup table
+CREATE TABLE IF NOT EXISTS removal_reasons (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,  -- 'incomplete', 'duplicate', 'cursive', 'ocr_fail', 'manual', etc.
+    description TEXT
+);
+
+-- Track removed fonts and why
+CREATE TABLE IF NOT EXISTS font_removals (
+    id INTEGER PRIMARY KEY,
+    font_id INTEGER REFERENCES fonts(id),
+    reason_id INTEGER REFERENCES removal_reasons(id),
+    details TEXT,  -- Additional context (e.g., "duplicate of font_id 123")
+    removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Font quality checks
 CREATE TABLE IF NOT EXISTS font_checks (
     id INTEGER PRIMARY KEY,
@@ -50,6 +66,7 @@ CREATE TABLE IF NOT EXISTS font_checks (
 
     -- Cursive detection
     connectivity_score REAL,
+    contextual_score REAL,
     is_cursive BOOLEAN,
 
     -- OCR prefilter
@@ -75,10 +92,10 @@ CREATE TABLE IF NOT EXISTS characters (
     strokes_processed TEXT,  -- JSON
     point_count INTEGER,
 
-    -- Validation
-    ocr_result TEXT,
-    ocr_confidence REAL,
-    ocr_match BOOLEAN,
+    -- Best OCR result (denormalized for quick access)
+    best_ocr_result TEXT,
+    best_ocr_confidence REAL,
+    best_ocr_match BOOLEAN,
 
     -- Quality
     quality_score REAL,
@@ -87,6 +104,37 @@ CREATE TABLE IF NOT EXISTS characters (
 
     UNIQUE(font_id, char)
 );
+
+-- OCR run history per character
+CREATE TABLE IF NOT EXISTS ocr_runs (
+    id INTEGER PRIMARY KEY,
+    character_id INTEGER REFERENCES characters(id),
+
+    -- What was OCR'd
+    stage TEXT NOT NULL,  -- 'raw_strokes', 'processed_strokes', 'prefilter'
+    image_path TEXT,
+
+    -- Results
+    ocr_result TEXT,
+    ocr_confidence REAL,
+    ocr_match BOOLEAN,
+
+    -- Metadata
+    model TEXT,  -- 'trocr', 'tesseract', etc.
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pre-populate removal reasons
+INSERT OR IGNORE INTO removal_reasons (code, description) VALUES
+    ('incomplete', 'Missing required glyphs'),
+    ('duplicate', 'Duplicate of another font'),
+    ('cursive', 'Cursive/connected letterforms'),
+    ('contextual', 'Has contextual alternates'),
+    ('ocr_prefilter', 'Failed OCR prefilter'),
+    ('ocr_validation', 'Failed OCR validation after processing'),
+    ('low_quality', 'Quality score below threshold'),
+    ('manual', 'Manually rejected during review'),
+    ('load_error', 'Could not load font file');
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_fonts_source ON fonts(source);
@@ -98,6 +146,10 @@ CREATE INDEX IF NOT EXISTS idx_font_checks_duplicate ON font_checks(is_duplicate
 CREATE INDEX IF NOT EXISTS idx_characters_font ON characters(font_id);
 CREATE INDEX IF NOT EXISTS idx_characters_quality ON characters(quality_score);
 CREATE INDEX IF NOT EXISTS idx_characters_char ON characters(char);
+CREATE INDEX IF NOT EXISTS idx_font_removals_font ON font_removals(font_id);
+CREATE INDEX IF NOT EXISTS idx_font_removals_reason ON font_removals(reason_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_runs_character ON ocr_runs(character_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_runs_stage ON ocr_runs(stage);
 """
 
 
@@ -333,6 +385,135 @@ class FontDB:
             ORDER BY avg_quality DESC
             LIMIT ?
         """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def add_ocr_run(
+        self,
+        character_id: int,
+        stage: str,
+        ocr_result: Optional[str] = None,
+        ocr_confidence: Optional[float] = None,
+        ocr_match: Optional[bool] = None,
+        image_path: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> int:
+        """
+        Record an OCR run for a character.
+
+        Args:
+            character_id: Foreign key to characters table
+            stage: 'raw_strokes', 'processed_strokes', or 'prefilter'
+            ocr_result: The text OCR detected
+            ocr_confidence: Confidence score 0-1
+            ocr_match: Whether it matched the expected character
+            image_path: Path to the image that was OCR'd
+            model: OCR model used ('trocr', 'tesseract', etc.)
+
+        Returns:
+            ocr_run id
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO ocr_runs (character_id, stage, ocr_result, ocr_confidence,
+                                  ocr_match, image_path, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (character_id, stage, ocr_result, ocr_confidence, ocr_match,
+              image_path, model))
+        self.conn.commit()
+
+        # Update best result on character if this is better
+        if ocr_confidence is not None:
+            cursor.execute("""
+                UPDATE characters
+                SET best_ocr_result = ?,
+                    best_ocr_confidence = ?,
+                    best_ocr_match = ?
+                WHERE id = ?
+                  AND (best_ocr_confidence IS NULL OR best_ocr_confidence < ?)
+            """, (ocr_result, ocr_confidence, ocr_match, character_id, ocr_confidence))
+            self.conn.commit()
+
+        return cursor.lastrowid
+
+    def remove_font(
+        self,
+        font_id: int,
+        reason_code: str,
+        details: Optional[str] = None
+    ):
+        """
+        Record that a font was removed from the pipeline.
+
+        Args:
+            font_id: The font being removed
+            reason_code: One of the codes in removal_reasons table
+            details: Additional context
+        """
+        cursor = self.conn.cursor()
+
+        # Get reason_id
+        cursor.execute(
+            "SELECT id FROM removal_reasons WHERE code = ?",
+            (reason_code,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Unknown removal reason: {reason_code}")
+        reason_id = row[0]
+
+        cursor.execute("""
+            INSERT INTO font_removals (font_id, reason_id, details)
+            VALUES (?, ?, ?)
+        """, (font_id, reason_id, details))
+        self.conn.commit()
+
+    def get_removed_fonts(self, reason_code: Optional[str] = None) -> list:
+        """Get list of removed fonts, optionally filtered by reason."""
+        cursor = self.conn.cursor()
+
+        if reason_code:
+            cursor.execute("""
+                SELECT f.*, rr.code as reason_code, rr.description as reason_desc,
+                       fr.details, fr.removed_at
+                FROM font_removals fr
+                JOIN fonts f ON fr.font_id = f.id
+                JOIN removal_reasons rr ON fr.reason_id = rr.id
+                WHERE rr.code = ?
+                ORDER BY fr.removed_at DESC
+            """, (reason_code,))
+        else:
+            cursor.execute("""
+                SELECT f.*, rr.code as reason_code, rr.description as reason_desc,
+                       fr.details, fr.removed_at
+                FROM font_removals fr
+                JOIN fonts f ON fr.font_id = f.id
+                JOIN removal_reasons rr ON fr.reason_id = rr.id
+                ORDER BY fr.removed_at DESC
+            """)
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_removal_stats(self) -> dict:
+        """Get counts of removed fonts by reason."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT rr.code, rr.description, COUNT(fr.id) as count
+            FROM removal_reasons rr
+            LEFT JOIN font_removals fr ON rr.id = fr.reason_id
+            GROUP BY rr.id
+            ORDER BY count DESC
+        """)
+        return {row['code']: {'description': row['description'], 'count': row['count']}
+                for row in cursor.fetchall()}
+
+    def get_ocr_history(self, character_id: int) -> list:
+        """Get all OCR runs for a character."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM ocr_runs
+            WHERE character_id = ?
+            ORDER BY created_at DESC
+        """, (character_id,))
         return [dict(row) for row in cursor.fetchall()]
 
 

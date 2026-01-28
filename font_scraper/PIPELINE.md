@@ -242,14 +242,32 @@ CREATE TABLE fonts (
     category TEXT,
     license TEXT,
     variant TEXT,  -- 'Regular', 'Bold', 'Italic', etc.
-    file_path TEXT NOT NULL,
+    file_path TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Removal reasons lookup table
+CREATE TABLE removal_reasons (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,  -- 'incomplete', 'duplicate', 'cursive', etc.
+    description TEXT
+);
+-- Pre-populated: incomplete, duplicate, cursive, contextual, ocr_prefilter,
+--                ocr_validation, low_quality, manual, load_error
+
+-- Track removed fonts and why
+CREATE TABLE font_removals (
+    id INTEGER PRIMARY KEY,
+    font_id INTEGER REFERENCES fonts(id),
+    reason_id INTEGER REFERENCES removal_reasons(id),
+    details TEXT,  -- Additional context (e.g., "duplicate of font_id 123")
+    removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Font quality checks
 CREATE TABLE font_checks (
     id INTEGER PRIMARY KEY,
-    font_id INTEGER REFERENCES fonts(id),
+    font_id INTEGER UNIQUE REFERENCES fonts(id),
 
     -- Completeness
     completeness_score REAL,
@@ -262,6 +280,7 @@ CREATE TABLE font_checks (
 
     -- Cursive detection
     connectivity_score REAL,
+    contextual_score REAL,
     is_cursive BOOLEAN,
 
     -- OCR prefilter
@@ -287,10 +306,10 @@ CREATE TABLE characters (
     strokes_processed TEXT,  -- JSON
     point_count INTEGER,
 
-    -- Validation
-    ocr_result TEXT,
-    ocr_confidence REAL,
-    ocr_match BOOLEAN,
+    -- Best OCR result (denormalized for quick access)
+    best_ocr_result TEXT,
+    best_ocr_confidence REAL,
+    best_ocr_match BOOLEAN,
 
     -- Quality
     quality_score REAL,
@@ -300,13 +319,24 @@ CREATE TABLE characters (
     UNIQUE(font_id, char)
 );
 
--- Indexes for common queries
-CREATE INDEX idx_fonts_source ON fonts(source);
-CREATE INDEX idx_fonts_category ON fonts(category);
-CREATE INDEX idx_font_checks_cursive ON font_checks(is_cursive);
-CREATE INDEX idx_font_checks_passed ON font_checks(prefilter_passed);
-CREATE INDEX idx_characters_quality ON characters(quality_score);
-CREATE INDEX idx_characters_font ON characters(font_id);
+-- OCR run history per character
+CREATE TABLE ocr_runs (
+    id INTEGER PRIMARY KEY,
+    character_id INTEGER REFERENCES characters(id),
+
+    -- What was OCR'd
+    stage TEXT NOT NULL,  -- 'raw_strokes', 'processed_strokes', 'prefilter'
+    image_path TEXT,
+
+    -- Results
+    ocr_result TEXT,
+    ocr_confidence REAL,
+    ocr_match BOOLEAN,
+
+    -- Metadata
+    model TEXT,  -- 'trocr', 'tesseract', etc.
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ---
