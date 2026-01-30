@@ -8,7 +8,8 @@
   a { color: #7eb8f7; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .nav { margin-bottom: 15px; }
-  h1 { margin-bottom: 5px; }
+  .header { display: flex; align-items: center; gap: 15px; margin-bottom: 5px; }
+  h1 { margin: 0; }
   .subtitle { color: #888; margin-bottom: 20px; }
   .grid { display: flex; flex-wrap: wrap; gap: 8px; max-width: 900px; }
   .cell {
@@ -19,21 +20,107 @@
   .cell:hover { border-color: #7eb8f7; }
   .cell .label { position: absolute; top: 2px; right: 4px; font-size: 10px; color: #555; }
   .cell .pts { position: absolute; bottom: 2px; right: 4px; font-size: 9px; color: #555; }
+  .cell.no-strokes { opacity: 0.5; border-style: dashed; }
+  .cell.preview { width: 224px; height: 224px; padding: 0; }
+  .cell.preview img { width: 100%; height: 100%; object-fit: contain; }
+  .cell.preview .char-label { display: none; }
+  .cell.preview .pts { background: rgba(0,0,0,0.5); padding: 0 3px; border-radius: 2px; }
+  .btn {
+    padding: 5px 12px; border: 1px solid #444; background: #222; color: #eee;
+    border-radius: 4px; cursor: pointer; font-size: 13px;
+  }
+  .btn:hover { background: #333; }
+  .btn.reject { border-color: #a55; color: #f88; }
+  .btn.reject:hover { background: #422; }
+  .rejected-msg { color: #f88; font-size: 14px; display: none; }
 </style>
 </head>
 <body>
 <div class="nav"><a href="/">&larr; All Fonts</a></div>
-<h1>{{ font.name }}</h1>
-<p class="subtitle">{{ chars|length }} characters with stroke data. Click to edit.</p>
+<div class="header">
+  <h1>{{ font.name }}</h1>
+  <button class="btn" id="skeletonBtn" onclick="generateAll()">Generate All (Skeleton)</button>
+  <button class="btn" id="drawBtn" onclick="drawAll()">Draw All</button>
+  <button class="btn reject" id="rejectBtn" onclick="rejectFont()">Reject Font</button>
+  <span class="rejected-msg" id="rejectedMsg">Rejected</span>
+  <span id="genStatus" style="font-size:13px;color:#888"></span>
+</div>
+<p class="subtitle">{{ chars|length }} characters. Click to edit.</p>
 <div class="grid">
 {% for c in chars %}
   <a href="/edit/{{ font.id }}?c={{ c.char|urlencode }}" style="text-decoration:none;color:inherit">
-    <div class="cell">
-      {{ c.char }}
+    <div class="cell{% if not c.point_count %} no-strokes{% endif %}" data-char="{{ c.char }}">
+      <span class="char-label">{{ c.char }}</span>
       <span class="pts">{{ c.point_count or '' }}</span>
     </div>
   </a>
 {% endfor %}
 </div>
+<script>
+function generateAll() {
+  document.getElementById('genStatus').textContent = 'Generating...';
+  document.getElementById('skeletonBtn').disabled = true;
+  fetch(`/api/skeleton-batch/{{ font.id }}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('genStatus').textContent = `Generated ${d.generated} characters`;
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        document.getElementById('genStatus').textContent = 'Error: ' + (d.error || 'unknown');
+      }
+      document.getElementById('skeletonBtn').disabled = false;
+    });
+}
+
+function drawAll() {
+  const btn = document.getElementById('drawBtn');
+  const status = document.getElementById('genStatus');
+  const cells = document.querySelectorAll('.cell[data-char]');
+  const isPreview = btn.textContent === 'Hide Previews';
+  if (isPreview) {
+    cells.forEach(cell => {
+      cell.classList.remove('preview');
+      const img = cell.querySelector('img');
+      if (img) img.remove();
+      cell.querySelector('.char-label').style.display = '';
+    });
+    btn.textContent = 'Draw All';
+    status.textContent = '';
+    return;
+  }
+  btn.textContent = 'Hide Previews';
+  status.textContent = 'Loading previews...';
+  let loaded = 0;
+  cells.forEach(cell => {
+    const ch = cell.dataset.char;
+    const img = document.createElement('img');
+    img.src = `/api/preview/{{ font.id }}?c=${encodeURIComponent(ch)}`;
+    img.onload = () => {
+      cell.classList.add('preview');
+      cell.querySelector('.char-label').style.display = 'none';
+      cell.insertBefore(img, cell.firstChild);
+      loaded++;
+      if (loaded === cells.length) status.textContent = '';
+    };
+    img.onerror = () => {
+      loaded++;
+      if (loaded === cells.length) status.textContent = '';
+    };
+  });
+}
+
+function rejectFont() {
+  if (!confirm('Reject this font?')) return;
+  fetch(`/api/reject/{{ font.id }}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('rejectBtn').style.display = 'none';
+        document.getElementById('rejectedMsg').style.display = 'inline';
+      }
+    });
+}
+</script>
 </body>
 </html>

@@ -411,7 +411,7 @@ pipeline.run(
 
 ## Stroke Editor
 
-Web-based tool for viewing and manually editing InkSight stroke data (`stroke_editor.py`).
+Web-based tool for viewing and manually editing stroke data (`stroke_editor.py`).
 
 ```bash
 python3 stroke_editor.py
@@ -425,8 +425,22 @@ python3 stroke_editor.py
 - Dot strokes rendered distinctly (stored as 2-point strokes for SDT compatibility)
 - Server-side processing: extend_to_connect (gap closing), Gaussian smoothing (adaptive sigma)
 - Dedup tool to remove overlapping artifact strokes from InkSight
+- Skeleton-based stroke generation from font glyphs (skeletonization → junction analysis → stroke tracing → merge/absorption pipeline)
+- Auto-detect structural markers (vertex, intersection, termination) from skeleton topology
+- Font grid: "Generate All" batch skeleton generation, "Draw All" preview thumbnails with strokes overlaid, reject/unreject fonts
+- Clear Page button to wipe all strokes and markers for a character
 - All actions have both toolbar buttons and keyboard shortcuts
 - Undo stack, unsaved change warnings, save to DB
+
+**Skeleton Pipeline:**
+The skeleton stroke generator (`skeleton_to_strokes`) converts font glyph masks into stroke paths:
+1. **Skeletonize** the binary glyph mask (medial axis)
+2. **Detect junctions** (degree ≥ 3 pixels) and cluster nearby junctions (within 12px)
+3. **Trace strokes** between junction clusters and endpoints
+4. **T-junction merge**: At junctions with 3+ strokes, merge the two longest if a short cross-branch exists (handles B's "3" shape)
+5. **Direction-based merge**: Merge stroke pairs whose approach directions align (< 45°), with loop-stroke guards
+6. **Stub absorption**: Remove short stubs (< 20px) by appending to neighboring strokes or deleting orphans
+7. **Marker detection**: Classify junction endpoints as vertex (convergence), intersection (pass-through), or termination (free end)
 
 **Shortcuts:** `V` select, `A` add stroke, `X` delete stroke, `D` dedup, `C` connect, `G` smooth+connect, `R` revert, `Del` delete point(s), `Shift+click` range select, `Ctrl+S` save, `Ctrl+Z` undo, `[`/`]` prev/next char
 

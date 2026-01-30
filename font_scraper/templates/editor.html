@@ -74,6 +74,10 @@
       <button id="btnSelect" class="active" onclick="setMode('select')"><kbd>V</kbd> Select</button>
       <button id="btnAddStroke" onclick="setMode('addStroke')"><kbd>A</kbd> + Stroke</button>
       <button id="btnDeleteStroke" onclick="setMode('deleteStroke')"><kbd>X</kbd> - Stroke</button>
+      <button id="btnDetectMarkers" class="process" onclick="detectMarkers()"><kbd>4</kbd> Detect V/T</button>
+      <button id="btnAddVertex" onclick="setMode('addVertex')"><kbd>1</kbd> + Vertex</button>
+      <button id="btnAddTerm" onclick="setMode('addTermination')"><kbd>2</kbd> + Termination</button>
+      <button id="btnClearMarkers" onclick="clearMarkers()"><kbd>3</kbd> Clear Markers</button>
     </div>
     <div class="section-label">Edit</div>
     <div class="toolbar">
@@ -83,6 +87,7 @@
       <button id="btnJoin" onclick="startJoin()"><kbd>J</kbd> Join</button>
       <button id="btnUndo" onclick="undo()"><kbd>Z</kbd> Undo</button>
       <button id="btnReload" onclick="reloadChar()"><kbd>R</kbd> Revert</button>
+      <button id="btnClearPage" onclick="clearPage()">Clear Page</button>
     </div>
     <div class="section-label">Process</div>
     <div class="toolbar">
@@ -95,6 +100,10 @@
       <button id="btnResample" class="process" onclick="runResample()"><kbd>E</kbd> Resample</button>
       <button id="btnScaleUp" class="process" onclick="runScale(1.03)"><kbd>+</kbd> Scale Up</button>
       <button id="btnScaleDn" class="process" onclick="runScale(1/1.03)"><kbd>-</kbd> Scale Down</button>
+      <button id="btnSkeleton" class="process" onclick="runSkeleton()"><kbd>K</kbd> Skeleton</button>
+      <button id="btnSkeletonFull" class="process" onclick="runSkeletonFull()"><kbd>F</kbd> Skel+Resample</button>
+      <button id="btnAutoJoin" class="process" onclick="runAutoJoin()"><kbd>W</kbd> Auto-Join</button>
+      <button id="btnReduce" class="process" onclick="runReduce()"><kbd>Q</kbd> Reduce</button>
     </div>
     <div class="section-label">Navigate</div>
     <div class="toolbar">
@@ -129,6 +138,14 @@
       <div class="row"><span class="key"><kbd>E</kbd></span> Resample (adaptive)</div>
       <div class="row"><span class="key"><kbd>G</kbd></span> Smooth</div>
       <div class="row"><span class="key"><kbd>+</kbd> <kbd>-</kbd></span> Scale up / down (3%)</div>
+      <div class="row"><span class="key"><kbd>K</kbd></span> Generate from skeleton</div>
+      <div class="row"><span class="key"><kbd>F</kbd></span> Skeleton + resample</div>
+      <div class="row"><span class="key"><kbd>W</kbd></span> Auto-join nearby strokes</div>
+      <div class="row"><span class="key"><kbd>Q</kbd></span> Reduce strokes (aggressive merge)</div>
+      <div class="row"><span class="key"><kbd>1</kbd></span> Place vertex marker (junction)</div>
+      <div class="row"><span class="key"><kbd>2</kbd></span> Place termination marker (endpoint)</div>
+      <div class="row"><span class="key"><kbd>3</kbd></span> Clear all markers</div>
+      <div class="row"><span class="key"><kbd>4</kbd></span> Auto-detect vertices/terminations</div>
       <div class="row"><span class="key"><kbd>Ctrl</kbd>+<kbd>S</kbd></span> Save</div>
       <div class="row"><span class="key"><kbd>Enter</kbd></span> Finish new stroke</div>
       <div class="row"><span class="key"><kbd>Esc</kbd></span> Cancel / deselect</div>
@@ -159,7 +176,8 @@ let state = {
   mode: 'select',
   newStrokePoints: [],
   joinFirst: null,  // {stroke, point} - first clicked point for join
-  dirty: false
+  dirty: false,
+  markers: []  // [{x, y, type: 'vertex'|'termination'}, ...] structural markers
 };
 
 let bgImage = null;
@@ -176,6 +194,7 @@ function load() {
     .then(r => r.json())
     .then(data => {
       state.strokes = data.strokes || [];
+      state.markers = data.markers || [];
       state.selectedStroke = -1;
       state.selectedPoint = -1;
       state.dirty = false;
@@ -198,7 +217,7 @@ function save() {
   fetch(`/api/char/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({strokes: stripVertices(state.strokes)})
+    body: JSON.stringify({strokes: stripVertices(state.strokes), markers: state.markers})
   }).then(r => r.json()).then(d => {
     if (d.ok) {
       state.dirty = false;
@@ -217,13 +236,20 @@ function reloadChar() {
 // --- Undo ---
 
 function pushUndo() {
-  undoStack.push(JSON.stringify(state.strokes));
+  undoStack.push(JSON.stringify({strokes: state.strokes, markers: state.markers}));
   if (undoStack.length > 50) undoStack.shift();
 }
 
 function undo() {
   if (!undoStack.length) return;
-  state.strokes = JSON.parse(undoStack.pop());
+  const snap = JSON.parse(undoStack.pop());
+  if (snap.strokes) {
+    state.strokes = snap.strokes;
+    state.markers = snap.markers || [];
+  } else {
+    // Legacy undo entry (just strokes array)
+    state.strokes = snap;
+  }
   state.selectedStroke = -1;
   state.selectedPoint = -1;
   state.dirty = true;
@@ -235,11 +261,11 @@ function undo() {
 // --- Processing (server-side) ---
 
 function serverProcess(url, payload, statusMsg, doneMsg) {
-  // Generic server call that preserves vertex points
+  // Generic server call - sends strokes with locked flags intact.
+  // Server preserves locked points during processing.
   pushUndo();
   setStatus(statusMsg);
-  const saved = saveVertexPositions(state.strokes);
-  const body = Object.assign({strokes: stripVertices(state.strokes)}, payload);
+  const body = Object.assign({strokes: state.strokes}, payload);
   fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -247,7 +273,6 @@ function serverProcess(url, payload, statusMsg, doneMsg) {
   }).then(r => r.json()).then(d => {
     if (d.strokes) {
       state.strokes = d.strokes;
-      restoreVertices(state.strokes, saved);
       state.selectedStroke = -1;
       state.selectedPoint = -1;
       state.dirty = true;
@@ -497,6 +522,422 @@ function runCenterBorders() {
   );
 }
 
+function runSkeleton() {
+  if (state.strokes.length > 0 && !confirm('Replace existing strokes with skeleton?')) return;
+  pushUndo();
+  setStatus('Generating skeleton...');
+  fetch(`/api/skeleton/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  }).then(r => r.json()).then(d => {
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      const pts = d.strokes.reduce((a, s) => a + s.length, 0);
+      setStatus(`Skeleton: ${d.strokes.length} strokes, ${pts} points`);
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+  });
+}
+
+function runSkeletonFull() {
+  if (state.strokes.length > 0 && !confirm('Replace existing strokes with skeleton?')) return;
+  pushUndo();
+  setStatus('Generating skeleton...');
+  fetch(`/api/skeleton/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  }).then(r => r.json()).then(d => {
+    if (!d.strokes) { setStatus('Error: ' + (d.error || 'unknown')); return; }
+    state.strokes = d.strokes;
+    state.dirty = true;
+    // Resample
+    const resampled = [];
+    for (const s of state.strokes) {
+      if (isDot(s)) { resampled.push(s); continue; }
+      resampled.push(resampleAdaptive(s, 7));
+    }
+    state.strokes = resampled;
+    state.selectedStroke = -1;
+    state.selectedPoint = -1;
+    state.selectedMulti = [];
+
+    // Detect markers FIRST, then auto-join guided by them
+    fetch(`/api/detect-markers/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: '{}'
+    }).then(r => r.json()).then(md => {
+      if (md.markers) {
+        state.markers = md.markers;
+      }
+      // Auto-join uses markers to guide merges at vertices
+      const aj = _autoJoinStrokes();
+      // Reduce remaining fragments
+      const rd = _reduceStrokes();
+      // Lock any remaining stroke points to markers
+      const locked = _lockMarkersToStrokes(state.markers || []);
+
+      draw();
+      updateStrokeList();
+      const pts = state.strokes.reduce((a, s) => a + s.length, 0);
+      const vc = (state.markers || []).filter(m => m.type === 'vertex').length;
+      const tc = (state.markers || []).filter(m => m.type === 'termination').length;
+      const ic = (state.markers || []).filter(m => m.type === 'intersection').length;
+      setStatus(`Pipeline: ${state.strokes.length} strokes, ${pts} pts, ${vc}V ${tc}T ${ic}I, joined ${aj}, reduced ${rd}`);
+    });
+  });
+}
+
+function _autoJoinStrokes() {
+  // Marker-guided auto-join: use detected vertices and terminations to
+  // decide which strokes to merge.  Strokes meeting at a vertex get
+  // paired by best continuation angle.  Termination endpoints are
+  // snapped but never joined.  Falls back to proximity join when no
+  // markers are available.
+
+  const SNAP_DIST = 15;
+
+  function endDir(stroke, fromEnd) {
+    const n = Math.min(4, stroke.length);
+    let p0, p1;
+    if (fromEnd) { p0 = stroke[stroke.length - n]; p1 = stroke[stroke.length - 1]; }
+    else { p0 = stroke[n - 1]; p1 = stroke[0]; }
+    const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+    const len = Math.sqrt(dx * dx + dy * dy);
+    return len > 0.01 ? [dx / len, dy / len] : [0, 0];
+  }
+
+  function dist(a, b) {
+    const dx = a[0] - b[0], dy = a[1] - b[1];
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function distToMarker(p, m) {
+    return Math.sqrt((p[0] - m.x) ** 2 + (p[1] - m.y) ** 2);
+  }
+
+  const vertices = (state.markers || []).filter(m => m.type === 'vertex');
+  const terminations = (state.markers || []).filter(m => m.type === 'termination');
+
+  // ---- Marker-guided join at vertices ----
+  let joined = 0;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const v of vertices) {
+      // Collect stroke endpoints near this vertex
+      // Each arrival: { si: stroke index, atEnd: bool }
+      let arrivals = [];
+      for (let si = 0; si < state.strokes.length; si++) {
+        const s = state.strokes[si];
+        if (s.length < 2) continue;
+        if (distToMarker(s[0], v) < SNAP_DIST)
+          arrivals.push({ si, atEnd: false });
+        if (distToMarker(s[s.length - 1], v) < SNAP_DIST)
+          arrivals.push({ si, atEnd: true });
+      }
+      if (arrivals.length < 2) continue;
+
+      // Find best continuation pair (most opposite arrival directions)
+      let bestScore = -Infinity, bestA = -1, bestB = -1;
+      for (let i = 0; i < arrivals.length; i++) {
+        for (let j = i + 1; j < arrivals.length; j++) {
+          if (arrivals[i].si === arrivals[j].si) continue;
+          // endDir points TOWARD the endpoint, so two strokes arriving
+          // from opposite sides will have dot ≈ -1
+          const d1 = endDir(state.strokes[arrivals[i].si], arrivals[i].atEnd);
+          const d2 = endDir(state.strokes[arrivals[j].si], arrivals[j].atEnd);
+          const dot = d1[0] * d2[0] + d1[1] * d2[1];
+          const score = -dot; // higher = better continuation
+          if (score > bestScore) {
+            bestScore = score;
+            bestA = i; bestB = j;
+          }
+        }
+      }
+
+      // With exactly 2 arrivals, always join (only option at this vertex).
+      // With 3+, reject only if best pair arrives from nearly the same
+      // direction (dot > 0.5 → score < -0.5, i.e. < 60° apart).
+      if (bestA < 0) continue;
+      if (arrivals.length > 2 && bestScore < -0.5) continue;
+
+      const a1 = arrivals[bestA], a2 = arrivals[bestB];
+      // Orient: s1 ends at vertex, s2 starts at vertex
+      let s1 = [...state.strokes[a1.si]];
+      let s2 = [...state.strokes[a2.si]];
+      if (!a1.atEnd) s1 = s1.reverse();
+      if (a2.atEnd) s2 = s2.reverse();
+
+      // Merged stroke: s1 → vertex (locked) → s2
+      const merged = [...s1.slice(0, -1), [v.x, v.y, 1], ...s2.slice(1)];
+
+      const higher = Math.max(a1.si, a2.si);
+      const lower = Math.min(a1.si, a2.si);
+      state.strokes.splice(higher, 1);
+      state.strokes[lower] = merged;
+      joined++;
+      changed = true;
+      break; // restart - indices are stale
+    }
+  }
+
+  // ---- Snap remaining endpoints to nearby terminations ----
+  for (const t of terminations) {
+    for (const stroke of state.strokes) {
+      for (const atEnd of [true, false]) {
+        const idx = atEnd ? stroke.length - 1 : 0;
+        const p = stroke[idx];
+        if (distToMarker(p, t) < SNAP_DIST && !isVertex(p)) {
+          stroke[idx] = [t.x, t.y, 1];
+        }
+      }
+    }
+  }
+
+  // ---- Snap remaining unpaired endpoints to nearby vertices ----
+  for (const v of vertices) {
+    for (const stroke of state.strokes) {
+      for (const atEnd of [true, false]) {
+        const idx = atEnd ? stroke.length - 1 : 0;
+        const p = stroke[idx];
+        if (distToMarker(p, v) < SNAP_DIST && !isVertex(p)) {
+          stroke[idx] = [v.x, v.y, 1];
+        }
+      }
+    }
+  }
+
+  // ---- Fallback: proximity join for non-marker endpoints ----
+  // Merge remaining strokes whose endpoints are close and not at markers
+  const PROX_DIST = 12;
+  const ANGLE_THRESH = Math.PI / 3;
+  changed = true;
+  while (changed) {
+    changed = false;
+    let bestScore = Infinity;
+    let bestI = -1, bestJ = -1;
+    let bestFlipI = false, bestFlipJ = false;
+
+    for (let i = 0; i < state.strokes.length; i++) {
+      if (state.strokes[i].length < 2) continue;
+      for (let j = i + 1; j < state.strokes.length; j++) {
+        if (state.strokes[j].length < 2) continue;
+        const combos = [
+          { ei: true,  flipI: false, ej: false, flipJ: false },
+          { ei: false, flipI: true,  ej: true,  flipJ: true  },
+          { ei: true,  flipI: false, ej: true,  flipJ: true  },
+          { ei: false, flipI: true,  ej: false, flipJ: false },
+        ];
+        for (const c of combos) {
+          const rawI = c.ei ? state.strokes[i][state.strokes[i].length - 1] : state.strokes[i][0];
+          const rawJ = c.ej ? state.strokes[j][state.strokes[j].length - 1] : state.strokes[j][0];
+          if (isVertex(rawI) || isVertex(rawJ)) continue;
+          const d = dist(rawI, rawJ);
+          if (d > PROX_DIST) continue;
+          const dirI = endDir(state.strokes[i], c.ei);
+          const dirJ = endDir(state.strokes[j], !c.ej);
+          const dot = dirI[0] * dirJ[0] + dirI[1] * dirJ[1];
+          const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+          if (angle > ANGLE_THRESH) continue;
+          const score = d + angle * 5;
+          if (score < bestScore) {
+            bestScore = score;
+            bestI = i; bestJ = j;
+            bestFlipI = c.flipI; bestFlipJ = c.flipJ;
+          }
+        }
+      }
+    }
+    if (bestI >= 0) {
+      let sI = state.strokes[bestI];
+      let sJ = state.strokes[bestJ];
+      if (bestFlipI) sI = [...sI].reverse();
+      if (bestFlipJ) sJ = [...sJ].reverse();
+      state.strokes.splice(bestJ, 1);
+      state.strokes[bestI] = sI.concat(sJ);
+      joined++;
+      changed = true;
+    }
+  }
+
+  return joined;
+}
+
+function runAutoJoin() {
+  if (state.strokes.length < 2) { setStatus('Need at least 2 strokes'); return; }
+  pushUndo();
+  const joined = _autoJoinStrokes();
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedMulti = [];
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+  setStatus(joined > 0 ? `Auto-joined ${joined} pairs (${state.strokes.length} strokes remain)` : 'No joinable pairs found');
+}
+
+function _reduceStrokes() {
+  // Aggressively merge strokes to reduce count while maintaining coverage.
+  // Uses the actual junction angle (how sharp the turn would be at the merge point).
+
+  function dist(a, b) {
+    const dx = a[0] - b[0], dy = a[1] - b[1];
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // Get direction of travel at a stroke endpoint.
+  // Returns unit vector pointing in the direction the stroke is traveling.
+  function travelDir(stroke, atEnd) {
+    const n = Math.min(5, Math.floor(stroke.length / 2));
+    if (n < 1) return [0, 0];
+    let p0, p1;
+    if (atEnd) {
+      p0 = stroke[stroke.length - 1 - n];
+      p1 = stroke[stroke.length - 1];
+    } else {
+      p0 = stroke[n];
+      p1 = stroke[0];  // reversed: travel direction goes away from start
+    }
+    const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+    const len = Math.sqrt(dx * dx + dy * dy);
+    return len > 0.01 ? [dx / len, dy / len] : [0, 0];
+  }
+
+  // Angle between two unit vectors (0 to PI)
+  function angleBetween(d1, d2) {
+    const dot = d1[0] * d2[0] + d1[1] * d2[1];
+    return Math.acos(Math.max(-1, Math.min(1, dot)));
+  }
+
+  // Compute the junction angle if we merge sI(end) -> sJ(start).
+  // This is the angle between the travel direction arriving at the junction
+  // and the travel direction departing. 0 = straight, PI = U-turn.
+  function junctionAngle(sI, sJ) {
+    // Travel direction at end of sI (arriving)
+    const n = Math.min(5, Math.floor(sI.length / 2));
+    if (n < 1) return 0;
+    const arrP0 = sI[sI.length - 1 - n], arrP1 = sI[sI.length - 1];
+    let adx = arrP1[0] - arrP0[0], ady = arrP1[1] - arrP0[1];
+    let alen = Math.sqrt(adx * adx + ady * ady);
+    if (alen < 0.01) return 0;
+    adx /= alen; ady /= alen;
+
+    // Travel direction at start of sJ (departing)
+    const m = Math.min(5, Math.floor(sJ.length / 2));
+    if (m < 1) return 0;
+    const depP0 = sJ[0], depP1 = sJ[m];
+    let ddx = depP1[0] - depP0[0], ddy = depP1[1] - depP0[1];
+    let dlen = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (dlen < 0.01) return 0;
+    ddx /= dlen; ddy /= dlen;
+
+    // Angle between arriving and departing directions (0 = straight continuation)
+    const dot = adx * ddx + ady * ddy;
+    return Math.acos(Math.max(-1, Math.min(1, dot)));
+  }
+
+  let merged = 0;
+  let changed = true;
+  const MAX_DIST = 30;
+  const MAX_ANGLE = Math.PI * 2 / 3;  // 120 degrees max turn at junction
+
+  while (changed) {
+    changed = false;
+    let bestScore = Infinity;
+    let bestI = -1, bestJ = -1;
+    let bestFlipI = false, bestFlipJ = false;
+
+    for (let i = 0; i < state.strokes.length; i++) {
+      if (state.strokes[i].length < 2) continue;
+      for (let j = i + 1; j < state.strokes.length; j++) {
+        if (state.strokes[j].length < 2) continue;
+
+        // Try all 4 endpoint combinations: which ends to connect
+        // Each combo determines how to orient the two strokes so that
+        // sI ends at the junction and sJ starts at the junction.
+        const combos = [
+          { flipI: false, flipJ: false },  // end-i -> start-j
+          { flipI: true,  flipJ: true  },  // start-i(rev) -> end-j(rev)
+          { flipI: false, flipJ: true  },  // end-i -> end-j(rev)
+          { flipI: true,  flipJ: false },  // start-i(rev) -> start-j
+        ];
+
+        for (const c of combos) {
+          // Don't merge at locked (vertex/termination) endpoints
+          const epI = c.flipI ? state.strokes[i][0] : state.strokes[i][state.strokes[i].length - 1];
+          const epJ = c.flipJ ? state.strokes[j][state.strokes[j].length - 1] : state.strokes[j][0];
+          if (isVertex(epI) || isVertex(epJ)) continue;
+
+          // Build oriented copies to check junction
+          const sI = c.flipI ? [...state.strokes[i]].reverse() : state.strokes[i];
+          const sJ = c.flipJ ? [...state.strokes[j]].reverse() : state.strokes[j];
+
+          // Distance between connecting endpoints
+          const pI = sI[sI.length - 1];
+          const pJ = sJ[0];
+          const d = dist(pI, pJ);
+          if (d > MAX_DIST) continue;
+
+          // Junction angle (how sharp the turn is)
+          const angle = junctionAngle(sI, sJ);
+          if (angle > MAX_ANGLE) continue;
+
+          // Score: prefer close + smooth + absorbing short strokes
+          const minLen = Math.min(state.strokes[i].length, state.strokes[j].length);
+          const shortBonus = minLen < 20 ? -15 : 0;
+          const score = d * 1.5 + angle * 10 + shortBonus;
+
+          if (score < bestScore) {
+            bestScore = score;
+            bestI = i; bestJ = j;
+            bestFlipI = c.flipI; bestFlipJ = c.flipJ;
+          }
+        }
+      }
+    }
+
+    if (bestI >= 0 && bestScore < 40) {
+      let sI = state.strokes[bestI];
+      let sJ = state.strokes[bestJ];
+      if (bestFlipI) sI = [...sI].reverse();
+      if (bestFlipJ) sJ = [...sJ].reverse();
+      state.strokes.splice(bestJ, 1);
+      state.strokes[bestI] = sI.concat(sJ);
+      merged++;
+      changed = true;
+    }
+  }
+
+  return merged;
+}
+
+function runReduce() {
+  if (state.strokes.length < 2) { setStatus('Need at least 2 strokes'); return; }
+  pushUndo();
+  const merged = _reduceStrokes();
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedMulti = [];
+  state.dirty = true;
+  draw();
+  updateStrokeList();
+  setStatus(merged > 0
+    ? `Reduced: merged ${merged} pairs (${state.strokes.length} strokes remain)`
+    : 'No further reductions possible');
+}
+
 function runCenter() {
   if (state.strokes.length === 0) return;
   serverProcess(
@@ -566,6 +1007,85 @@ function restoreVertices(strokes, saved) {
       strokes[v.stroke][v.point] = [v.x, v.y, 1];
     }
   }
+}
+
+// --- Structural markers ---
+
+function _lockMarkersToStrokes(markers) {
+  // Find the nearest stroke point to each vertex/termination marker and lock it.
+  // Intersections are ignored - strokes pass through them without locking.
+  let locked = 0;
+  for (const m of markers) {
+    if (m.type === 'intersection') continue;
+    let bestDist = Infinity, bestSi = -1, bestPi = -1;
+    for (let si = 0; si < state.strokes.length; si++) {
+      for (let pi = 0; pi < state.strokes[si].length; pi++) {
+        const p = state.strokes[si][pi];
+        const dx = p[0] - m.x, dy = p[1] - m.y;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestSi = si;
+          bestPi = pi;
+        }
+      }
+    }
+    if (bestSi >= 0) {
+      state.strokes[bestSi][bestPi] = [m.x, m.y, 1];
+      locked++;
+    }
+  }
+  return locked;
+}
+
+function clearPage() {
+  if (state.strokes.length === 0 && state.markers.length === 0) { setStatus('Already empty'); return; }
+  pushUndo();
+  state.strokes = [];
+  state.markers = [];
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.dirty = true;
+  draw();
+  buildStrokeList();
+  setStatus('Cleared all strokes and markers');
+}
+
+function clearMarkers() {
+  if (state.markers.length === 0) { setStatus('No markers to clear'); return; }
+  pushUndo();
+  state.markers = [];
+  state.dirty = true;
+  draw();
+  setStatus('Cleared all markers');
+}
+
+function detectMarkers() {
+  // Detect vertices/terminations from the font glyph image (not from strokes).
+  // Skeletonizes the rendered glyph and finds junction clusters (vertices)
+  // and endpoints (terminations). If strokes exist, locks nearest points.
+  pushUndo();
+  setStatus('Analyzing glyph image...');
+  fetch(`/api/detect-markers/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  }).then(r => r.json()).then(d => {
+    if (!d.markers) { setStatus('Error: ' + (d.error || 'unknown')); return; }
+    state.markers = d.markers;
+    let locked = 0;
+    if (state.strokes.length > 0) {
+      locked = _lockMarkersToStrokes(d.markers);
+    }
+    state.dirty = true;
+    draw();
+    updateStrokeList();
+    const vc = d.markers.filter(m => m.type === 'vertex').length;
+    const tc = d.markers.filter(m => m.type === 'termination').length;
+    const ic = d.markers.filter(m => m.type === 'intersection').length;
+    const lockMsg = locked > 0 ? `, ${locked} locked to strokes` : '';
+    setStatus(`Detected ${vc}V ${tc}T ${ic}I${lockMsg}`);
+  });
 }
 
 // --- Dot detection ---
@@ -686,6 +1206,55 @@ function draw() {
         ctx.fillStyle = '#d00';
         ctx.fillText('E', ex, ey - 10);
       }
+    }
+  }
+
+  // Draw structural markers (vertices, terminations, intersections)
+  for (const m of state.markers) {
+    const cx = m.x * SCALE;
+    const cy = m.y * SCALE;
+    ctx.lineWidth = 2;
+    if (m.type === 'vertex') {
+      // Diamond shape, cyan
+      const r = 8;
+      ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
+      ctx.strokeStyle = '#0ff';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('V', cx, cy);
+    } else if (m.type === 'intersection') {
+      // Plus/cross shape, dim gray - informational only
+      const r = 6;
+      ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+      ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
+      ctx.stroke();
+    } else {
+      // Circle, red/orange - termination
+      const r = 8;
+      ctx.fillStyle = 'rgba(255, 100, 0, 0.7)';
+      ctx.strokeStyle = '#f60';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('T', cx, cy);
     }
   }
 
@@ -929,7 +1498,11 @@ function setMode(mode) {
   document.getElementById('btnAddStroke').classList.toggle('active', mode === 'addStroke');
   document.getElementById('btnDeleteStroke').classList.toggle('active', mode === 'deleteStroke');
   document.getElementById('btnJoin').classList.toggle('active', mode === 'joinStroke');
-  canvas.style.cursor = mode === 'select' ? 'crosshair' : mode === 'addStroke' ? 'copy' : mode === 'joinStroke' ? 'alias' : 'not-allowed';
+  document.getElementById('btnAddVertex').classList.toggle('active', mode === 'addVertex');
+  document.getElementById('btnAddTerm').classList.toggle('active', mode === 'addTermination');
+  const cursors = {select: 'crosshair', addStroke: 'copy', joinStroke: 'alias',
+                   addVertex: 'cell', addTermination: 'cell'};
+  canvas.style.cursor = cursors[mode] || 'not-allowed';
   draw();
 }
 
@@ -1092,6 +1665,31 @@ canvas.addEventListener('mousedown', e => {
       }
       joinStrokes(state.joinFirst, hit);
     }
+
+  } else if (state.mode === 'addVertex' || state.mode === 'addTermination') {
+    const coordX = mx / SCALE;
+    const coordY = my / SCALE;
+    const markerType = state.mode === 'addVertex' ? 'vertex' : 'termination';
+    // Check if clicking near an existing marker of same type to remove it
+    const HIT_DIST = 10;
+    let removed = false;
+    for (let i = state.markers.length - 1; i >= 0; i--) {
+      const m = state.markers[i];
+      const d = Math.sqrt((m.x - coordX) ** 2 + (m.y - coordY) ** 2);
+      if (d < HIT_DIST && m.type === markerType) {
+        state.markers.splice(i, 1);
+        removed = true;
+        break;
+      }
+    }
+    if (!removed) {
+      state.markers.push({x: coordX, y: coordY, type: markerType});
+    }
+    state.dirty = true;
+    draw();
+    const vc = state.markers.filter(m => m.type === 'vertex').length;
+    const tc = state.markers.filter(m => m.type === 'termination').length;
+    setStatus(`${markerType === 'vertex' ? (removed ? 'Removed' : 'Added') : (removed ? 'Removed' : 'Added')} ${markerType} (${vc}V, ${tc}T)`);
   }
 });
 
@@ -1280,6 +1878,14 @@ document.addEventListener('keydown', e => {
     case 'c': runConnect(); break;
     case 'g': runSmooth(); break;
     case 'e': runResample(); break;
+    case 'k': runSkeleton(); break;
+    case 'f': runSkeletonFull(); break;
+    case 'w': runAutoJoin(); break;
+    case 'q': runReduce(); break;
+    case '1': setMode('addVertex'); break;
+    case '2': setMode('addTermination'); break;
+    case '3': clearMarkers(); break;
+    case '4': detectMarkers(); break;
     case 'r': reloadChar(); break;
     case '=':
     case '+': runScale(1.03); break;

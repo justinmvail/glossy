@@ -7,7 +7,8 @@
   body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
   h1 { margin-bottom: 5px; }
   .subtitle { color: #888; margin-bottom: 20px; }
-  table { border-collapse: collapse; width: 100%; max-width: 900px; }
+  .controls { display: flex; gap: 15px; align-items: center; margin-bottom: 15px; }
+  table { border-collapse: collapse; width: 100%; max-width: 1000px; }
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; }
   th { color: #888; font-weight: 600; }
   a { color: #7eb8f7; text-decoration: none; }
@@ -15,21 +16,47 @@
   .count { color: #888; }
   .source { font-size: 0.85em; color: #666; }
   input[type=text] { padding: 6px 10px; border: 1px solid #444; background: #222; color: #eee;
-    border-radius: 4px; width: 300px; margin-bottom: 15px; }
+    border-radius: 4px; width: 300px; }
+  .btn {
+    padding: 4px 10px; border: 1px solid #444; background: #222; color: #eee;
+    border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  .btn:hover { background: #333; }
+  .btn.reject { border-color: #a55; color: #f88; }
+  .btn.reject:hover { background: #422; }
+  .btn.unreject { border-color: #5a5; color: #8f8; }
+  .btn.unreject:hover { background: #242; }
+  .btn.toggle { padding: 6px 12px; }
+  .btn.toggle.active { background: #335; border-color: #7eb8f7; }
+  tr.rejected td:first-child a { color: #f88; text-decoration: line-through; }
 </style>
 </head>
 <body>
 <h1>Stroke Editor</h1>
-<p class="subtitle">{{ fonts|length }} fonts with stroke data</p>
-<input type="text" id="search" placeholder="Filter fonts..." oninput="filterFonts()">
+<p class="subtitle">{{ fonts|length }} fonts{% if show_rejected %} (rejected){% endif %}</p>
+<div class="controls">
+  <input type="text" id="search" placeholder="Filter fonts..." oninput="filterFonts()">
+  {% if show_rejected %}
+    <a href="/" class="btn toggle active">Showing Rejected</a>
+  {% else %}
+    <a href="/?rejected=1" class="btn toggle">Show Rejected</a>
+  {% endif %}
+</div>
 <table>
-  <thead><tr><th>Font</th><th>Source</th><th>Characters</th></tr></thead>
+  <thead><tr><th>Font</th><th>Source</th><th>Characters</th><th></th></tr></thead>
   <tbody id="fontTable">
   {% for f in fonts %}
-    <tr data-name="{{ f.name|lower }}">
+    <tr data-name="{{ f.name|lower }}" data-id="{{ f.id }}" {% if f.rejected %}class="rejected"{% endif %}>
       <td><a href="/font/{{ f.id }}">{{ f.name }}</a></td>
       <td class="source">{{ f.source or '' }}</td>
       <td class="count">{{ f.char_count }}</td>
+      <td>
+        {% if show_rejected %}
+          <button class="btn unreject" onclick="unrejectFont({{ f.id }}, this)">Restore</button>
+        {% else %}
+          <button class="btn reject" onclick="rejectFont({{ f.id }}, this)">Reject</button>
+        {% endif %}
+      </td>
     </tr>
   {% endfor %}
   </tbody>
@@ -40,6 +67,29 @@ function filterFonts() {
   document.querySelectorAll('#fontTable tr').forEach(tr => {
     tr.style.display = tr.dataset.name.includes(q) ? '' : 'none';
   });
+}
+
+function rejectFont(fontId, btn) {
+  if (!confirm('Reject this font?')) return;
+  fetch(`/api/reject/${fontId}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        const tr = btn.closest('tr');
+        tr.style.display = 'none';
+      }
+    });
+}
+
+function unrejectFont(fontId, btn) {
+  fetch(`/api/unreject/${fontId}`, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        const tr = btn.closest('tr');
+        tr.style.display = 'none';
+      }
+    });
 }
 </script>
 </body>
