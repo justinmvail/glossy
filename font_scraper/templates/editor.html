@@ -699,13 +699,11 @@ function runCenterBorders() {
 }
 
 function runDiffVG() {
-  if (state.strokes.length === 0) {
-    setStatus('No strokes to refine');
-    return;
-  }
+  const mode = state.strokes.length === 0 ? 'generate' : 'refine';
+  if (mode === 'generate' && !confirm('Generate strokes from template using DiffVG?')) return;
   pushUndo();
   startRecording('DiffVG');
-  setStatus('Running DiffVG (GPU)...');
+  setStatus(mode === 'generate' ? 'DiffVG generating (GPU)...' : 'DiffVG refining (GPU)...');
   fetch(`/api/diffvg/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -721,8 +719,9 @@ function runDiffVG() {
       updateStrokeList();
       const score = d.score ? d.score.toFixed(3) : '?';
       const elapsed = d.elapsed ? d.elapsed.toFixed(1) : '?';
-      setStatus(`DiffVG: score=${score}, ${elapsed}s`);
-      recordFrame(`DiffVG: score=${score}`);
+      const src = d.source === 'generated' ? ' (from template)' : '';
+      setStatus(`DiffVG: score=${score}, ${elapsed}s${src}`);
+      recordFrame(`DiffVG: score=${score}${src}`);
     } else {
       setStatus('DiffVG error: ' + (d.error || 'no strokes returned'));
     }

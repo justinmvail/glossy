@@ -4771,21 +4771,16 @@ def api_skeleton_batch(font_id):
 
 @app.route('/api/diffvg/<int:font_id>', methods=['POST'])
 def api_diffvg(font_id):
-    """Refine strokes using DiffVG gradient-based optimization in Docker/GPU."""
+    """Generate or refine strokes using DiffVG gradient-based optimization in Docker/GPU.
+
+    If strokes are provided, refines them. If empty/missing, generates from letter template.
+    """
     char = request.args.get('c')
     if not char:
         return jsonify(error="Missing ?c= parameter"), 400
 
     if _diffvg_docker is None:
         return jsonify(error="DiffVG Docker not available"), 503
-
-    data = request.get_json()
-    if not data or 'strokes' not in data:
-        return jsonify(error="Missing strokes data"), 400
-
-    strokes = data['strokes']
-    if not strokes or not any(len(s) >= 2 for s in strokes):
-        return jsonify(error="No valid strokes to refine"), 400
 
     db = get_db()
     font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
@@ -4795,8 +4790,21 @@ def api_diffvg(font_id):
 
     font_path = resolve_font_path(font['file_path'])
 
-    # Strip lock flags from points (DiffVG expects [x, y] only)
-    clean_strokes = [[[p[0], p[1]] for p in s] for s in strokes if len(s) >= 2]
+    data = request.get_json() or {}
+    strokes = data.get('strokes', [])
+    valid_strokes = [s for s in strokes if len(s) >= 2]
+
+    if valid_strokes:
+        # Refine existing strokes
+        clean_strokes = [[[p[0], p[1]] for p in s] for s in valid_strokes]
+        source = 'refined'
+    else:
+        # Generate from letter template
+        template_result = template_to_strokes(font_path, char, canvas_size=224)
+        if not template_result:
+            return jsonify(error=f"No template available for '{char}'"), 400
+        clean_strokes = template_result
+        source = 'generated'
 
     result = _diffvg_docker.optimize(
         font_path=font_path,
@@ -4816,6 +4824,7 @@ def api_diffvg(font_id):
         score=result.get('score', 0),
         elapsed=result.get('elapsed', 0),
         iterations=result.get('iterations', 0),
+        source=source,
     )
 
 
