@@ -47,6 +47,64 @@
   .status { font-size: 12px; color: #888; margin-top: 10px; }
   .status.saved { color: #4a8; }
 
+  /* Streaming indicator banner */
+  .stream-banner {
+    display: none;
+    background: #1a2a1a;
+    border: 1px solid #3a6a3a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #ccc;
+  }
+  .stream-banner.active { display: block; }
+  .stream-banner .stream-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .stream-banner .stream-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid #3a6a3a;
+    border-top-color: #6c6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stream-banner .stream-label {
+    font-weight: bold;
+    color: #6c6;
+  }
+  .stream-banner .stream-elapsed {
+    margin-left: auto;
+    color: #999;
+    font-variant-numeric: tabular-nums;
+  }
+  .stream-banner .stream-details {
+    display: flex;
+    gap: 16px;
+    color: #aaa;
+    font-size: 11px;
+  }
+  .stream-banner .stream-details span { white-space: nowrap; }
+  .stream-banner .stream-details .val { color: #ddd; }
+  .stream-banner .stream-stop {
+    margin-left: auto;
+    background: #5a2a2a;
+    color: #ddd;
+    border: 1px solid #744;
+    border-radius: 3px;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .stream-banner .stream-stop:hover { background: #733; }
+  .stream-banner.done { border-color: #4a8a4a; }
+  .stream-banner.done .stream-spinner { display: none; }
+  .stream-banner.done .stream-label { color: #4a8; }
+
   .help { font-size: 11px; color: #555; margin-top: 12px; line-height: 1.7; }
   .help kbd {
     background: #333; padding: 1px 4px; border-radius: 3px; border: 1px solid #444;
@@ -67,6 +125,24 @@
 <div class="main">
   <div class="canvas-wrap">
     <canvas id="canvas" width="768" height="768"></canvas>
+    <div id="playerPanel" style="display:none; margin-top:6px; width:768px;">
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
+        <select id="sessionSelect" onchange="selectSession()" style="background:#222; color:#eee; border:1px solid #444; border-radius:3px; font-size:12px; padding:2px 4px; min-width:140px;"></select>
+        <button onclick="playFirst()" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">|&lt;</button>
+        <button onclick="playStep(-1)" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">&lt;</button>
+        <button id="btnPlayPause" onclick="togglePlay()" style="padding:3px 10px; background:#254; color:#eee; border:1px solid #4a8; border-radius:3px; cursor:pointer; font-size:11px;">Play</button>
+        <button onclick="playStep(1)" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">&gt;</button>
+        <button onclick="playLast()" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">&gt;|</button>
+        <select id="speedSelect" onchange="setPlaySpeed(+this.value)" style="background:#222; color:#eee; border:1px solid #444; border-radius:3px; font-size:11px; padding:2px;">
+          <option value="500">0.5x</option>
+          <option value="200" selected>1x</option>
+          <option value="100">2x</option>
+          <option value="50">4x</option>
+        </select>
+        <span id="frameInfo" style="font-size:11px; color:#888; white-space:nowrap; margin-left:auto;"></span>
+      </div>
+      <input id="timeline" type="range" min="0" max="0" value="0" oninput="seekFrame(+this.value)" style="width:100%;">
+    </div>
   </div>
   <div class="sidebar">
     <div class="section-label">Mode</div>
@@ -102,6 +178,9 @@
       <button id="btnScaleDn" class="process" onclick="runScale(1/1.03)"><kbd>-</kbd> Scale Down</button>
       <button id="btnSkeleton" class="process" onclick="runSkeleton()"><kbd>K</kbd> Skeleton</button>
       <button id="btnSkeletonFull" class="process" onclick="runSkeletonFull()"><kbd>F</kbd> Skel+Resample</button>
+      <button id="btnOptLive" class="process" onclick="runOptimizeLive()" style="background:#2a5a2a"><kbd>O</kbd> Optimize Live</button>
+      <button id="btnDiffVG" class="process" onclick="runDiffVG()" style="background:#2a4a5a"><kbd>Y</kbd> DiffVG Refine</button>
+      <button id="btnClearCache" class="process" onclick="clearShapeCache()" style="background:#5a2a2a">Clear Cache</button>
       <button id="btnAutoJoin" class="process" onclick="runAutoJoin()"><kbd>W</kbd> Auto-Join</button>
       <button id="btnReduce" class="process" onclick="runReduce()"><kbd>Q</kbd> Reduce</button>
     </div>
@@ -115,6 +194,19 @@
     <div class="section-label">Strokes</div>
     <div id="strokeList" class="stroke-list"></div>
     <div id="status" class="status"></div>
+    <div id="streamBanner" class="stream-banner">
+      <div class="stream-header">
+        <div class="stream-spinner"></div>
+        <span class="stream-label" id="streamLabel">Streaming</span>
+        <span class="stream-elapsed" id="streamElapsed">0s</span>
+      </div>
+      <div class="stream-details">
+        <span>Phase: <span class="val" id="streamPhase">--</span></span>
+        <span>Score: <span class="val" id="streamScore">--</span></span>
+        <span>Frame: <span class="val" id="streamFrame">--</span></span>
+        <button class="stream-stop" id="streamStop" onclick="stopStream()">Stop</button>
+      </div>
+    </div>
 
     <div class="help">
       <strong>All Shortcuts</strong>
@@ -142,6 +234,7 @@
       <div class="row"><span class="key"><kbd>F</kbd></span> Skeleton + resample</div>
       <div class="row"><span class="key"><kbd>W</kbd></span> Auto-join nearby strokes</div>
       <div class="row"><span class="key"><kbd>Q</kbd></span> Reduce strokes (aggressive merge)</div>
+      <div class="row"><span class="key"><kbd>Y</kbd></span> DiffVG refine (GPU)</div>
       <div class="row"><span class="key"><kbd>1</kbd></span> Place vertex marker (junction)</div>
       <div class="row"><span class="key"><kbd>2</kbd></span> Place termination marker (endpoint)</div>
       <div class="row"><span class="key"><kbd>3</kbd></span> Clear all markers</div>
@@ -150,7 +243,9 @@
       <div class="row"><span class="key"><kbd>Enter</kbd></span> Finish new stroke</div>
       <div class="row"><span class="key"><kbd>Esc</kbd></span> Cancel / deselect</div>
       <div class="row"><span class="key"><kbd>[</kbd> <kbd>]</kbd></span> Prev / Next char</div>
+      <div class="row"><span class="key"><kbd>P</kbd></span> Play / Pause recording</div>
     </div>
+
   </div>
 </div>
 
@@ -179,6 +274,69 @@ let state = {
   dirty: false,
   markers: []  // [{x, y, type: 'vertex'|'termination'}, ...] structural markers
 };
+
+const recorder = {
+  sessions: [],
+  currentSession: -1,
+  playing: false,
+  playTimer: null,
+  playSpeed: 200,
+  playIndex: 0,
+  viewSession: -1,
+  maxSessions: 50,
+  maxFramesPerSession: 2000,
+  lastDragFrame: 0
+};
+
+function startRecording(label) {
+  if (recorder.sessions.length >= recorder.maxSessions) recorder.sessions.shift();
+  recorder.sessions.push({label, frames: [], time: Date.now()});
+  recorder.currentSession = recorder.sessions.length - 1;
+}
+
+function recordFrame(statusMsg) {
+  // Auto-create an "Edits" session if no operation session is active
+  if (recorder.currentSession < 0) {
+    // Reuse last session if it's an "Edits" session with room
+    const last = recorder.sessions[recorder.sessions.length - 1];
+    if (last && last.label === 'Edits' && last.frames.length < recorder.maxFramesPerSession) {
+      recorder.currentSession = recorder.sessions.length - 1;
+    } else {
+      startRecording('Edits');
+    }
+  }
+  const session = recorder.sessions[recorder.currentSession];
+  if (session.frames.length >= recorder.maxFramesPerSession) return;
+  session.frames.push({
+    strokes: JSON.parse(JSON.stringify(state.strokes)),
+    markers: JSON.parse(JSON.stringify(state.markers)),
+    status: statusMsg || ''
+  });
+  // Keep view tracking the latest frame if not in playback
+  if (!recorder.playing) {
+    // If viewing "All", stay in All mode and track total frame count
+    if (recorder.viewSession === -1) {
+      recorder.playIndex = _getAllFrames().length - 1;
+    } else {
+      recorder.viewSession = recorder.currentSession;
+      recorder.playIndex = session.frames.length - 1;
+    }
+  }
+  updatePlayerPanel();
+}
+
+function stopRecording() {
+  if (recorder.currentSession >= 0) {
+    if (recorder.viewSession === -1) {
+      recorder.playIndex = _getAllFrames().length - 1;
+    } else {
+      recorder.viewSession = recorder.currentSession;
+      recorder.playIndex = recorder.sessions[recorder.currentSession].frames.length - 1;
+    }
+  }
+  recorder.currentSession = -1;
+  updatePlayerPanel();
+}
 
 let bgImage = null;
 let undoStack = [];
@@ -210,6 +368,9 @@ function load() {
       }
       updateStrokeList();
       setStatus('Loaded');
+      startRecording('Edits');
+      recordFrame('loaded');
+      recorder.viewSession = -1;  // default to "All" view
     });
 }
 
@@ -256,6 +417,7 @@ function undo() {
   draw();
   updateStrokeList();
   setStatus('Undone');
+  recordFrame('undo');
 }
 
 // --- Processing (server-side) ---
@@ -264,6 +426,7 @@ function serverProcess(url, payload, statusMsg, doneMsg) {
   // Generic server call - sends strokes with locked flags intact.
   // Server preserves locked points during processing.
   pushUndo();
+  startRecording(doneMsg);
   setStatus(statusMsg);
   const body = Object.assign({strokes: state.strokes}, payload);
   fetch(url, {
@@ -279,9 +442,11 @@ function serverProcess(url, payload, statusMsg, doneMsg) {
       draw();
       updateStrokeList();
       setStatus(doneMsg);
+      recordFrame(doneMsg);
     } else {
       setStatus('Error: ' + (d.error || 'unknown'));
     }
+    stopRecording();
   });
 }
 
@@ -328,6 +493,7 @@ function runDedup() {
   }
 
   pushUndo();
+  startRecording('Dedup');
   state.strokes = keep.map(i => state.strokes[i]);
   state.selectedStroke = -1;
   state.selectedPoint = -1;
@@ -336,6 +502,8 @@ function runDedup() {
   draw();
   updateStrokeList();
   setStatus(`Removed ${removed.length} duplicate strokes (${before} -> ${state.strokes.length})`);
+  recordFrame(`Removed ${removed.length} duplicates`);
+  stopRecording();
 }
 
 function strokesOverlap(a, b, thresh) {
@@ -440,6 +608,7 @@ function runResample() {
   const BASE_SPACING = 7;
 
   pushUndo();
+  startRecording('Resample');
   const before = state.strokes.reduce((a, s) => a + s.length, 0);
   const result = [];
   for (let i = 0; i < state.strokes.length; i++) {
@@ -465,6 +634,9 @@ function runResample() {
       resampled[bestIdx] = [v.x, v.y, 1];
     }
     result.push(resampled);
+    // Record per-stroke frame
+    state.strokes = result.concat(state.strokes.slice(result.length));
+    recordFrame(`resample stroke ${i+1}/${state.strokes.length}: ${s.length}→${resampled.length} pts`);
   }
   state.strokes = result;
   state.selectedStroke = -1;
@@ -476,11 +648,13 @@ function runResample() {
   draw();
   updateStrokeList();
   setStatus(`Resampled: ${before} → ${after} points`);
+  stopRecording();
 }
 
 function runScale(factor) {
   if (state.strokes.length === 0) return;
   pushUndo();
+  startRecording('Scale');
 
   // Compute centroid of all points
   let cx = 0, cy = 0, n = 0;
@@ -504,6 +678,8 @@ function runScale(factor) {
   draw();
   const pct = Math.round((factor - 1) * 100);
   setStatus(`Scaled ${pct > 0 ? '+' : ''}${pct}%`);
+  recordFrame(`Scaled ${pct > 0 ? '+' : ''}${pct}%`);
+  stopRecording();
 }
 
 function runSnap() {
@@ -522,9 +698,45 @@ function runCenterBorders() {
   );
 }
 
+function runDiffVG() {
+  if (state.strokes.length === 0) {
+    setStatus('No strokes to refine');
+    return;
+  }
+  pushUndo();
+  startRecording('DiffVG');
+  setStatus('Running DiffVG (GPU)...');
+  fetch(`/api/diffvg/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strokes: state.strokes})
+  }).then(r => r.json()).then(d => {
+    if (d.strokes && d.strokes.length > 0) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      const score = d.score ? d.score.toFixed(3) : '?';
+      const elapsed = d.elapsed ? d.elapsed.toFixed(1) : '?';
+      setStatus(`DiffVG: score=${score}, ${elapsed}s`);
+      recordFrame(`DiffVG: score=${score}`);
+    } else {
+      setStatus('DiffVG error: ' + (d.error || 'no strokes returned'));
+    }
+    stopRecording();
+  }).catch(err => {
+    setStatus('DiffVG failed: ' + err);
+    stopRecording();
+  });
+}
+
 function runSkeleton() {
   if (state.strokes.length > 0 && !confirm('Replace existing strokes with skeleton?')) return;
   pushUndo();
+  startRecording('Skeleton');
   setStatus('Generating skeleton...');
   fetch(`/api/skeleton/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
     method: 'POST',
@@ -533,6 +745,7 @@ function runSkeleton() {
   }).then(r => r.json()).then(d => {
     if (d.strokes) {
       state.strokes = d.strokes;
+      if (d.markers) state.markers = d.markers;
       state.selectedStroke = -1;
       state.selectedPoint = -1;
       state.selectedMulti = [];
@@ -541,59 +754,235 @@ function runSkeleton() {
       updateStrokeList();
       const pts = d.strokes.reduce((a, s) => a + s.length, 0);
       setStatus(`Skeleton: ${d.strokes.length} strokes, ${pts} points`);
+      recordFrame(`Skeleton: ${d.strokes.length} strokes, ${pts} pts`);
     } else {
       setStatus('Error: ' + (d.error || 'unknown'));
     }
+    stopRecording();
   });
 }
 
 function runSkeletonFull() {
   if (state.strokes.length > 0 && !confirm('Replace existing strokes with skeleton?')) return;
   pushUndo();
-  setStatus('Generating skeleton...');
+  startRecording('Skel+Resample');
+  setStatus('Optimizing shapes (streaming)...');
+  showStreamBanner('Skel+Resample');
+
+  // Use SSE stream so we can see every optimization step
+  if (_optimizeES) { _optimizeES.close(); _optimizeES = null; }
+  const url = `/api/optimize-stream/${FONT_ID}?c=${encodeURIComponent(CHAR)}`;
+  _optimizeES = new EventSource(url);
+
+  _optimizeES.onmessage = function(ev) {
+    const d = JSON.parse(ev.data);
+    if (d.error) {
+      setStatus('Error: ' + d.error);
+      hideStreamBanner();
+      _optimizeES.close(); _optimizeES = null;
+      // Fall back to non-streaming skeleton
+      _skeletonFullFallback();
+      return;
+    }
+    if (d.done) {
+      hideStreamBanner(d);
+      _optimizeES.close(); _optimizeES = null;
+      // Now do client-side post-processing: resample, join, reduce
+      _skeletonFullPostProcess();
+      return;
+    }
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.markers = [];
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      const phase = d.phase || '';
+      updateStreamBanner(d.frame, d.score, phase);
+      setStatus(`Optimize F${d.frame}: ${d.score} [${phase}]`);
+      recordFrame(`optimize F${d.frame} score=${d.score} ${phase}`);
+    }
+  };
+  _optimizeES.onerror = function() {
+    hideStreamBanner();
+    _optimizeES.close(); _optimizeES = null;
+    // Fall back to non-streaming skeleton
+    _skeletonFullFallback();
+  };
+}
+
+function _skeletonFullFallback() {
+  // Non-streaming fallback: use /api/skeleton one-shot
+  setStatus('Falling back to one-shot skeleton...');
   fetch(`/api/skeleton/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: '{}'
   }).then(r => r.json()).then(d => {
-    if (!d.strokes) { setStatus('Error: ' + (d.error || 'unknown')); return; }
+    if (!d.strokes) { setStatus('Error: ' + (d.error || 'unknown')); stopRecording(); return; }
     state.strokes = d.strokes;
+    if (d.markers) state.markers = d.markers;
     state.dirty = true;
-    // Resample
-    const resampled = [];
-    for (const s of state.strokes) {
-      if (isDot(s)) { resampled.push(s); continue; }
-      resampled.push(resampleAdaptive(s, 7));
+    recordFrame('skeleton (fallback)');
+    _skeletonFullPostProcess();
+  });
+}
+
+function _skeletonFullPostProcess() {
+  // Resample each stroke individually with per-stroke frames
+  for (let ri = 0; ri < state.strokes.length; ri++) {
+    if (isDot(state.strokes[ri])) continue;
+    const before = state.strokes[ri].length;
+    state.strokes[ri] = resampleAdaptive(state.strokes[ri], 7);
+    recordFrame(`resample stroke ${ri+1}/${state.strokes.length}: ${before}→${state.strokes[ri].length} pts`);
+  }
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedMulti = [];
+
+  // Detect markers then join/reduce
+  fetch(`/api/detect-markers/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  }).then(r => r.json()).then(md => {
+    if (md.markers) state.markers = md.markers;
+    recordFrame('markers detected');
+
+    // Skip auto-join: the optimizer already produced the correct stroke topology.
+    // Auto-join would merge nearby endpoints (vline + arcs) into one D-shaped stroke.
+    const locked = _lockMarkersToStrokes(state.markers || []);
+
+    draw();
+    updateStrokeList();
+    const pts = state.strokes.reduce((a, s) => a + s.length, 0);
+    const vc = (state.markers || []).filter(m => m.type === 'vertex').length;
+    const tc = (state.markers || []).filter(m => m.type === 'termination').length;
+    setStatus(`Pipeline: ${state.strokes.length} strokes, ${pts} pts, ${vc}V ${tc}T`);
+    stopRecording();
+  });
+}
+
+// ---- Streaming status banner ----
+let _streamTimer = null;
+let _streamStartTime = 0;
+
+function showStreamBanner(label) {
+  const banner = document.getElementById('streamBanner');
+  banner.classList.add('active');
+  banner.classList.remove('done');
+  document.getElementById('streamLabel').textContent = label || 'Streaming';
+  document.getElementById('streamPhase').textContent = '--';
+  document.getElementById('streamScore').textContent = '--';
+  document.getElementById('streamFrame').textContent = '--';
+  document.getElementById('streamStop').style.display = '';
+  _streamStartTime = Date.now();
+  document.getElementById('streamElapsed').textContent = '0s';
+  clearInterval(_streamTimer);
+  _streamTimer = setInterval(() => {
+    const s = Math.round((Date.now() - _streamStartTime) / 1000);
+    document.getElementById('streamElapsed').textContent = s + 's';
+  }, 1000);
+}
+
+function updateStreamBanner(frame, score, phase) {
+  document.getElementById('streamPhase').textContent = phase || '--';
+  document.getElementById('streamScore').textContent = score != null ? score : '--';
+  document.getElementById('streamFrame').textContent = frame != null ? frame : '--';
+}
+
+function hideStreamBanner(doneData) {
+  clearInterval(_streamTimer);
+  const banner = document.getElementById('streamBanner');
+  if (doneData && doneData.score != null) {
+    banner.classList.add('done');
+    const elapsed = doneData.elapsed != null ? doneData.elapsed + 's' :
+                    Math.round((Date.now() - _streamStartTime) / 1000) + 's';
+    document.getElementById('streamElapsed').textContent = elapsed;
+    const reasonMap = {perfect: 'Perfect', converged: 'Converged', 'time limit': 'Time limit'};
+    const reason = reasonMap[doneData.reason] || 'Done';
+    const cycles = doneData.cycles ? ` (${doneData.cycles} cycles)` : '';
+    document.getElementById('streamLabel').textContent = reason + cycles;
+    document.getElementById('streamScore').textContent = doneData.score;
+    document.getElementById('streamFrame').textContent = doneData.frame || '--';
+    document.getElementById('streamPhase').textContent = reason;
+    document.getElementById('streamStop').style.display = 'none';
+    // Auto-hide after 8 seconds
+    setTimeout(() => { banner.classList.remove('active', 'done'); }, 8000);
+  } else {
+    banner.classList.remove('active', 'done');
+  }
+}
+
+function stopStream() {
+  if (_optimizeES) {
+    _optimizeES.close();
+    _optimizeES = null;
+    stopRecording();
+    hideStreamBanner();
+    setStatus('Stream stopped by user');
+  }
+}
+
+let _optimizeES = null;  // EventSource for live optimize
+function runOptimizeLive() {
+  if (_optimizeES) { _optimizeES.close(); _optimizeES = null; }
+  pushUndo();
+  startRecording('Optimize');
+  setStatus('Optimizing live...');
+  showStreamBanner('Optimize Live');
+  const url = `/api/optimize-stream/${FONT_ID}?c=${encodeURIComponent(CHAR)}`;
+  _optimizeES = new EventSource(url);
+  let frameCount = 0;
+  _optimizeES.onmessage = function(ev) {
+    const d = JSON.parse(ev.data);
+    if (d.error) {
+      setStatus('Error: ' + d.error);
+      hideStreamBanner();
+      _optimizeES.close(); _optimizeES = null;
+      stopRecording();
+      return;
     }
-    state.strokes = resampled;
-    state.selectedStroke = -1;
-    state.selectedPoint = -1;
-    state.selectedMulti = [];
-
-    // Detect markers FIRST, then auto-join guided by them
-    fetch(`/api/detect-markers/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: '{}'
-    }).then(r => r.json()).then(md => {
-      if (md.markers) {
-        state.markers = md.markers;
-      }
-      // Auto-join uses markers to guide merges at vertices
-      const aj = _autoJoinStrokes();
-      // Reduce remaining fragments
-      const rd = _reduceStrokes();
-      // Lock any remaining stroke points to markers
-      const locked = _lockMarkersToStrokes(state.markers || []);
-
+    if (d.done) {
+      const reason = d.reason ? ` (${d.reason})` : '';
+      const cycles = d.cycles ? `, ${d.cycles} cycles` : '';
+      setStatus(`Optimize done: score=${d.score}, ${d.frame} frames${cycles}${reason}`);
+      hideStreamBanner(d);
+      _optimizeES.close(); _optimizeES = null;
+      stopRecording();
+      return;
+    }
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.markers = [];
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
       draw();
-      updateStrokeList();
-      const pts = state.strokes.reduce((a, s) => a + s.length, 0);
-      const vc = (state.markers || []).filter(m => m.type === 'vertex').length;
-      const tc = (state.markers || []).filter(m => m.type === 'termination').length;
-      const ic = (state.markers || []).filter(m => m.type === 'intersection').length;
-      setStatus(`Pipeline: ${state.strokes.length} strokes, ${pts} pts, ${vc}V ${tc}T ${ic}I, joined ${aj}, reduced ${rd}`);
-    });
+      frameCount++;
+      const phase = d.phase || '';
+      updateStreamBanner(d.frame, d.score, phase);
+      setStatus(`Frame ${d.frame}: score=${d.score}`);
+      recordFrame(`F${d.frame} score=${d.score}`);
+    }
+  };
+  _optimizeES.onerror = function() {
+    setStatus('Optimize stream ended');
+    hideStreamBanner();
+    _optimizeES.close(); _optimizeES = null;
+    stopRecording();
+  };
+}
+
+function clearShapeCache() {
+  fetch(`/api/clear-shape-cache/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST'
+  }).then(r => r.json()).then(d => {
+    if (d.ok) setStatus('Shape cache cleared for ' + CHAR);
+    else setStatus('Error clearing cache');
   });
 }
 
@@ -688,6 +1077,7 @@ function _autoJoinStrokes() {
       state.strokes.splice(higher, 1);
       state.strokes[lower] = merged;
       joined++;
+      recordFrame(`join at vertex: ${state.strokes.length} strokes remain`);
       changed = true;
       break; // restart - indices are stale
     }
@@ -744,6 +1134,15 @@ function _autoJoinStrokes() {
           const rawI = c.ei ? state.strokes[i][state.strokes[i].length - 1] : state.strokes[i][0];
           const rawJ = c.ej ? state.strokes[j][state.strokes[j].length - 1] : state.strokes[j][0];
           if (isVertex(rawI) || isVertex(rawJ)) continue;
+          // Don't join at intersection markers
+          const inters2 = (state.markers || []).filter(m => m.type === 'intersection');
+          let nearInt2 = false;
+          for (const m of inters2) {
+            if (dist(rawI, [m.x, m.y]) < SNAP_DIST || dist(rawJ, [m.x, m.y]) < SNAP_DIST) {
+              nearInt2 = true; break;
+            }
+          }
+          if (nearInt2) continue;
           const d = dist(rawI, rawJ);
           if (d > PROX_DIST) continue;
           const dirI = endDir(state.strokes[i], c.ei);
@@ -768,6 +1167,7 @@ function _autoJoinStrokes() {
       state.strokes.splice(bestJ, 1);
       state.strokes[bestI] = sI.concat(sJ);
       joined++;
+      recordFrame(`proximity join: ${state.strokes.length} strokes remain`);
       changed = true;
     }
   }
@@ -778,6 +1178,7 @@ function _autoJoinStrokes() {
 function runAutoJoin() {
   if (state.strokes.length < 2) { setStatus('Need at least 2 strokes'); return; }
   pushUndo();
+  startRecording('Auto-Join');
   const joined = _autoJoinStrokes();
   state.selectedStroke = -1;
   state.selectedPoint = -1;
@@ -785,7 +1186,10 @@ function runAutoJoin() {
   state.dirty = true;
   draw();
   updateStrokeList();
-  setStatus(joined > 0 ? `Auto-joined ${joined} pairs (${state.strokes.length} strokes remain)` : 'No joinable pairs found');
+  const msg = joined > 0 ? `Auto-joined ${joined} pairs (${state.strokes.length} strokes remain)` : 'No joinable pairs found';
+  setStatus(msg);
+  recordFrame(msg);
+  stopRecording();
 }
 
 function _reduceStrokes() {
@@ -879,6 +1283,16 @@ function _reduceStrokes() {
           const epI = c.flipI ? state.strokes[i][0] : state.strokes[i][state.strokes[i].length - 1];
           const epJ = c.flipJ ? state.strokes[j][state.strokes[j].length - 1] : state.strokes[j][0];
           if (isVertex(epI) || isVertex(epJ)) continue;
+          // Don't merge at intersection markers (strokes overlap there, not join)
+          const inters = (state.markers || []).filter(m => m.type === 'intersection');
+          let nearIntersection = false;
+          for (const m of inters) {
+            if (Math.sqrt((epI[0]-m.x)**2 + (epI[1]-m.y)**2) < 15 ||
+                Math.sqrt((epJ[0]-m.x)**2 + (epJ[1]-m.y)**2) < 15) {
+              nearIntersection = true; break;
+            }
+          }
+          if (nearIntersection) continue;
 
           // Build oriented copies to check junction
           const sI = c.flipI ? [...state.strokes[i]].reverse() : state.strokes[i];
@@ -916,6 +1330,7 @@ function _reduceStrokes() {
       state.strokes.splice(bestJ, 1);
       state.strokes[bestI] = sI.concat(sJ);
       merged++;
+      recordFrame(`reduce merge: ${state.strokes.length} strokes remain`);
       changed = true;
     }
   }
@@ -926,6 +1341,7 @@ function _reduceStrokes() {
 function runReduce() {
   if (state.strokes.length < 2) { setStatus('Need at least 2 strokes'); return; }
   pushUndo();
+  startRecording('Reduce');
   const merged = _reduceStrokes();
   state.selectedStroke = -1;
   state.selectedPoint = -1;
@@ -933,9 +1349,12 @@ function runReduce() {
   state.dirty = true;
   draw();
   updateStrokeList();
-  setStatus(merged > 0
+  const msg = merged > 0
     ? `Reduced: merged ${merged} pairs (${state.strokes.length} strokes remain)`
-    : 'No further reductions possible');
+    : 'No further reductions possible';
+  setStatus(msg);
+  recordFrame(msg);
+  stopRecording();
 }
 
 function runCenter() {
@@ -963,6 +1382,7 @@ function toggleVertex() {
     state.dirty = true;
     draw();
     setStatus('Toggled vertex on selected points');
+    recordFrame('toggle vertex (multi)');
     return;
   }
   if (state.selectedStroke < 0 || state.selectedPoint < 0) {
@@ -980,6 +1400,7 @@ function toggleVertex() {
   state.dirty = true;
   draw();
   setStatus('Toggled vertex');
+  recordFrame('toggle vertex');
 }
 
 // Strip vertex flags for DB/server, return clean [x,y] arrays
@@ -1014,11 +1435,14 @@ function restoreVertices(strokes, saved) {
 function _lockMarkersToStrokes(markers) {
   // Find the nearest stroke point to each vertex/termination marker and lock it.
   // Intersections are ignored - strokes pass through them without locking.
+  // If marker has stroke_id, only search within that stroke.
   let locked = 0;
   for (const m of markers) {
     if (m.type === 'intersection') continue;
     let bestDist = Infinity, bestSi = -1, bestPi = -1;
-    for (let si = 0; si < state.strokes.length; si++) {
+    const siMin = (m.stroke_id !== undefined) ? m.stroke_id : 0;
+    const siMax = (m.stroke_id !== undefined) ? m.stroke_id + 1 : state.strokes.length;
+    for (let si = siMin; si < siMax && si < state.strokes.length; si++) {
       for (let pi = 0; pi < state.strokes[si].length; pi++) {
         const p = state.strokes[si][pi];
         const dx = p[0] - m.x, dy = p[1] - m.y;
@@ -1033,6 +1457,7 @@ function _lockMarkersToStrokes(markers) {
     if (bestSi >= 0) {
       state.strokes[bestSi][bestPi] = [m.x, m.y, 1];
       locked++;
+      recordFrame(`lock ${m.type} → stroke ${bestSi+1} pt ${bestPi}`);
     }
   }
   return locked;
@@ -1049,6 +1474,7 @@ function clearPage() {
   draw();
   buildStrokeList();
   setStatus('Cleared all strokes and markers');
+  recordFrame('clear page');
 }
 
 function clearMarkers() {
@@ -1058,6 +1484,7 @@ function clearMarkers() {
   state.dirty = true;
   draw();
   setStatus('Cleared all markers');
+  recordFrame('clear markers');
 }
 
 function detectMarkers() {
@@ -1085,6 +1512,7 @@ function detectMarkers() {
     const ic = d.markers.filter(m => m.type === 'intersection').length;
     const lockMsg = locked > 0 ? `, ${locked} locked to strokes` : '';
     setStatus(`Detected ${vc}V ${tc}T ${ic}I${lockMsg}`);
+    recordFrame('detect markers');
   });
 }
 
@@ -1192,8 +1620,9 @@ function draw() {
         }
       }
 
-      // Start/End labels
-      if (stroke.length >= 2) {
+      // Start/End labels (only if no template markers, to avoid duplicates)
+      const hasTemplateMarkers = (state.markers || []).some(m => m.type === 'start' || m.type === 'stop');
+      if (stroke.length >= 2 && !hasTemplateMarkers) {
         const sx = stroke[0][0] * SCALE, sy = stroke[0][1] * SCALE;
         const ex = stroke[stroke.length-1][0] * SCALE, ey = stroke[stroke.length-1][1] * SCALE;
         ctx.font = 'bold 10px system-ui';
@@ -1209,12 +1638,42 @@ function draw() {
     }
   }
 
-  // Draw structural markers (vertices, terminations, intersections)
+  // Draw structural markers (vertices, terminations, starts, stops, curves)
   for (const m of state.markers) {
     const cx = m.x * SCALE;
     const cy = m.y * SCALE;
+    const label = m.label || '';
     ctx.lineWidth = 2;
-    if (m.type === 'vertex') {
+    if (m.type === 'start') {
+      // Triangle pointing right, green - stroke start
+      const r = 9;
+      ctx.fillStyle = 'rgba(0, 200, 0, 0.8)';
+      ctx.strokeStyle = '#0a0';
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy - r);
+      ctx.lineTo(cx + r * 0.7, cy);
+      ctx.lineTo(cx - r * 0.7, cy + r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, cx - 1, cy);
+    } else if (m.type === 'stop') {
+      // Square, red - stroke end
+      const r = 8;
+      ctx.fillStyle = 'rgba(220, 0, 0, 0.8)';
+      ctx.strokeStyle = '#a00';
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, cx, cy);
+    } else if (m.type === 'vertex') {
       // Diamond shape, cyan
       const r = 8;
       ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
@@ -1231,7 +1690,21 @@ function draw() {
       ctx.font = 'bold 9px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('V', cx, cy);
+      ctx.fillText(label || 'V', cx, cy);
+    } else if (m.type === 'curve') {
+      // Circle, orange - smooth curve waypoint
+      const r = 8;
+      ctx.fillStyle = 'rgba(255, 160, 0, 0.8)';
+      ctx.strokeStyle = '#f80';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label || 'C', cx, cy);
     } else if (m.type === 'intersection') {
       // Plus/cross shape, dim gray - informational only
       const r = 6;
@@ -1242,7 +1715,7 @@ function draw() {
       ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
       ctx.stroke();
     } else {
-      // Circle, red/orange - termination
+      // Circle, red/orange - termination (legacy)
       const r = 8;
       ctx.fillStyle = 'rgba(255, 100, 0, 0.7)';
       ctx.strokeStyle = '#f60';
@@ -1297,6 +1770,26 @@ function draw() {
     ctx.fillStyle = 'rgba(126, 184, 247, 0.1)';
     ctx.fillRect(marquee.x1, marquee.y1, marquee.x2 - marquee.x1, marquee.y2 - marquee.y1);
   }
+
+  // Frame counter overlay
+  if (recorder.sessions.length > 0) {
+    const totalFrames = recorder.sessions.reduce((a, s) => a + s.frames.length, 0);
+    let label;
+    if (recorder.viewSession >= 0 && recorder.viewSession < recorder.sessions.length) {
+      const s = recorder.sessions[recorder.viewSession];
+      label = `S${recorder.viewSession + 1} F${recorder.playIndex + 1}/${s.frames.length} (${totalFrames} total)`;
+    } else {
+      label = `${recorder.sessions.length} sessions, ${totalFrames} frames`;
+    }
+    ctx.font = 'bold 12px monospace';
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(4, 4, tw + 12, 20);
+    ctx.fillStyle = '#0f0';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(label, 10, 8);
+  }
 }
 
 // --- UI helpers ---
@@ -1348,6 +1841,7 @@ function deleteStroke(i) {
   state.dirty = true;
   draw();
   updateStrokeList();
+  recordFrame('delete stroke');
 }
 
 function deleteSelectedPoint() {
@@ -1378,6 +1872,7 @@ function deleteSelectedPoint() {
     state.dirty = true;
     draw();
     updateStrokeList();
+    recordFrame('delete points (multi)');
     return;
   }
 
@@ -1413,6 +1908,7 @@ function deleteSelectedPoint() {
   state.dirty = true;
   draw();
   updateStrokeList();
+  recordFrame('delete point');
 }
 
 function splitStroke() {
@@ -1441,6 +1937,7 @@ function splitStroke() {
   draw();
   updateStrokeList();
   setStatus(`Split into ${first.length} + ${second.length} points`);
+  recordFrame('split stroke');
 }
 
 function startJoin() {
@@ -1488,6 +1985,7 @@ function joinStrokes(firstHit, secondHit) {
   draw();
   updateStrokeList();
   setStatus(`Joined strokes (${joined.length} points)`);
+  recordFrame('join strokes');
 }
 
 function setMode(mode) {
@@ -1612,6 +2110,7 @@ canvas.addEventListener('mousedown', e => {
       dragging = true;
       draw();
       updateStrokeList();
+      recordFrame('insert point');
       return;
     }
 
@@ -1630,6 +2129,7 @@ canvas.addEventListener('mousedown', e => {
     const coordY = my / SCALE;
     state.newStrokePoints.push([coordX, coordY]);
     draw();
+    recordFrame('add stroke point');
 
   } else if (state.mode === 'deleteStroke') {
     const hit = findPoint(mx, my, 15);
@@ -1689,7 +2189,9 @@ canvas.addEventListener('mousedown', e => {
     draw();
     const vc = state.markers.filter(m => m.type === 'vertex').length;
     const tc = state.markers.filter(m => m.type === 'termination').length;
-    setStatus(`${markerType === 'vertex' ? (removed ? 'Removed' : 'Added') : (removed ? 'Removed' : 'Added')} ${markerType} (${vc}V, ${tc}T)`);
+    const markerMsg = `${removed ? 'remove' : 'add'} ${markerType}`;
+    setStatus(`${removed ? 'Removed' : 'Added'} ${markerType} (${vc}V, ${tc}T)`);
+    recordFrame(markerMsg);
   }
 });
 
@@ -1706,6 +2208,9 @@ canvas.addEventListener('mousemove', e => {
     return;
   }
 
+  const now = Date.now();
+  const shouldRecord = (now - recorder.lastDragFrame) > 80;
+
   if (multiDragging && state.selectedMulti.length > 0) {
     const dx = (mx - dragStartX) / SCALE;
     const dy = (my - dragStartY) / SCALE;
@@ -1718,6 +2223,7 @@ canvas.addEventListener('mousemove', e => {
     dragStartY = my;
     state.dirty = true;
     draw();
+    if (shouldRecord) { recorder.lastDragFrame = now; recordFrame('drag multi'); }
     return;
   }
 
@@ -1727,6 +2233,7 @@ canvas.addEventListener('mousemove', e => {
     state.strokes[state.selectedStroke][state.selectedPoint] = [coordX, coordY];
     state.dirty = true;
     draw();
+    if (shouldRecord) { recorder.lastDragFrame = now; recordFrame('drag point'); }
   }
 });
 
@@ -1764,6 +2271,8 @@ canvas.addEventListener('mouseup', () => {
     marquee = null;
     draw();
     updateStrokeList();
+  } else if (dragging) {
+    recordFrame('drop');
   }
   dragging = false;
   multiDragging = false;
@@ -1859,6 +2368,7 @@ document.addEventListener('keydown', e => {
           state.strokes.push(state.newStrokePoints);
           state.dirty = true;
           updateStrokeList();
+          recordFrame('new stroke');
         }
         state.newStrokePoints = [];
         setMode('select');
@@ -1880,8 +2390,11 @@ document.addEventListener('keydown', e => {
     case 'e': runResample(); break;
     case 'k': runSkeleton(); break;
     case 'f': runSkeletonFull(); break;
+    case 'o': runOptimizeLive(); break;
     case 'w': runAutoJoin(); break;
     case 'q': runReduce(); break;
+    case 'y': runDiffVG(); break;
+    case 'p': togglePlay(); break;
     case '1': setMode('addVertex'); break;
     case '2': setMode('addTermination'); break;
     case '3': clearMarkers(); break;
@@ -1904,6 +2417,136 @@ function navigateChar(dir) {
   if (next < 0 || next >= CHAR_LIST.length) return;
   if (state.dirty && !confirm('Unsaved changes. Continue?')) return;
   window.location.href = `/edit/${FONT_ID}?c=${encodeURIComponent(CHAR_LIST[next])}`;
+}
+
+// --- Playback ---
+
+// Build a flat list of all frames across all sessions, with session labels
+function _getAllFrames() {
+  const all = [];
+  for (let si = 0; si < recorder.sessions.length; si++) {
+    const s = recorder.sessions[si];
+    for (let fi = 0; fi < s.frames.length; fi++) {
+      all.push({frame: s.frames[fi], sessionIdx: si, label: s.label, localIdx: fi});
+    }
+  }
+  return all;
+}
+
+function _getActiveFrames() {
+  const si = recorder.viewSession;
+  if (si === -1) return _getAllFrames();
+  if (si >= 0 && si < recorder.sessions.length) {
+    const s = recorder.sessions[si];
+    return s.frames.map((f, fi) => ({frame: f, sessionIdx: si, label: s.label, localIdx: fi}));
+  }
+  return [];
+}
+
+function updatePlayerPanel() {
+  const panel = document.getElementById('playerPanel');
+  if (recorder.sessions.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const sel = document.getElementById('sessionSelect');
+  const curVal = sel.value;
+  const totalFrames = recorder.sessions.reduce((a, s) => a + s.frames.length, 0);
+  let html = `<option value="-1">All (${totalFrames}f)</option>`;
+  html += recorder.sessions.map((s, i) =>
+    `<option value="${i}">${s.label} (${s.frames.length}f)</option>`
+  ).join('');
+  sel.innerHTML = html;
+  sel.value = recorder.viewSession;
+  const frames = _getActiveFrames();
+  const tl = document.getElementById('timeline');
+  tl.max = Math.max(0, frames.length - 1);
+  tl.value = Math.min(recorder.playIndex, frames.length - 1);
+  const idx = +tl.value;
+  if (frames.length > 0 && idx < frames.length) {
+    const f = frames[idx];
+    document.getElementById('frameInfo').textContent =
+      `F${idx + 1}/${frames.length}` + (f.frame.status ? ' - ' + f.frame.status : '');
+  } else {
+    document.getElementById('frameInfo').textContent = `0/${frames.length}`;
+  }
+}
+
+function selectSession() {
+  const si = +document.getElementById('sessionSelect').value;
+  recorder.viewSession = si;
+  recorder.playIndex = 0;
+  seekFrame(0);
+}
+
+function seekFrame(idx) {
+  const frames = _getActiveFrames();
+  if (frames.length === 0) return;
+  idx = Math.max(0, Math.min(idx, frames.length - 1));
+  recorder.playIndex = idx;
+  const entry = frames[idx];
+  const frame = entry.frame;
+  state.strokes = JSON.parse(JSON.stringify(frame.strokes));
+  state.markers = JSON.parse(JSON.stringify(frame.markers));
+  state.selectedStroke = -1;
+  state.selectedPoint = -1;
+  state.selectedMulti = [];
+  draw();
+  updateStrokeList();
+  document.getElementById('timeline').value = idx;
+  document.getElementById('frameInfo').textContent =
+    `F${idx + 1}/${frames.length}` + (frame.status ? ' - ' + frame.status : '');
+  setStatus(`[${entry.label}] Frame ${idx + 1}/${frames.length}${frame.status ? ': ' + frame.status : ''}`);
+}
+
+function togglePlay() {
+  if (recorder.sessions.length === 0) return;
+  if (recorder.playing) {
+    clearInterval(recorder.playTimer);
+    recorder.playing = false;
+    document.getElementById('btnPlayPause').textContent = 'Play';
+  } else {
+    const frames = _getActiveFrames();
+    if (frames.length === 0) return;
+    // If at the end, restart from frame 0
+    if (recorder.playIndex >= frames.length - 1) {
+      recorder.playIndex = 0;
+      seekFrame(0);
+    }
+    recorder.playing = true;
+    document.getElementById('btnPlayPause').textContent = 'Pause';
+    recorder.playTimer = setInterval(() => {
+      const frames = _getActiveFrames();
+      if (recorder.playIndex >= frames.length - 1) { togglePlay(); return; }
+      seekFrame(recorder.playIndex + 1);
+    }, recorder.playSpeed);
+  }
+}
+
+function playStep(dir) {
+  if (recorder.playing) togglePlay();
+  seekFrame(recorder.playIndex + dir);
+}
+
+function playFirst() {
+  if (recorder.playing) togglePlay();
+  seekFrame(0);
+}
+
+function playLast() {
+  if (recorder.playing) togglePlay();
+  const frames = _getActiveFrames();
+  seekFrame(frames.length - 1);
+}
+
+function setPlaySpeed(ms) {
+  recorder.playSpeed = ms;
+  if (recorder.playing) {
+    clearInterval(recorder.playTimer);
+    recorder.playTimer = setInterval(() => {
+      const frames = _getActiveFrames();
+      if (recorder.playIndex >= frames.length - 1) { togglePlay(); return; }
+      seekFrame(recorder.playIndex + 1);
+    }, recorder.playSpeed);
+  }
 }
 
 // --- Init ---
