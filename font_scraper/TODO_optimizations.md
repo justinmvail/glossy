@@ -71,9 +71,41 @@ InkSight outputs vary significantly in bounding box size:
 - Validate bounding box size is reasonable
 - OCR validation on rendered strokes
 
+## Shape Optimizer Performance
+
+The Skel+Resample shape optimizer fits parametric shapes (vline, arc, loop, etc.) to glyph masks using scipy DE + Nelder-Mead.
+
+### Current Performance
+- **Phase 0 (affine):** 1-2s, scores 0.35-0.67 depending on font/character
+- **Phase 1 (greedy):** 2-5s, scores 0.50-0.65
+- **Full cycle (NM→DE→NM):** 20-40s per cycle
+- **Convergence:** Typically stagnates after 1-3 cycles (score improves < 0.001)
+- **Best scores achieved:** 0.67-0.70 for B across test fonts
+
+### Key Bottleneck
+Scoring function called ~10,000+ times per cycle. Each call: build shape points → smooth → snap to mask → KD-tree coverage query → compute penalties. At ~0.3ms per call, a single DE run (200 generations × 20 population) = 4000 evaluations = ~1.2s, but typically needs multiple restarts.
+
+### Problems Identified
+1. **Gradient-free on smooth problem** — DE/NM can't see which way to move points. A differentiable renderer (DiffVG/PyTorch) would give exact gradients and converge orders of magnitude faster.
+2. **Affine often wins** — The quick affine transform (6 params, 1-2s) frequently outscores the full 15-dim shape optimizer (30s+). Shape optimization may be wasted computation.
+3. **NM ignores bounds** — Required manual clamping in every objective function. Easy to miss and causes silent failures.
+4. **Post-processing undoes optimization** — Auto-join merged separate strokes. Had to be disabled.
+5. **Search space too large** — B has 15 parameters with tight interdependencies (arc heights must not overlap). Box constraints can't express these relationships.
+
+### Potential Improvements
+| Approach | Impact | Effort | Status |
+|----------|--------|--------|--------|
+| DiffVG / PyTorch differentiable rendering | Very high (100x faster convergence) | High | Not attempted |
+| Use InkSight output instead of shape optimizer | High (already built) | Low | Not compared |
+| GPU-accelerated batch scoring (cupy) | Medium (5-10x per-eval speedup) | Medium | Not attempted |
+| Multiprocess DE population evaluation | Medium (4-8x on multi-core) | Medium | Not attempted |
+| Reduce point cloud density | Low (minor speedup, quality tradeoff) | Low | Partially done (spacing=3) |
+
 ## Next Steps After Current Run
 1. Check results quality - identify failed characters
 2. Run post-processing (cleanup, snap, smooth)
 3. OCR validation on processed strokes
 4. Re-run or filter low-quality characters
 5. Consider optimizations for re-runs
+6. Compare InkSight vs shape optimizer output quality for B and other multi-arc characters
+7. Evaluate DiffVG integration feasibility (PyTorch already in repo for EMNIST)

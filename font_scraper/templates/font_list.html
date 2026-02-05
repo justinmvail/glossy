@@ -8,9 +8,15 @@
   h1 { margin-bottom: 5px; }
   .subtitle { color: #888; margin-bottom: 20px; }
   .controls { display: flex; gap: 15px; align-items: center; margin-bottom: 15px; }
-  table { border-collapse: collapse; width: 100%; max-width: 1000px; }
+  table { border-collapse: collapse; width: 100%; max-width: 1400px; }
+  .font-sample { height: 36px; max-width: 300px; vertical-align: middle; }
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; }
   th { color: #888; font-weight: 600; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #7eb8f7; }
+  th.sortable::after { content: ''; margin-left: 5px; }
+  th.sort-asc::after { content: ' \u25B2'; }
+  th.sort-desc::after { content: ' \u25BC'; }
   a { color: #7eb8f7; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .count { color: #888; }
@@ -22,6 +28,7 @@
     border-radius: 4px; cursor: pointer; font-size: 12px;
   }
   .btn:hover { background: #333; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn.reject { border-color: #a55; color: #f88; }
   .btn.reject:hover { background: #422; }
   .btn.unreject { border-color: #5a5; color: #8f8; }
@@ -38,16 +45,38 @@
   <input type="text" id="search" placeholder="Filter fonts..." oninput="filterFonts()">
   {% if show_rejected %}
     <a href="/" class="btn toggle active">Showing Rejected</a>
+    <button class="btn unreject" onclick="restoreAll()">Restore All</button>
   {% else %}
     <a href="/?rejected=1" class="btn toggle">Show Rejected</a>
+    <button class="btn" id="checkBtn" onclick="verifyFonts()">Verify Fonts</button>
+    <button class="btn test" id="testBtn" onclick="testFirst10()" style="border-color:#58f;color:#8cf;">Test First 10</button>
+    <button class="btn reject" id="rejectBtn" onclick="rejectConnected()">Reject</button>
   {% endif %}
+  <span id="statusMsg" style="color:#888;font-size:13px;"></span>
 </div>
 <table>
-  <thead><tr><th>Font</th><th>Source</th><th>Characters</th><th></th></tr></thead>
+  <thead><tr>
+    <th class="sortable" data-col="0" data-type="text" onclick="sortTable(this)">Font</th>
+    <th>Sample</th>
+    <th class="sortable" data-col="2" data-type="num" onclick="sortTable(this)">Shapes</th>
+    <th class="sortable" data-col="3" data-type="num" onclick="sortTable(this)">Max Width</th>
+    <th class="sortable" data-col="4" data-type="text" onclick="sortTable(this)">"l" Test</th>
+    <th class="sortable" data-col="5" data-type="text" onclick="sortTable(this)">"!" Test</th>
+    <th class="sortable" data-col="6" data-type="num" onclick="sortTable(this)">Case Issues</th>
+    <th class="sortable" data-col="7" data-type="text" onclick="sortTable(this)">Source</th>
+    <th class="sortable" data-col="8" data-type="num" onclick="sortTable(this)">Characters</th>
+    <th></th>
+  </tr></thead>
   <tbody id="fontTable">
   {% for f in fonts %}
     <tr data-name="{{ f.name|lower }}" data-id="{{ f.id }}" {% if f.rejected %}class="rejected"{% endif %}>
       <td><a href="/font/{{ f.id }}">{{ f.name }}</a></td>
+      <td><img class="font-sample" src="/api/font-sample/{{ f.id }}" loading="lazy" alt=""></td>
+      <td class="shapes" data-id="{{ f.id }}">-</td>
+      <td class="width" data-id="{{ f.id }}">-</td>
+      <td class="ltest" data-id="{{ f.id }}">-</td>
+      <td class="extest" data-id="{{ f.id }}">-</td>
+      <td class="casetest" data-id="{{ f.id }}">-</td>
       <td class="source">{{ f.source or '' }}</td>
       <td class="count">{{ f.char_count }}</td>
       <td>
@@ -62,6 +91,42 @@
   </tbody>
 </table>
 <script>
+function sortTable(th) {
+  const col = parseInt(th.dataset.col);
+  const type = th.dataset.type;
+  const tbody = document.getElementById('fontTable');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+
+  // Determine sort direction
+  const isAsc = th.classList.contains('sort-asc');
+  const dir = isAsc ? -1 : 1;
+
+  // Clear other sort indicators
+  document.querySelectorAll('th.sortable').forEach(h => {
+    h.classList.remove('sort-asc', 'sort-desc');
+  });
+  th.classList.add(isAsc ? 'sort-desc' : 'sort-asc');
+
+  // Sort rows
+  rows.sort((a, b) => {
+    const aCell = a.cells[col];
+    const bCell = b.cells[col];
+    let aVal = aCell ? aCell.textContent.trim() : '';
+    let bVal = bCell ? bCell.textContent.trim() : '';
+
+    if (type === 'num') {
+      aVal = parseFloat(aVal) || 0;
+      bVal = parseFloat(bVal) || 0;
+      return (aVal - bVal) * dir;
+    } else {
+      return aVal.localeCompare(bVal) * dir;
+    }
+  });
+
+  // Re-append rows in sorted order
+  rows.forEach(row => tbody.appendChild(row));
+}
+
 function filterFonts() {
   const q = document.getElementById('search').value.toLowerCase();
   document.querySelectorAll('#fontTable tr').forEach(tr => {
@@ -91,6 +156,218 @@ function unrejectFont(fontId, btn) {
       }
     });
 }
+
+function restoreAll() {
+  const count = document.querySelectorAll('#fontTable tr').length;
+  if (!confirm(`Restore all ${count} rejected fonts?`)) return;
+  const status = document.getElementById('statusMsg');
+  status.textContent = 'Restoring...';
+  fetch('/api/unreject-all', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        status.textContent = `Restored ${d.restored} fonts.`;
+        setTimeout(() => location.href = '/', 1500);
+      } else {
+        status.textContent = 'Error: ' + (d.error || 'unknown');
+      }
+    })
+    .catch(err => {
+      status.textContent = 'Error: ' + err;
+    });
+}
+
+function rejectConnected() {
+  if (!confirm('Reject all fonts based on known criteria?')) return;
+  const status = document.getElementById('statusMsg');
+  status.textContent = 'Checking fonts...';
+  fetch('/api/reject-connected', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        status.textContent = `Checked ${d.checked}, rejected ${d.rejected} connected fonts.`;
+        if (d.rejected > 0) {
+          setTimeout(() => location.reload(), 1500);
+        }
+      } else {
+        status.textContent = 'Error: ' + (d.error || 'unknown');
+      }
+    })
+    .catch(err => {
+      status.textContent = 'Error: ' + err;
+    });
+}
+
+async function verifyFonts() {
+  const status = document.getElementById('statusMsg');
+  const rejectBtn = document.getElementById('rejectBtn');
+  const checkBtn = document.getElementById('checkBtn');
+  const shapeCells = document.querySelectorAll('td.shapes[data-id]');
+  console.log('verifyFonts: found', shapeCells.length, 'fonts');
+  status.textContent = `Verifying ${shapeCells.length} fonts...`;
+
+  if (rejectBtn) rejectBtn.disabled = true;
+  if (checkBtn) checkBtn.disabled = true;
+
+  if (shapeCells.length === 0) {
+    status.textContent = 'No fonts found to verify';
+    if (rejectBtn) rejectBtn.disabled = false;
+    if (checkBtn) checkBtn.disabled = false;
+    return;
+  }
+
+  let checked = 0;
+  for (const shapeCell of shapeCells) {
+    const fontId = shapeCell.dataset.id;
+    const widthCell = document.querySelector(`td.width[data-id="${fontId}"]`);
+    const ltestCell = document.querySelector(`td.ltest[data-id="${fontId}"]`);
+    const extestCell = document.querySelector(`td.extest[data-id="${fontId}"]`);
+    const casetestCell = document.querySelector(`td.casetest[data-id="${fontId}"]`);
+    try {
+      const r = await fetch(`/api/check-connected/${fontId}`);
+      const d = await r.json();
+      if (!r.ok || d.error) {
+        const errMsg = d.error || `HTTP ${r.status}`;
+        console.error('API error for font', fontId, errMsg);
+        shapeCell.textContent = '-';
+        shapeCell.title = errMsg;
+        shapeCell.style.color = '#888';
+        if (widthCell) {
+          widthCell.textContent = '-';
+          widthCell.title = errMsg;
+          widthCell.style.color = '#888';
+        }
+        if (ltestCell) {
+          ltestCell.textContent = '-';
+          ltestCell.title = errMsg;
+          ltestCell.style.color = '#888';
+        }
+        if (extestCell) {
+          extestCell.textContent = '-';
+          extestCell.title = errMsg;
+          extestCell.style.color = '#888';
+        }
+        if (casetestCell) {
+          casetestCell.textContent = '-';
+          casetestCell.title = errMsg;
+          casetestCell.style.color = '#888';
+        }
+        continue;
+      }
+      console.log('Font', fontId, 'shapes:', d.shapes, 'width:', d.max_width_pct, 'case_mismatches:', d.case_mismatches);
+      if (d.shapes !== undefined) {
+        // Shapes column
+        shapeCell.textContent = d.shapes;
+        const badShapes = d.shapes < 10 || d.shapes > 15;
+        shapeCell.style.color = badShapes ? '#f88' : '#8f8';
+
+        // Width column
+        if (widthCell) {
+          widthCell.textContent = d.max_width_pct + '%';
+          const badWidth = d.max_width_pct > 22.5;
+          widthCell.style.color = badWidth ? '#f88' : '#8f8';
+        }
+
+        // "l" test column
+        if (ltestCell) {
+          ltestCell.textContent = d.l_has_hole ? 'FAIL' : 'PASS';
+          ltestCell.style.color = d.l_has_hole ? '#f88' : '#8f8';
+        }
+
+        // "!" test column
+        if (extestCell) {
+          extestCell.textContent = d.exclaim_ok ? 'PASS' : `FAIL (${d.exclaim_shapes})`;
+          extestCell.style.color = d.exclaim_ok ? '#8f8' : '#f88';
+        }
+
+        // Case mismatch column
+        if (casetestCell) {
+          const count = d.case_mismatch_count || 0;
+          const letters = d.case_mismatches || [];
+          if (count === 0) {
+            casetestCell.textContent = 'OK';
+            casetestCell.style.color = '#8f8';
+            casetestCell.title = '';
+          } else {
+            casetestCell.textContent = count;
+            casetestCell.style.color = count > 5 ? '#f88' : '#ff8';
+            casetestCell.title = `Lowercase = Uppercase: ${letters.join(', ')}`;
+          }
+        }
+      } else {
+        shapeCell.textContent = '?';
+        if (widthCell) widthCell.textContent = '?';
+        if (casetestCell) casetestCell.textContent = '?';
+      }
+    } catch (e) {
+      console.error('Error verifying font', fontId, e);
+      shapeCell.textContent = '-';
+      shapeCell.title = 'Error: ' + e;
+      if (widthCell) {
+        widthCell.textContent = '-';
+        widthCell.title = 'Error: ' + e;
+      }
+      if (ltestCell) {
+        ltestCell.textContent = '-';
+        ltestCell.title = 'Error: ' + e;
+      }
+      if (extestCell) {
+        extestCell.textContent = '-';
+        extestCell.title = 'Error: ' + e;
+      }
+      if (casetestCell) {
+        casetestCell.textContent = '-';
+        casetestCell.title = 'Error: ' + e;
+      }
+    }
+    checked++;
+    if (checked % 10 === 0) {
+      status.textContent = `Verified ${checked}/${shapeCells.length}...`;
+    }
+  }
+  status.textContent = `Verified ${checked} fonts.`;
+  if (rejectBtn) rejectBtn.disabled = false;
+  if (checkBtn) checkBtn.disabled = false;
+}
+
+async function testFirst10() {
+  const status = document.getElementById('statusMsg');
+  const testBtn = document.getElementById('testBtn');
+  const rows = Array.from(document.querySelectorAll('#fontTable tr')).filter(r => r.style.display !== 'none');
+  const first10 = rows.slice(0, 10);
+
+  if (first10.length === 0) {
+    status.textContent = 'No fonts to test';
+    return;
+  }
+
+  testBtn.disabled = true;
+  status.textContent = `Testing ${first10.length} fonts...`;
+
+  let tested = 0;
+  let totalScore = 0;
+  for (const row of first10) {
+    const fontId = row.dataset.id;
+    const fontName = row.querySelector('a')?.textContent || fontId;
+    status.textContent = `Testing ${tested + 1}/${first10.length}: ${fontName}...`;
+
+    try {
+      const r = await fetch(`/api/test-run/${fontId}`, {method: 'POST'});
+      const d = await r.json();
+      if (d.ok && d.avg_score !== undefined) {
+        totalScore += d.avg_score;
+      }
+    } catch (e) {
+      console.error('Error testing font', fontId, e);
+    }
+    tested++;
+  }
+
+  const avgScore = tested > 0 ? (totalScore / tested).toFixed(3) : 'N/A';
+  status.textContent = `Tested ${tested} fonts. Avg score: ${avgScore}`;
+  testBtn.disabled = false;
+}
+
 </script>
 </body>
 </html>

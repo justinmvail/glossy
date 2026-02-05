@@ -18,10 +18,18 @@ import numpy as np
 import pydiffvg
 import torch
 from PIL import Image, ImageDraw, ImageFont
+from skimage.morphology import thin
 
 
-def render_glyph_mask(font_path, char, canvas_size=224):
-    """Render a single character glyph as a binary mask."""
+def render_glyph_mask(font_path, char, canvas_size=224, thin_iterations=0):
+    """Render a single character glyph as a binary mask.
+
+    Args:
+        font_path: Path to font file
+        char: Character to render
+        canvas_size: Canvas size in pixels
+        thin_iterations: Number of topology-preserving thinning iterations
+    """
     img = Image.new('L', (canvas_size, canvas_size), 255)
     draw = ImageDraw.Draw(img)
 
@@ -45,7 +53,13 @@ def render_glyph_mask(font_path, char, canvas_size=224):
             y = (canvas_size - th) / 2 - bbox[1]
             draw.text((x, y), char, fill=0, font=font)
             arr = np.array(img)
-            return arr < 128  # Boolean mask
+            mask = arr < 128  # Boolean mask
+
+            # Apply topology-preserving thinning
+            if thin_iterations > 0:
+                mask = thin(mask, max_num_iter=thin_iterations)
+
+            return mask
     return None
 
 
@@ -110,24 +124,24 @@ def render_scene(shapes, shape_groups, canvas_size, device):
 
 
 def compute_loss(rendered, target, stroke_points_list, stroke_widths=None,
-                 glyph_weight=10.0, outside_weight=2.0, smoothness_weight=0.001):
-    """Compute optimization loss with region-weighted MSE.
-
-    The glyph typically covers only ~10% of canvas pixels. Plain MSE is
-    dominated by the 90% background, causing strokes to vanish. We weight
-    glyph-region pixels much higher so the optimizer is incentivized to
-    cover the glyph.
+                 initial_points_list=None, glyph_weight=10.0, outside_weight=5.0,
+                 smoothness_weight=0.001, anchor_weight=2.0, coverage_weight=5.0):
+    """Compute optimization loss with topology preservation and coverage.
 
     Args:
         rendered: (H, W) float tensor, 0=black stroke, 1=white background
         target: (H, W) float tensor, 0=glyph, 1=background
         stroke_points_list: list of (N, 2) tensors for smoothness regularization
+        initial_points_list: list of (N, 2) tensors - original positions for anchoring
         glyph_weight: extra weight for pixels inside the glyph region
-        outside_weight: penalty weight for strokes outside the glyph
+        outside_weight: penalty for strokes outside the glyph
         smoothness_weight: weight for curvature penalty
+        anchor_weight: penalty for deviation from initial positions (preserves topology)
+        coverage_weight: penalty for uncovered glyph pixels
     """
     glyph_mask = (target < 0.5).float()   # 1 where glyph, 0 where bg
     bg_mask = 1.0 - glyph_mask
+    stroke_mask = (rendered < 0.5).float()  # 1 where stroke renders
 
     # Per-pixel squared error
     sq_err = (rendered - target) ** 2
@@ -140,6 +154,10 @@ def compute_loss(rendered, target, stroke_points_list, stroke_widths=None,
     stroke_pixels = (1.0 - rendered).clamp(min=0)  # how dark each pixel is
     outside_penalty = (stroke_pixels * bg_mask).sum() / bg_mask.sum().clamp(min=1)
 
+    # Coverage penalty: glyph pixels not covered by strokes
+    uncovered = glyph_mask * (1.0 - stroke_mask)  # glyph pixels without strokes
+    coverage_penalty = uncovered.sum() / glyph_mask.sum().clamp(min=1)
+
     # Smoothness: penalize high curvature in polylines
     smoothness = torch.tensor(0.0, device=rendered.device)
     for points in stroke_points_list:
@@ -148,7 +166,15 @@ def compute_loss(rendered, target, stroke_points_list, stroke_widths=None,
             d2 = d1[1:] - d1[:-1]
             smoothness = smoothness + (d2 ** 2).mean()
 
-    return loss_mse + outside_weight * outside_penalty + smoothness_weight * smoothness
+    # Anchor: penalize deviation from initial positions to preserve topology
+    anchor_loss = torch.tensor(0.0, device=rendered.device)
+    if initial_points_list is not None:
+        for points, initial in zip(stroke_points_list, initial_points_list):
+            anchor_loss = anchor_loss + ((points - initial) ** 2).mean()
+
+    return (loss_mse + outside_weight * outside_penalty +
+            coverage_weight * coverage_penalty +
+            smoothness_weight * smoothness + anchor_weight * anchor_loss)
 
 
 def compute_score(rendered, target):
@@ -187,7 +213,7 @@ def optimize(config):
 
     Args:
         config: dict with font_path, char, canvas_size, initial_strokes,
-                num_iterations, stroke_width, lr
+                num_iterations, stroke_width, lr, erode_iterations
     Returns:
         dict with strokes, score, iterations, final_loss, elapsed
     """
@@ -200,12 +226,13 @@ def optimize(config):
     initial_width = config.get('stroke_width', 8.0)
     lr = config.get('lr', 1.0)
     max_pts_per_stroke = config.get('max_points_per_stroke', 40)
+    thin_iterations = config.get('thin_iterations', 0)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pydiffvg.set_use_gpu(torch.cuda.is_available())
 
-    # Render target glyph mask
-    mask = render_glyph_mask(font_path, char, canvas_size)
+    # Render target glyph mask (optionally thinned to reduce junction blobs)
+    mask = render_glyph_mask(font_path, char, canvas_size, thin_iterations)
     if mask is None:
         return {'error': f'Could not render glyph for {char}'}
 
@@ -239,6 +266,9 @@ def optimize(config):
           f'width: {initial_width}, lr: {lr}, iters: {num_iterations}',
           file=sys.stderr, flush=True)
 
+    # Save initial positions for anchor regularization (preserves topology)
+    initial_points_list = [pts.detach().clone() for pts in stroke_points_list]
+
     # Optimizers: separate LRs for points and widths
     optimizer_pts = torch.optim.Adam(stroke_points_list, lr=lr)
     optimizer_w = torch.optim.Adam(stroke_widths, lr=0.5)
@@ -259,7 +289,8 @@ def optimize(config):
         )
         rendered = render_scene(shapes, shape_groups, canvas_size, device)
 
-        loss = compute_loss(rendered, target, stroke_points_list, stroke_widths)
+        loss = compute_loss(rendered, target, stroke_points_list, stroke_widths,
+                            initial_points_list)
         loss.backward()
 
         optimizer_pts.step()

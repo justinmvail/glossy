@@ -74,6 +74,7 @@ class DiffVGDocker:
         canvas_size: int = 224,
         num_iterations: int = 500,
         stroke_width: float = 8.0,
+        thin_iterations: int = 0,
         timeout: int = 300,
     ) -> Dict:
         """
@@ -86,6 +87,7 @@ class DiffVGDocker:
             canvas_size: Canvas size in pixels (default 224)
             num_iterations: Number of Adam optimizer iterations
             stroke_width: Initial stroke width in pixels
+            thin_iterations: Number of topology-preserving thinning iterations
             timeout: Max seconds to wait for container
 
         Returns:
@@ -106,6 +108,7 @@ class DiffVGDocker:
             'canvas_size': canvas_size,
             'num_iterations': num_iterations,
             'stroke_width': stroke_width,
+            'thin_iterations': thin_iterations,
         }
         if initial_strokes:
             config['initial_strokes'] = initial_strokes

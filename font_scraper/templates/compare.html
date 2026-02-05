@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ font.name }} - Test Comparison</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+  a { color: #7eb8f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .nav { margin-bottom: 15px; }
+  h1 { margin: 0 0 5px 0; }
+  .subtitle { color: #888; margin-bottom: 20px; }
+  .summary { background: #222; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: flex; gap: 30px; align-items: center; }
+  .summary .avg { font-size: 24px; font-weight: bold; }
+  .summary .avg.improved { color: #8f8; }
+  .summary .avg.regressed { color: #f88; }
+  .summary .avg.unchanged { color: #888; }
+  .summary .arrow { font-size: 20px; color: #888; }
+  .summary .delta { font-size: 18px; padding: 5px 10px; border-radius: 4px; }
+  .summary .delta.up { background: #243; color: #8f8; }
+  .summary .delta.down { background: #432; color: #f88; }
+  .filters { margin-bottom: 15px; display: flex; gap: 10px; }
+  .btn { padding: 5px 12px; border: 1px solid #444; background: #222; color: #eee; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .btn:hover { background: #333; }
+  .btn.active { background: #335; border-color: #7eb8f7; }
+
+  .comparison-grid { display: flex; flex-direction: column; gap: 15px; }
+  .char-row { display: flex; gap: 20px; background: #222; padding: 15px; border-radius: 6px; align-items: center; }
+  .char-row.improved { border-left: 3px solid #8f8; }
+  .char-row.regressed { border-left: 3px solid #f88; }
+  .char-row.unchanged { border-left: 3px solid #555; }
+
+  .char-label { font-size: 36px; min-width: 50px; text-align: center; }
+  .scores { display: flex; flex-direction: column; gap: 5px; min-width: 120px; }
+  .scores .old { color: #888; font-size: 14px; }
+  .scores .new { font-size: 18px; font-weight: bold; }
+  .scores .delta { font-size: 12px; }
+  .scores .delta.up { color: #8f8; }
+  .scores .delta.down { color: #f88; }
+
+  .previews { display: flex; gap: 10px; flex: 1; }
+  .preview-box { text-align: center; }
+  .preview-box .label { font-size: 11px; color: #666; margin-bottom: 5px; }
+  .preview-box img { width: 150px; height: 150px; background: #1a1a2e; border: 1px solid #333; border-radius: 4px; object-fit: contain; }
+
+  .metrics { display: flex; gap: 15px; font-size: 12px; color: #888; }
+  .metric { display: flex; flex-direction: column; align-items: center; }
+  .metric-val { color: #aaa; }
+
+  .loading { color: #888; font-style: italic; padding: 20px; }
+  .no-data { color: #666; font-style: italic; padding: 20px; }
+</style>
+</head>
+<body>
+<div class="nav">
+  <a href="/">&larr; All Fonts</a> |
+  <a href="/font/{{ font.id }}">&larr; {{ font.name }}</a>
+</div>
+<h1>Test Comparison: {{ font.name }}</h1>
+<p class="subtitle" id="dateRange">Loading...</p>
+
+<div class="summary" id="summary">
+  <div class="loading">Loading comparison data...</div>
+</div>
+
+<div class="filters">
+  <button class="btn active" data-filter="all" onclick="filterRows('all', this)">All</button>
+  <button class="btn" data-filter="regressed" onclick="filterRows('regressed', this)">Regressed</button>
+  <button class="btn" data-filter="improved" onclick="filterRows('improved', this)">Improved</button>
+  <button class="btn" data-filter="unchanged" onclick="filterRows('unchanged', this)">Unchanged</button>
+  <span style="color:#555;margin:0 10px;">|</span>
+  <span style="color:#888;font-size:12px;margin-right:5px;">Sort:</span>
+  <button class="btn active" data-sort="score-asc" onclick="sortRows('score-asc', this)">Worst First</button>
+  <button class="btn" data-sort="score-desc" onclick="sortRows('score-desc', this)">Best First</button>
+  <button class="btn" data-sort="delta-asc" onclick="sortRows('delta-asc', this)">Most Regressed</button>
+  <button class="btn" data-sort="delta-desc" onclick="sortRows('delta-desc', this)">Most Improved</button>
+  <button class="btn" data-sort="alpha" onclick="sortRows('alpha', this)">A-Z</button>
+</div>
+
+<div class="comparison-grid" id="comparisonGrid">
+  <div class="loading">Loading...</div>
+</div>
+
+<script>
+let comparisonData = null;
+let currentSort = 'score-asc';
+let currentFilter = 'all';
+
+function filterRows(filter, btn) {
+  document.querySelectorAll('.filters .btn[data-filter]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = filter;
+
+  document.querySelectorAll('.char-row').forEach(row => {
+    if (filter === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = row.classList.contains(filter) ? '' : 'none';
+    }
+  });
+}
+
+function sortRows(sortType, btn) {
+  document.querySelectorAll('.filters .btn[data-sort]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSort = sortType;
+
+  if (!comparisonData) return;
+
+  // Sort the comparisons
+  const sorted = [...comparisonData.comparisons].sort((a, b) => {
+    switch (sortType) {
+      case 'score-asc':
+        // Worst first (lowest new_score)
+        return (a.new_score ?? -1) - (b.new_score ?? -1);
+      case 'score-desc':
+        // Best first (highest new_score)
+        return (b.new_score ?? -1) - (a.new_score ?? -1);
+      case 'delta-asc':
+        // Most regressed first (most negative delta)
+        return (a.delta ?? 0) - (b.delta ?? 0);
+      case 'delta-desc':
+        // Most improved first (most positive delta)
+        return (b.delta ?? 0) - (a.delta ?? 0);
+      case 'alpha':
+        return a.char.localeCompare(b.char);
+      default:
+        return 0;
+    }
+  });
+
+  renderComparisons(sorted);
+}
+
+function renderComparisons(comparisons) {
+  const oldRunId = comparisonData.run1_id;
+  const newRunId = comparisonData.run2_id;
+  const fontId = comparisonData.font_id;
+
+  let html = '';
+  comparisons.forEach(c => {
+    const rowClass = c.delta > 0.01 ? 'improved' : (c.delta < -0.01 ? 'regressed' : 'unchanged');
+    const deltaClass = c.delta > 0 ? 'up' : (c.delta < 0 ? 'down' : '');
+    const deltaText = c.delta !== null ? `${c.delta >= 0 ? '+' : ''}${c.delta.toFixed(3)}` : '-';
+    const display = (currentFilter === 'all' || rowClass === currentFilter) ? '' : 'display:none;';
+
+    html += `
+      <div class="char-row ${rowClass}" style="${display}">
+        <div class="char-label">${c.char}</div>
+        <div class="scores">
+          <div class="old">Old: ${c.old_score !== null ? c.old_score.toFixed(3) : 'N/A'}</div>
+          <div class="new">New: ${c.new_score !== null ? c.new_score.toFixed(3) : 'N/A'}</div>
+          <div class="delta ${deltaClass}">${deltaText}</div>
+        </div>
+        <div class="previews">
+          <div class="preview-box">
+            <div class="label">Old Strokes</div>
+            <img src="/api/preview-from-run/${oldRunId}?c=${encodeURIComponent(c.char)}&font_id=${fontId}" alt="${c.char} old">
+          </div>
+          <div class="preview-box">
+            <div class="label">New Strokes</div>
+            <img src="/api/preview-from-run/${newRunId}?c=${encodeURIComponent(c.char)}&font_id=${fontId}" alt="${c.char} new">
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <span class="metric-val">${c.old_coverage?.toFixed(2) || '-'} → ${c.new_coverage?.toFixed(2) || '-'}</span>
+            <span>coverage</span>
+          </div>
+          <div class="metric">
+            <span class="metric-val">${c.old_topology?.toFixed(2) || '-'} → ${c.new_topology?.toFixed(2) || '-'}</span>
+            <span>topology</span>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  document.getElementById('comparisonGrid').innerHTML = html;
+}
+
+function loadComparison() {
+  fetch(`/api/compare-runs?font_id={{ font.id }}`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) {
+        document.getElementById('summary').innerHTML = `<div class="no-data">Error: ${d.error}</div>`;
+        document.getElementById('comparisonGrid').innerHTML = '';
+        return;
+      }
+
+      // Store data globally for sorting
+      comparisonData = d;
+
+      // Update date range
+      const date1 = new Date(d.run1_date).toLocaleString();
+      const date2 = new Date(d.run2_date).toLocaleString();
+      document.getElementById('dateRange').textContent = `Comparing: ${date1} → ${date2}`;
+
+      // Summary
+      const avgDelta = d.new_avg - d.old_avg;
+      const deltaClass = avgDelta > 0.01 ? 'up' : (avgDelta < -0.01 ? 'down' : '');
+      const avgClass = avgDelta > 0.01 ? 'improved' : (avgDelta < -0.01 ? 'regressed' : 'unchanged');
+
+      document.getElementById('summary').innerHTML = `
+        <div>
+          <div style="color:#888;font-size:12px;">Old Average</div>
+          <div class="avg">${d.old_avg.toFixed(3)}</div>
+        </div>
+        <div class="arrow">→</div>
+        <div>
+          <div style="color:#888;font-size:12px;">New Average</div>
+          <div class="avg ${avgClass}">${d.new_avg.toFixed(3)}</div>
+        </div>
+        <div class="delta ${deltaClass}">
+          ${avgDelta >= 0 ? '+' : ''}${avgDelta.toFixed(3)}
+        </div>
+        <div style="margin-left:auto;color:#888;">
+          ${d.comparisons.filter(c => c.delta > 0.01).length} improved,
+          ${d.comparisons.filter(c => c.delta < -0.01).length} regressed,
+          ${d.comparisons.filter(c => c.delta !== null && Math.abs(c.delta) <= 0.01).length} unchanged
+        </div>
+      `;
+
+      // Apply default sort (worst first) and render
+      sortRows(currentSort, document.querySelector(`.btn[data-sort="${currentSort}"]`));
+    })
+    .catch(err => {
+      document.getElementById('summary').innerHTML = `<div class="no-data">Error loading comparison: ${err}</div>`;
+      document.getElementById('comparisonGrid').innerHTML = '';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', loadComparison);
+</script>
+</body>
+</html>

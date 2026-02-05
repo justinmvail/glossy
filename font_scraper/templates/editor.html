@@ -180,9 +180,15 @@
       <button id="btnSkeletonFull" class="process" onclick="runSkeletonFull()"><kbd>F</kbd> Skel+Resample</button>
       <button id="btnOptLive" class="process" onclick="runOptimizeLive()" style="background:#2a5a2a"><kbd>O</kbd> Optimize Live</button>
       <button id="btnDiffVG" class="process" onclick="runDiffVG()" style="background:#2a4a5a"><kbd>Y</kbd> DiffVG Refine</button>
+      <button id="btnThinPreview" class="process" onclick="showThinPreview()" style="background:#4a4a2a"><kbd>T</kbd> Thin Preview</button>
+      <button id="btnMinimalStrokes" class="process" onclick="loadMinimalStrokes()" style="background:#4a2a4a"><kbd>U</kbd> Minimal Strokes</button>
       <button id="btnClearCache" class="process" onclick="clearShapeCache()" style="background:#5a2a2a">Clear Cache</button>
       <button id="btnAutoJoin" class="process" onclick="runAutoJoin()"><kbd>W</kbd> Auto-Join</button>
       <button id="btnReduce" class="process" onclick="runReduce()"><kbd>Q</kbd> Reduce</button>
+    </div>
+    <div class="section-label">View</div>
+    <div class="toolbar">
+      <button id="btnGrid" onclick="toggleGrid()"><kbd>#</kbd> Grid</button>
     </div>
     <div class="section-label">Navigate</div>
     <div class="toolbar">
@@ -272,7 +278,9 @@ let state = {
   newStrokePoints: [],
   joinFirst: null,  // {stroke, point} - first clicked point for join
   dirty: false,
-  markers: []  // [{x, y, type: 'vertex'|'termination'}, ...] structural markers
+  markers: [],  // [{x, y, type: 'vertex'|'termination'}, ...] structural markers
+  showGrid: false,  // Show 9-region grid (nonants/nondrants)
+  glyphBbox: null   // {x_min, y_min, x_max, y_max} in data coords
 };
 
 const recorder = {
@@ -698,13 +706,61 @@ function runCenterBorders() {
   );
 }
 
-function runDiffVG() {
+let thinPreviewImg = null;
+
+function showThinPreview(thin = 5) {
+  const url = `/api/thin-preview/${FONT_ID}?c=${encodeURIComponent(CHAR)}&thin=${thin}`;
+  // Load as overlay on canvas
+  const img = new Image();
+  img.onload = function() {
+    thinPreviewImg = img;
+    draw();
+    setStatus(`Thin preview (${thin} iterations) - press Esc to hide`);
+  };
+  img.onerror = function() {
+    setStatus('Failed to load thin preview');
+  };
+  img.src = url;
+}
+
+function hideThinPreview() {
+  thinPreviewImg = null;
+  draw();
+}
+
+function loadMinimalStrokes() {
+  if (state.strokes.length > 0 && !confirm('Replace existing strokes with minimal template+skeleton strokes?')) return;
+  pushUndo();
+  setStatus('Loading minimal strokes...');
+  fetch(`/api/minimal-strokes/${FONT_ID}?c=${encodeURIComponent(CHAR)}`)
+    .then(r => r.json())
+    .then(d => {
+      if (d.strokes && d.strokes.length > 0) {
+        state.strokes = d.strokes;
+        state.selectedStroke = -1;
+        state.selectedPoint = -1;
+        state.selectedMulti = [];
+        state.dirty = true;
+        draw();
+        updateStrokeList();
+        const pts = d.strokes.reduce((a, s) => a + s.length, 0);
+        setStatus(`Minimal strokes: ${d.strokes.length} strokes, ${pts} points`);
+      } else {
+        setStatus('Error: ' + (d.error || 'no strokes'));
+      }
+    })
+    .catch(err => setStatus('Failed: ' + err));
+}
+
+function runDiffVG(thin = 0) {
+  // thin=0 means optimize against original glyph (not thinned)
+  // Initial points come from skeleton analysis, but DiffVG target is the full glyph
   const mode = state.strokes.length === 0 ? 'generate' : 'refine';
   if (mode === 'generate' && !confirm('Generate strokes from template using DiffVG?')) return;
   pushUndo();
   startRecording('DiffVG');
   setStatus(mode === 'generate' ? 'DiffVG generating (GPU)...' : 'DiffVG refining (GPU)...');
-  fetch(`/api/diffvg/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+  fetch(`/api/diffvg/${FONT_ID}?c=${encodeURIComponent(CHAR)}&thin=${thin}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({strokes: state.strokes})
@@ -1539,6 +1595,60 @@ function draw() {
     ctx.globalAlpha = 1.0;
   }
 
+  // Draw 9-region grid (nonants/nondrants) if enabled
+  if (state.showGrid && state.glyphBbox) {
+    const bb = state.glyphBbox;
+    const w = bb.x_max - bb.x_min;
+    const h = bb.y_max - bb.y_min;
+
+    ctx.strokeStyle = 'rgba(100, 100, 255, 0.6)';
+    ctx.lineWidth = 1;
+
+    // Bounding box
+    ctx.strokeRect(bb.x_min, bb.y_min, w, h);
+
+    // Vertical lines at 1/3 and 2/3
+    const x1 = bb.x_min + w / 3;
+    const x2 = bb.x_min + 2 * w / 3;
+    ctx.beginPath();
+    ctx.moveTo(x1, bb.y_min); ctx.lineTo(x1, bb.y_max);
+    ctx.moveTo(x2, bb.y_min); ctx.lineTo(x2, bb.y_max);
+    ctx.stroke();
+
+    // Horizontal lines at 1/3 and 2/3
+    const y1 = bb.y_min + h / 3;
+    const y2 = bb.y_min + 2 * h / 3;
+    ctx.beginPath();
+    ctx.moveTo(bb.x_min, y1); ctx.lineTo(bb.x_max, y1);
+    ctx.moveTo(bb.x_min, y2); ctx.lineTo(bb.x_max, y2);
+    ctx.stroke();
+
+    // Labels 1-9 (numpad layout)
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = 'rgba(80, 80, 200, 0.8)';
+    const positions = {
+      7: [bb.x_min + w/6, bb.y_min + h/6],
+      8: [bb.x_min + w/2, bb.y_min + h/6],
+      9: [bb.x_min + 5*w/6, bb.y_min + h/6],
+      4: [bb.x_min + w/6, bb.y_min + h/2],
+      5: [bb.x_min + w/2, bb.y_min + h/2],
+      6: [bb.x_min + 5*w/6, bb.y_min + h/2],
+      1: [bb.x_min + w/6, bb.y_min + 5*h/6],
+      2: [bb.x_min + w/2, bb.y_min + 5*h/6],
+      3: [bb.x_min + 5*w/6, bb.y_min + 5*h/6],
+    };
+    for (const [num, [px, py]] of Object.entries(positions)) {
+      ctx.fillText(num, px - 5, py + 5);
+    }
+  }
+
+  // Thin preview overlay (if active)
+  if (thinPreviewImg) {
+    ctx.globalAlpha = 0.7;
+    ctx.drawImage(thinPreviewImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.globalAlpha = 1.0;
+  }
+
   // Draw strokes
   for (let si = 0; si < state.strokes.length; si++) {
     const stroke = state.strokes[si];
@@ -2003,6 +2113,45 @@ function setMode(mode) {
   draw();
 }
 
+function toggleGrid() {
+  state.showGrid = !state.showGrid;
+  document.getElementById('btnGrid').classList.toggle('active', state.showGrid);
+  // Compute glyph bounding box from background image if not already done
+  if (state.showGrid && !state.glyphBbox && bgImage) {
+    computeGlyphBbox();
+  }
+  draw();
+}
+
+function computeGlyphBbox() {
+  // Draw bgImage to a temp canvas and find non-white pixels
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = CANVAS_SIZE;
+  tempCanvas.height = CANVAS_SIZE;
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.drawImage(bgImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  const imgData = tempCtx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  const data = imgData.data;
+
+  let minX = CANVAS_SIZE, maxX = 0, minY = CANVAS_SIZE, maxY = 0;
+  for (let y = 0; y < CANVAS_SIZE; y++) {
+    for (let x = 0; x < CANVAS_SIZE; x++) {
+      const i = (y * CANVAS_SIZE + x) * 4;
+      // Check if pixel is not white (glyph pixel)
+      if (data[i] < 250 || data[i+1] < 250 || data[i+2] < 250) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX > minX && maxY > minY) {
+    state.glyphBbox = {x_min: minX, y_min: minY, x_max: maxX, y_max: maxY};
+  }
+}
+
 function setStatus(msg, saved) {
   const el = document.getElementById('status');
   el.textContent = msg;
@@ -2343,6 +2492,7 @@ document.addEventListener('keydown', e => {
       break;
 
     case 'Escape':
+      hideThinPreview();
       if (state.mode === 'addStroke') {
         state.newStrokePoints = [];
         setMode('select');
@@ -2393,6 +2543,8 @@ document.addEventListener('keydown', e => {
     case 'w': runAutoJoin(); break;
     case 'q': runReduce(); break;
     case 'y': runDiffVG(); break;
+    case 't': if (!e.ctrlKey) showThinPreview(); break;
+    case 'u': loadMinimalStrokes(); break;
     case 'p': togglePlay(); break;
     case '1': setMode('addVertex'); break;
     case '2': setMode('addTermination'); break;
@@ -2404,6 +2556,7 @@ document.addEventListener('keydown', e => {
     case '-': runScale(1/1.03); break;
     case '[': navigateChar(-1); break;
     case ']': navigateChar(1); break;
+    case '#': toggleGrid(); break;
   }
 });
 

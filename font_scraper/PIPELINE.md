@@ -448,6 +448,105 @@ The skeleton stroke generator (`skeleton_to_strokes`) converts font glyph masks 
 
 ---
 
+### Shape Optimizer (Skel+Resample)
+
+The Skel+Resample pipeline generates strokes by fitting parametric shape primitives to font glyph masks. This is a separate path from InkSight — it uses classical optimization to fit geometric templates directly to the rendered glyph.
+
+**Shape Primitives:**
+7 shape types: `vline`, `hline`, `diag`, `arc_right`, `arc_left`, `loop`, `u_arc`. Each has bbox-fraction parameters (e.g., center_x, center_y, radius_x, radius_y, angle_start, angle_end).
+
+**Template System:**
+`SHAPE_TEMPLATES` maps 62 characters (A-Z, a-z, 0-9) to lists of shapes with default parameters and bounds. Example for B: 1 vline (spine) + 2 arc_right (top/bottom bumps).
+
+**Optimization Pipeline (current):**
+
+```
+Phase 0: Template + Affine  (1-2s)
+Phase 1: Greedy per-shape   (varies)
+  ↓
+┌─────────────── Repeating cycle ───────────────┐
+│ NM refinement → DE global search → NM polish  │
+│ Repeat until converged or 1 hour timeout       │
+└────────────────────────────────────────────────┘
+  ↓
+Final: best of affine vs shape optimization
+```
+
+- **Phase 0 — Template + Affine:** Calls `template_to_strokes()` to generate mask-aware strokes from waypoint templates, then optimizes a 6-parameter global affine transform (translate, scale, rotate, shear) followed by per-stroke refinement (translate + scale per stroke). If affine score >= 0.85, skips shape optimization entirely.
+- **Phase 1 — Greedy:** Optimizes each shape individually against uncovered point cloud regions using Nelder-Mead + quick DE.
+- **Repeating NM/DE/NM Cycle:** Joint optimization of all shape parameters together. Nelder-Mead for local refinement, Differential Evolution for global search, NM polish. Repeats until score stagnates (< 0.001 improvement over 2 consecutive cycles) or 1-hour time limit.
+
+**Scoring:** Point cloud coverage within adaptive radius, with penalties for off-mask strokes, edge proximity, and stroke overlap. Score range 0-1 (higher = better).
+
+**Streaming:** The `/api/optimize-stream/<font_id>?c=<char>` SSE endpoint streams every optimization frame to the editor UI in real time, showing phase, score, frame count, and elapsed time. A banner with spinner, stop button, and convergence info is displayed during streaming.
+
+**Caching:** Winning parameters are cached in the `shape_params_cache` DB column. Subsequent runs start from cached params and can improve further. Cache is saved periodically during long runs so progress isn't lost.
+
+---
+
+### Shape Optimizer — Problems Encountered
+
+Development of the shape optimizer for letter B revealed several significant issues:
+
+#### 1. Arc parameters allow degenerate shapes
+**Problem:** The `arc_right` shape's `ry_f` parameter is a radius, not a diameter. With default bounds (0.05, 0.8), a single arc could span 80% of the glyph height. For B, both top and bottom arcs would expand to cover the full glyph, merging into a single D shape.
+
+**Fix:** Tightened ry_f bounds to (0.10, 0.28) and cy bounds to non-overlapping ranges: top arc (0.10, 0.35), bottom arc (0.65, 0.90). Similar constraints applied to S template.
+
+#### 2. Nelder-Mead ignores bounds entirely
+**Problem:** Scipy's Nelder-Mead is an unconstrained optimizer — it silently ignores the `bounds` parameter. Parameters would drift far outside bounds during optimization, producing invalid shapes. This was the root cause of multiple "it did the same thing again" failures where tightening bounds had no effect.
+
+**Fix:** Added explicit `_clamp()` (np.clip) calls inside every NM objective function and on every NM result vector. Applied in both streaming and non-streaming endpoints across all phases (greedy, joint NM, polish NM).
+
+#### 3. Angle bounds allow near-complete ellipses
+**Problem:** Default angle bounds (-180, 0) and (0, 180) allowed arcs to sweep ~320 degrees, turning semicircular bumps into near-complete ellipses. Test showed ang_start=-168.6, ang_end=151.2 for what should be a ~180-degree arc.
+
+**Fix:** Constrained angles to (-100, -80) and (80, 100) for B's arcs, enforcing approximately semicircular sweep.
+
+#### 4. Post-processing merges optimized strokes
+**Problem:** After optimization correctly produced 3 separate strokes (spine + 2 bumps), the client-side `_autoJoinStrokes()` post-processing merged them into one stroke because their endpoints were within PROX_DIST=12 pixels of each other. This created a single D-shaped stroke, undoing all the optimizer's work.
+
+**Fix:** Removed `_autoJoinStrokes()` and `_reduceStrokes()` from `_skeletonFullPostProcess()` in editor.html. The optimizer already produces correct stroke topology.
+
+#### 5. Optimization converges too slowly
+**Problem:** With TIME_BUDGET=10s, DE was still actively improving when time expired. Score only reached ~0.63 after 15 seconds. The search space (15 dimensions for B) is too large for quick convergence.
+
+**Fix:** Increased TIME_BUDGET from 10s to 30s, then to 3600s (1 hour) with automatic stagnation detection. Increased DE parameters: maxiter 80→200, popsize 15→20, tol 0.005→0.002. Added repeating NM→DE→NM cycles that stop when score improves less than 0.001 over 2 consecutive cycles.
+
+#### 6. Affine result often beats shape optimizer
+**Problem:** Phase 0 (template + affine) scores ~0.67 in 1-2 seconds, but the shape optimizer starting from template defaults scores lower (0.13 initially) and only catches up to ~0.67 after 30+ seconds. The shape optimizer doesn't use the affine result as a starting point — it starts from scratch.
+
+**Current mitigation:** At the end, the system compares affine vs shape results and returns whichever scored higher. The affine result frequently wins.
+
+**Underlying issue:** Converting affine-transformed raw strokes back into shape parameters (cx, cy, rx, ry, angles) is non-trivial, so the shape optimizer can't be seeded from the affine result. This means Phase 0 and Phases 1-4 are largely independent, and the expensive shape optimization may be wasted effort.
+
+#### 7. Fundamental limitation: gradient-free optimization on a smooth problem
+**Problem:** Both Nelder-Mead and Differential Evolution are gradient-free optimizers. They treat the scoring function as a black box, unable to determine *which direction* to move stroke points. For a 15-dimensional search space, this means thousands of evaluations to make incremental progress. The scoring function (point cloud coverage vs rendered strokes) is actually smooth and differentiable — gradient information exists but isn't being used.
+
+**Not yet attempted:** Differentiable rendering (DiffVG) or PyTorch-based optimization could compute exact gradients, potentially converging in seconds instead of minutes. See "Future Directions" below.
+
+---
+
+### Shape Optimizer — Future Directions
+
+**Differentiable rendering (DiffVG):**
+The most promising improvement would be replacing scipy DE/NM with gradient-based optimization using a differentiable rasterizer. DiffVG or a custom PyTorch soft-rasterizer would allow:
+- Represent strokes as bezier curves with learnable parameters
+- Render differentiably to a raster image
+- Compute MSE loss against the target glyph mask
+- Backpropagate gradients directly to stroke parameters
+- Converge in ~100-500 iterations at milliseconds each (vs thousands of evaluations at ~0.3ms each but with no gradient signal)
+
+This has not been attempted. The repo has PyTorch (for EMNIST classifier) and TensorFlow (for InkSight) but neither is used for stroke optimization.
+
+**InkSight as alternative:**
+The InkSight Vision-Language model already generates strokes from glyph images and runs on GPU. For characters where the shape optimizer struggles (like B), InkSight output may be better out of the box. A quality comparison between InkSight strokes vs shape optimizer strokes for problematic characters has not been done.
+
+**Hybrid approach:**
+Use InkSight or DiffVG for initial stroke generation, then fine-tune with the existing shape optimizer's scoring function for final cleanup. This would combine ML's ability to quickly find approximate solutions with the optimizer's precise scoring.
+
+---
+
 ## Goal
 
 Find fonts with highest `quality_score` = least hand correction needed for SDT training.

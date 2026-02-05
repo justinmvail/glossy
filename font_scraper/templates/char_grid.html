@@ -20,11 +20,16 @@
   .cell:hover { border-color: #7eb8f7; }
   .cell .label { position: absolute; top: 2px; right: 4px; font-size: 10px; color: #555; }
   .cell .pts { position: absolute; bottom: 2px; right: 4px; font-size: 9px; color: #555; }
+  .cell .score { position: absolute; bottom: 2px; left: 4px; font-size: 9px; font-weight: bold; }
+  .cell .score.good { color: #8f8; }
+  .cell .score.ok { color: #ff8; }
+  .cell .score.bad { color: #f88; }
   .cell.no-strokes { opacity: 0.5; border-style: dashed; }
   .cell.preview { width: 224px; height: 224px; padding: 0; }
   .cell.preview img { width: 100%; height: 100%; object-fit: contain; }
   .cell.preview .char-label { display: none; }
   .cell.preview .pts { background: rgba(0,0,0,0.5); padding: 0 3px; border-radius: 2px; }
+  .cell.preview .score { background: rgba(0,0,0,0.5); padding: 0 3px; border-radius: 2px; font-size: 12px; }
   .btn {
     padding: 5px 12px; border: 1px solid #444; background: #222; color: #eee;
     border-radius: 4px; cursor: pointer; font-size: 13px;
@@ -32,7 +37,29 @@
   .btn:hover { background: #333; }
   .btn.reject { border-color: #a55; color: #f88; }
   .btn.reject:hover { background: #422; }
+  .btn.test { border-color: #5a5; color: #8f8; }
+  .btn.test:hover { background: #242; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .rejected-msg { color: #f88; font-size: 14px; display: none; }
+
+  /* Test history section */
+  .test-section { margin-top: 30px; max-width: 900px; }
+  .test-section h2 { font-size: 18px; margin-bottom: 10px; color: #aaa; }
+  .test-history { background: #222; border-radius: 6px; padding: 15px; }
+  .test-run { display: flex; gap: 20px; padding: 10px 0; border-bottom: 1px solid #333; align-items: center; }
+  .test-run:last-child { border-bottom: none; }
+  .test-run .date { color: #888; font-size: 12px; min-width: 140px; }
+  .test-run .score { font-size: 20px; font-weight: bold; min-width: 60px; }
+  .test-run .score.good { color: #8f8; }
+  .test-run .score.ok { color: #ff8; }
+  .test-run .score.bad { color: #f88; }
+  .test-run .metrics { display: flex; gap: 15px; font-size: 12px; color: #888; }
+  .test-run .metric { display: flex; flex-direction: column; align-items: center; }
+  .test-run .metric-val { font-size: 14px; color: #ccc; }
+  .test-run .trend { font-size: 14px; min-width: 50px; text-align: right; }
+  .test-run .trend.up { color: #8f8; }
+  .test-run .trend.down { color: #f88; }
+  .no-tests { color: #666; font-style: italic; }
 </style>
 </head>
 <body>
@@ -40,7 +67,11 @@
 <div class="header">
   <h1>{{ font.name }}</h1>
   <button class="btn" id="skeletonBtn" onclick="generateAll()">Generate All (Skeleton)</button>
-  <button class="btn" id="drawBtn" onclick="drawAll()">Draw All</button>
+  <button class="btn" id="minimalBtn" onclick="generateMinimal(false)" style="background:#4a2a6a">Generate All (Minimal)</button>
+  <button class="btn" id="minimalForceBtn" onclick="generateMinimal(true)" style="background:#6a2a4a">Regenerate All (Minimal)</button>
+  <button class="btn" id="drawBtn" onclick="drawAll(event)">Draw All</button>
+  <button class="btn test" id="testBtn" onclick="runTests()">Run Tests</button>
+  <a href="/compare/{{ font.id }}" class="btn" id="compareLink" style="display:none">Compare Runs</a>
   <button class="btn reject" id="rejectBtn" onclick="rejectFont()">Reject Font</button>
   <span class="rejected-msg" id="rejectedMsg">Rejected</span>
   <span id="genStatus" style="font-size:13px;color:#888"></span>
@@ -51,21 +82,39 @@
   <a href="/edit/{{ font.id }}?c={{ c.char|urlencode }}" style="text-decoration:none;color:inherit">
     <div class="cell{% if not c.point_count %} no-strokes{% endif %}" data-char="{{ c.char }}">
       <span class="char-label">{{ c.char }}</span>
+      <span class="score" data-char="{{ c.char }}"></span>
       <span class="pts">{{ c.point_count or '' }}</span>
     </div>
   </a>
 {% endfor %}
 </div>
+
+<div class="test-section">
+  <h2>Test History</h2>
+  <div class="test-history" id="testHistory">
+    <div class="no-tests">Loading...</div>
+  </div>
+</div>
+
 <script>
+let pendingReload = null;
+function cancelPendingReload() {
+  if (pendingReload) {
+    clearTimeout(pendingReload);
+    pendingReload = null;
+  }
+}
+
 function generateAll() {
+  cancelPendingReload();
   document.getElementById('genStatus').textContent = 'Generating...';
   document.getElementById('skeletonBtn').disabled = true;
   fetch(`/api/skeleton-batch/{{ font.id }}`, {method: 'POST'})
     .then(r => r.json())
     .then(d => {
       if (d.ok) {
-        document.getElementById('genStatus').textContent = `Generated ${d.generated} characters`;
-        setTimeout(() => location.reload(), 1000);
+        document.getElementById('genStatus').textContent = `Generated ${d.generated} characters. Reload in 3s or click Draw All.`;
+        pendingReload = setTimeout(() => location.reload(), 3000);
       } else {
         document.getElementById('genStatus').textContent = 'Error: ' + (d.error || 'unknown');
       }
@@ -73,11 +122,42 @@ function generateAll() {
     });
 }
 
-function drawAll() {
+function generateMinimal(force = false) {
+  cancelPendingReload();
+  const status = document.getElementById('genStatus');
+  const btn = document.getElementById('minimalBtn');
+  status.textContent = 'Generating minimal strokes...';
+  btn.disabled = true;
+  const url = `/api/minimal-strokes-batch/{{ font.id }}` + (force ? '?force=true' : '');
+  fetch(url, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        status.textContent = `Generated ${d.generated}, skipped ${d.skipped}, failed ${d.failed}. Reload in 3s or click Draw All.`;
+        pendingReload = setTimeout(() => location.reload(), 3000);
+      } else {
+        status.textContent = 'Error: ' + (d.error || 'unknown');
+      }
+      btn.disabled = false;
+    })
+    .catch(err => {
+      status.textContent = 'Error: ' + err;
+      btn.disabled = false;
+    });
+}
+
+let drawAllLoading = false;
+function drawAll(event) {
+  if (event) event.preventDefault();
+  cancelPendingReload(); // Cancel any pending page reload
+
   const btn = document.getElementById('drawBtn');
   const status = document.getElementById('genStatus');
   const cells = document.querySelectorAll('.cell[data-char]');
   const isPreview = btn.textContent === 'Hide Previews';
+
+  if (drawAllLoading) return;
+
   if (isPreview) {
     cells.forEach(cell => {
       cell.classList.remove('preview');
@@ -89,11 +169,17 @@ function drawAll() {
     status.textContent = '';
     return;
   }
+
+  drawAllLoading = true;
   btn.textContent = 'Hide Previews';
   status.textContent = 'Loading previews...';
   let loaded = 0;
   cells.forEach(cell => {
     const ch = cell.dataset.char;
+    // Remove any existing preview image first
+    const existingImg = cell.querySelector('img');
+    if (existingImg) existingImg.remove();
+
     const img = document.createElement('img');
     img.src = `/api/preview/{{ font.id }}?c=${encodeURIComponent(ch)}`;
     img.onload = () => {
@@ -101,11 +187,17 @@ function drawAll() {
       cell.querySelector('.char-label').style.display = 'none';
       cell.insertBefore(img, cell.firstChild);
       loaded++;
-      if (loaded === cells.length) status.textContent = '';
+      if (loaded === cells.length) {
+        status.textContent = '';
+        drawAllLoading = false;
+      }
     };
     img.onerror = () => {
       loaded++;
-      if (loaded === cells.length) status.textContent = '';
+      if (loaded === cells.length) {
+        status.textContent = '';
+        drawAllLoading = false;
+      }
     };
   });
 }
@@ -121,6 +213,129 @@ function rejectFont() {
       }
     });
 }
+
+function runTests() {
+  const btn = document.getElementById('testBtn');
+  const status = document.getElementById('genStatus');
+  btn.disabled = true;
+  status.textContent = 'Running tests...';
+
+  // Clear existing scores
+  document.querySelectorAll('.cell .score').forEach(el => {
+    el.textContent = '';
+    el.className = 'score';
+  });
+
+  fetch(`/api/test-run/{{ font.id }}?details=true`, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        status.textContent = `Tests complete: ${d.chars_ok}/${d.chars_tested} OK, score=${d.avg_score}`;
+        loadTestHistory();
+
+        // Display per-character scores
+        if (d.results) {
+          d.results.forEach(r => {
+            const scoreEl = document.querySelector(`.cell .score[data-char="${r.char}"]`);
+            if (scoreEl && r.status === 'ok') {
+              scoreEl.textContent = r.score.toFixed(2);
+              if (r.score >= 0.7) {
+                scoreEl.className = 'score good';
+              } else if (r.score >= 0.5) {
+                scoreEl.className = 'score ok';
+              } else {
+                scoreEl.className = 'score bad';
+              }
+            } else if (scoreEl) {
+              scoreEl.textContent = 'ERR';
+              scoreEl.className = 'score bad';
+            }
+          });
+        }
+      } else {
+        status.textContent = 'Error: ' + (d.error || 'unknown');
+      }
+      btn.disabled = false;
+    })
+    .catch(err => {
+      status.textContent = 'Error: ' + err;
+      btn.disabled = false;
+    });
+}
+
+function loadTestHistory() {
+  fetch(`/api/test-history/{{ font.id }}?limit=10`)
+    .then(r => r.json())
+    .then(d => {
+      const container = document.getElementById('testHistory');
+      if (!d.runs || d.runs.length === 0) {
+        container.innerHTML = '<div class="no-tests">No test runs yet. Click "Run Tests" to start.</div>';
+        return;
+      }
+
+      let html = '';
+      d.runs.forEach((run, idx) => {
+        const date = new Date(run.run_date).toLocaleString();
+        const scoreClass = run.avg_score >= 0.7 ? 'good' : (run.avg_score >= 0.5 ? 'ok' : 'bad');
+
+        // Calculate trend (compare to previous run)
+        let trend = '';
+        if (idx < d.runs.length - 1) {
+          const prevScore = d.runs[idx + 1].avg_score;
+          const diff = run.avg_score - prevScore;
+          if (Math.abs(diff) > 0.01) {
+            const arrow = diff > 0 ? '↑' : '↓';
+            const trendClass = diff > 0 ? 'up' : 'down';
+            trend = `<span class="trend ${trendClass}">${arrow}${Math.abs(diff).toFixed(3)}</span>`;
+          }
+        }
+
+        html += `
+          <div class="test-run">
+            <span class="date">${date}</span>
+            <span class="score ${scoreClass}">${run.avg_score.toFixed(3)}</span>
+            <div class="metrics">
+              <div class="metric">
+                <span class="metric-val">${run.avg_coverage.toFixed(2)}</span>
+                <span>coverage</span>
+              </div>
+              <div class="metric">
+                <span class="metric-val">${run.avg_overshoot.toFixed(2)}</span>
+                <span>overshoot</span>
+              </div>
+              <div class="metric">
+                <span class="metric-val">${run.avg_stroke_count.toFixed(2)}</span>
+                <span>strokes</span>
+              </div>
+              <div class="metric">
+                <span class="metric-val">${run.avg_topology.toFixed(2)}</span>
+                <span>topology</span>
+              </div>
+              <div class="metric">
+                <span class="metric-val">${run.chars_ok}/${run.chars_tested}</span>
+                <span>chars OK</span>
+              </div>
+            </div>
+            ${trend}
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+
+      // Show compare link if 2+ runs
+      if (d.runs.length >= 2) {
+        document.getElementById('compareLink').style.display = '';
+      }
+    })
+    .catch(err => {
+      document.getElementById('testHistory').innerHTML =
+        '<div class="no-tests">Error loading test history</div>';
+    });
+}
+
+// Load test history on page load
+document.addEventListener('DOMContentLoaded', loadTestHistory);
 </script>
 </body>
 </html>

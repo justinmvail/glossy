@@ -120,74 +120,225 @@ LETTER_TEMPLATES = {
 #   int        → termination (stroke starts/ends at glyph edge near region)
 #   'v(n)'     → sharp vertex (abrupt direction change)
 #   'c(n)'     → smooth curve vertex (smooth direction change)
-NUMPAD_TEMPLATES = {
+# Waypoint hints for enriched templates:
+#   'bar'    - end of horizontal bar structure (not vertical stem)
+#   'apex'   - extremum point (topmost if in top half, bottommost if in bottom half)
+#   'top'    - explicitly topmost pixel in region
+#   'bottom' - explicitly bottommost pixel in region
+#   'corner' - actual corner of glyph bbox
+#   'diag'   - point on diagonal stroke
+#   'stem'   - point on vertical stem
+#   'base'   - point on baseline/bottom edge
+# Format: position alone (7) or tuple with hint ((6, 'bar'))
+#
+# NUMPAD_TEMPLATE_VARIANTS: Maps character -> dict of variant_name -> template
+# Each character can have multiple valid stroke patterns. The system will try
+# each variant and keep the best-scoring one.
+
+NUMPAD_TEMPLATE_VARIANTS = {
     # --- Uppercase ---
-    'A': [[1, 'v(8)', 3], [4, 6]],
-    'B': [[7, 1], [7, 'c(9)', 'v(6)', 'c(3)', 1]],
-    'C': [[9, 'c(7)', 'c(1)', 3]],
-    'D': [[7, 1], [7, 'c(9)', 'c(3)', 1]],
-    'E': [[9, 7, 1, 3], [4, 6]],
-    'F': [[9, 7, 1], [4, 6]],
-    'G': [[9, 'c(7)', 'c(1)', 3, 6], [6, 5]],
-    'H': [[7, 1], [9, 3], [4, 6]],
-    'I': [[8, 2]],
-    'J': [[8, 'c(1)']],
-    'K': [[7, 1], [9, 'v(4)', 3]],
-    'L': [[7, 1, 3]],
-    'M': [[1, 7, 'v(2)', 9, 3]],
-    'N': [[1, 7, 3, 9]],
-    'O': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
-    'P': [[1, 7, 'c(9)', 'c(6)', 4]],
-    'Q': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8], [5, 3]],
-    'R': [[1, 7, 'c(9)', 'c(6)', 4], [4, 3]],
-    'S': [[9, 'c(7)', 'c(4)', 'c(6)', 'c(3)', 1]],
-    'T': [[7, 9], [8, 2]],
-    'U': [[7, 'c(1)', 'c(3)', 9]],
-    'V': [[7, 'v(2)', 9]],
-    'W': [[7, 'v(1)', 'v(5)', 'v(3)', 9]],
-    'X': [[7, 3], [9, 1]],
-    'Y': [[7, 'v(5)', 9], [5, 2]],
-    'Z': [[7, 9, 1, 3]],
+    'A': {
+        'pointed': [[(1, 'corner'), 'v(8)', (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+        'flat_top': [[(1, 'corner'), (7, 'corner'), (9, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+    },
+    'B': {
+        'default': [[(7, 'corner'), (1, 'corner')], [(7, 'stem'), 'c(9)', 'v(6)', 'c(3)', (1, 'stem')]],
+    },
+    'C': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')]],
+    },
+    'D': {
+        'default': [[(7, 'corner'), (1, 'corner')], [(7, 'stem'), 'c(9)', 'c(3)', (1, 'stem')]],
+    },
+    'E': {
+        'default': [[(9, 'corner'), (7, 'corner'), (1, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+    },
+    'F': {
+        'default': [[(9, 'corner'), (7, 'corner'), (1, 'corner')], [(4, 'bar'), (6, 'bar')]],
+    },
+    'G': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner'), 6], [6, 5]],
+    },
+    'H': {
+        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+    },
+    'I': {
+        'default': [[(8, 'apex'), (2, 'apex')]],
+    },
+    'J': {
+        'default': [[(8, 'apex'), 'c(1)']],
+    },
+    'K': {
+        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), 'v(4)', (3, 'corner')]],
+    },
+    'L': {
+        'default': [[(7, 'corner'), (1, 'corner'), (3, 'corner')]],
+    },
+    'M': {
+        'default': [[(1, 'corner'), (7, 'corner'), 'v(2)', (9, 'corner'), (3, 'corner')]],
+    },
+    'N': {
+        'default': [[(1, 'corner'), (7, 'corner'), (3, 'corner'), (9, 'corner')]],
+    },
+    'O': {
+        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
+    },
+    'P': {
+        'default': [[(1, 'corner'), (7, 'corner'), 'c(9)', 'c(6)', (4, 'bar')]],
+    },
+    'Q': {
+        'default': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')], [5, (3, 'corner')]],
+    },
+    'R': {
+        'default': [[(1, 'corner'), (7, 'corner'), 'c(9)', 'c(6)', (4, 'bar')], [(4, 'diag'), (3, 'corner')]],
+    },
+    'S': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(4)', 'c(6)', 'c(3)', (1, 'corner')]],
+    },
+    'T': {
+        'default': [[(7, 'corner'), (9, 'corner')], [(8, 'apex'), (2, 'apex')]],
+    },
+    'U': {
+        'default': [[(7, 'corner'), 'c(1)', 'c(3)', (9, 'corner')]],
+    },
+    'V': {
+        'default': [[(7, 'corner'), 'v(2)', (9, 'corner')]],
+    },
+    'W': {
+        'default': [[(7, 'corner'), 'v(1)', 'v(5)', 'v(3)', (9, 'corner')]],
+    },
+    'X': {
+        'default': [[(7, 'corner'), (3, 'corner')], [(9, 'corner'), (1, 'corner')]],
+    },
+    'Y': {
+        'default': [[(7, 'corner'), 'v(5)', (9, 'corner')], [5, (2, 'apex')]],
+    },
+    'Z': {
+        'default': [[(7, 'corner'), (9, 'corner'), (1, 'corner'), (3, 'corner')]],
+    },
 
     # --- Lowercase ---
-    'a': [[9, 'c(7)', 'c(1)', 3], [9, 3]],
-    'b': [[7, 1, 'c(3)', 'c(9)', 4]],
-    'c': [[9, 'c(7)', 'c(1)', 3]],
-    'd': [[9, 'c(7)', 'c(1)', 3], [9, 3]],
-    'e': [[6, 4, 'c(1)', 'c(3)', 'c(6)']],
-    'f': [[9, 'c(8)', 2], [4, 6]],
-    'g': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [9, 'c(3)']],
-    'h': [[7, 1], [4, 'c(9)', 3]],
-    'i': [[8, 2]],
-    'j': [[8, 'c(1)']],
-    'k': [[7, 1], [9, 'v(4)', 3]],
-    'l': [[8, 2]],
-    'm': [[1, 4, 'c(8)', 5], [5, 'c(9)', 3]],
-    'n': [[1, 4, 'c(9)', 3]],
-    'o': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
-    'p': [[4, 'c(7)', 'c(9)', 'c(6)', 1]],
-    'q': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [9, 3]],
-    'r': [[1, 4, 'c(9)']],
-    's': [[9, 'c(7)', 'c(4)', 'c(6)', 'c(3)', 1]],
-    't': [[8, 2], [7, 9]],
-    'u': [[7, 'c(1)', 'c(3)', 9], [9, 3]],
-    'v': [[7, 'v(2)', 9]],
-    'w': [[7, 'v(1)', 'v(5)', 'v(3)', 9]],
-    'x': [[7, 3], [9, 1]],
-    'y': [[7, 'v(5)'], [9, 'v(5)', 'c(1)']],
-    'z': [[7, 9, 1, 3]],
+    'a': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')], [(9, 'stem'), (3, 'stem')]],
+    },
+    'b': {
+        'default': [[(7, 'corner'), (1, 'corner'), 'c(3)', 'c(9)', (4, 'bar')]],
+    },
+    'c': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')]],
+    },
+    'd': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')], [(9, 'stem'), (3, 'stem')]],
+    },
+    'e': {
+        'default': [[6, 4, 'c(1)', 'c(3)', 'c(6)']],
+    },
+    'f': {
+        'default': [[9, 'c(8)', (2, 'apex')], [(4, 'bar'), (6, 'bar')]],
+    },
+    'g': {
+        'default': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [9, 'c(3)']],
+    },
+    'h': {
+        'default': [[(7, 'corner'), (1, 'corner')], [4, 'c(9)', (3, 'corner')]],
+    },
+    'i': {
+        'default': [[(8, 'apex'), (2, 'apex')]],
+    },
+    'j': {
+        'default': [[(8, 'apex'), 'c(1)']],
+    },
+    'k': {
+        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), 'v(4)', (3, 'corner')]],
+    },
+    'l': {
+        'default': [[(8, 'apex'), (2, 'apex')]],
+    },
+    'm': {
+        'default': [[(1, 'corner'), 4, 'c(8)', 5], [5, 'c(9)', (3, 'corner')]],
+    },
+    'n': {
+        'default': [[(1, 'corner'), 4, 'c(9)', (3, 'corner')]],
+    },
+    'o': {
+        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
+    },
+    'p': {
+        'default': [[4, 'c(7)', 'c(9)', 'c(6)', (1, 'corner')]],
+    },
+    'q': {
+        'default': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [(9, 'stem'), (3, 'stem')]],
+    },
+    'r': {
+        'default': [[(1, 'corner'), 4, 'c(9)']],
+    },
+    's': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(4)', 'c(6)', 'c(3)', (1, 'corner')]],
+    },
+    't': {
+        'default': [[(8, 'apex'), (2, 'apex')], [(7, 'bar'), (9, 'bar')]],
+    },
+    'u': {
+        'default': [[(7, 'corner'), 'c(1)', 'c(3)', (9, 'corner')], [(9, 'stem'), (3, 'stem')]],
+    },
+    'v': {
+        'default': [[(7, 'corner'), 'v(2)', (9, 'corner')]],
+    },
+    'w': {
+        'default': [[(7, 'corner'), 'v(1)', 'v(5)', 'v(3)', (9, 'corner')]],
+    },
+    'x': {
+        'default': [[(7, 'corner'), (3, 'corner')], [(9, 'corner'), (1, 'corner')]],
+    },
+    'y': {
+        'default': [[(7, 'corner'), 'v(5)'], [(9, 'corner'), 'v(5)', 'c(1)']],
+    },
+    'z': {
+        'default': [[(7, 'corner'), (9, 'corner'), (1, 'corner'), (3, 'corner')]],
+    },
 
     # --- Digits ---
-    '0': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
-    '1': [[7, 8, 2]],
-    '2': [[7, 'c(9)', 'c(6)', 'v(4)', 1, 3]],
-    '3': [[7, 'c(9)', 'c(6)', 4], [4, 'c(6)', 'c(3)', 1]],
-    '4': [[7, 4, 6], [9, 3]],
-    '5': [[9, 7, 4, 'c(6)', 'c(3)', 1]],
-    '6': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 4]],
-    '7': [[7, 9, 1]],
-    '8': [[5, 'c(8)', 'c(7)', 'c(4)', 5], [5, 'c(2)', 'c(3)', 'c(6)', 5]],
-    '9': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', 1]],
+    '0': {
+        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
+        'open': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)']],  # Incomplete loop from top
+        'ccw_open': [[7, 'c(4)', 'c(1)', 'c(2)', 'c(3)', 'c(6)', 'c(9)', 'c(8)', 'c(7)', 4]],  # Full CCW loop: 7-4-1-2-3-6-9-8-7-4
+    },
+    '1': {
+        'with_serif': [[(7, 'diag'), (8, 'apex'), (2, 'apex')]],
+        'simple': [[(8, 'apex'), (2, 'apex')]],
+        'with_base': [[4, 'v(8)', 2], [1, 2, 3]],  # Diagonal (4→8→2) + horizontal base
+    },
+    '2': {
+        'default': [[7, 'v(4)', 1, 3]],  # Endpoints: 7 -> junction at 4 -> 1 or 3
+    },
+    '3': {
+        'default': [[(7, 'corner'), 'c(9)', 'v(4)', 'c(3)', (1, 'corner')]],
+    },
+    '4': {
+        'open': [[(7, 'corner'), 'v(4)', (6, 'bar')], [(9, 'apex'), (3, 'base')]],
+        'closed': [[(7, 'corner'), 'v(4)', (6, 'bar'), (9, 'apex')], [(9, 'apex'), (3, 'base')]],
+    },
+    '5': {
+        'default': [[(9, 'corner'), (7, 'corner'), (4, 'bar'), 'c(6)', 'c(3)', (1, 'corner')]],
+    },
+    '6': {
+        'default': [[(9, 'corner'), 'c(7)', 'c(1)', 'c(3)', 'c(6)', (4, 'bar')]],
+    },
+    '7': {
+        'default': [[(7, 'corner'), (9, 'corner'), (1, 'diag')]],
+    },
+    '8': {
+        'default': [[5, 'c(8)', 'c(7)', 'c(4)', 5], [5, 'c(2)', 'c(3)', 'c(6)', 5]],
+    },
+    '9': {
+        'default': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', (1, 'corner')]],
+    },
+}
+
+# Legacy compatibility: NUMPAD_TEMPLATES returns first variant for each char
+NUMPAD_TEMPLATES = {
+    char: list(variants.values())[0]
+    for char, variants in NUMPAD_TEMPLATE_VARIANTS.items()
 }
 
 # Numpad region positions as (col_fraction, row_fraction) within glyph bbox.
@@ -2186,6 +2337,1045 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     return strokes
 
 
+def _find_skeleton_segments(info):
+    """Find and classify skeleton path segments between junctions.
+
+    Returns list of segments, each with:
+    - 'path': list of (x,y) points
+    - 'start_junction': index or -1 for endpoint
+    - 'end_junction': index or -1 for endpoint
+    - 'angle': direction in degrees (0=right, 90=down)
+    - 'length': number of pixels
+    """
+    from collections import deque
+
+    adj = info['adj']
+    junction_pixels = info['junction_pixels']
+    junction_clusters = info['junction_clusters']
+    endpoints = info['endpoints']
+
+    segments = []
+
+    # Map pixels to their junction cluster index
+    pixel_to_junction = {}
+    for i, cluster in enumerate(junction_clusters):
+        for p in cluster:
+            pixel_to_junction[p] = i
+
+    # Find all segments between junctions/endpoints
+    visited_pairs = set()
+
+    # Start points: junction cluster border pixels and endpoints
+    start_points = []
+    for i, cluster in enumerate(junction_clusters):
+        for p in cluster:
+            for nb in adj[p]:
+                if nb not in junction_pixels:
+                    start_points.append((p, nb, i))  # (start, next, junction_idx)
+    for ep in endpoints:
+        if ep not in junction_pixels:
+            start_points.append((ep, None, -1))
+
+    for start, first_step, start_junc in start_points:
+        if first_step is None:
+            # Endpoint - find its neighbor
+            neighbors = adj[start]
+            if not neighbors:
+                continue
+            first_step = neighbors[0]
+
+        # Trace path until we hit another junction or endpoint
+        path = [start, first_step]
+        current = first_step
+        prev = start
+
+        while current not in junction_pixels and current not in endpoints:
+            neighbors = [n for n in adj[current] if n != prev]
+            if not neighbors:
+                break
+            if len(neighbors) > 1:
+                break  # Unexpected branching
+            prev = current
+            current = neighbors[0]
+            path.append(current)
+
+        # Determine end junction/endpoint
+        if current in junction_pixels:
+            end_junc = pixel_to_junction.get(current, -1)
+        elif current in endpoints:
+            end_junc = -1  # Mark as endpoint with special value
+        else:
+            end_junc = -1
+
+        # Avoid duplicate segments
+        pair = (min(start_junc, end_junc), max(start_junc, end_junc),
+                min(start, current), max(start, current))
+        if pair in visited_pairs:
+            continue
+        visited_pairs.add(pair)
+
+        if len(path) >= 2:
+            dx = path[-1][0] - path[0][0]
+            dy = path[-1][1] - path[0][1]
+            angle = np.degrees(np.arctan2(dy, dx))
+
+            segments.append({
+                'path': path,
+                'start': path[0],
+                'end': path[-1],
+                'start_junction': start_junc,
+                'end_junction': end_junc,
+                'angle': angle,
+                'length': len(path),
+            })
+
+    return segments
+
+
+def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=None):
+    """Trace a path along skeleton pixels from start to end using BFS.
+
+    Args:
+        start: (x, y) starting point (should be on or near skeleton)
+        end: (x, y) ending point (should be on or near skeleton)
+        adj: adjacency dict from _analyze_skeleton
+        skel_set: set of skeleton pixels
+        max_steps: maximum path length to prevent infinite loops
+        avoid_pixels: set of pixels to avoid (already traced in this stroke)
+
+    Returns:
+        List of (x, y) points along the path, or None if no path found.
+    """
+    from collections import deque
+
+    if avoid_pixels is None:
+        avoid_pixels = set()
+
+    # Find nearest skeleton pixels to start and end
+    start = tuple(start) if not isinstance(start, tuple) else start
+    end = tuple(end) if not isinstance(end, tuple) else end
+
+    # If start/end not exactly on skeleton, find nearest
+    if start not in skel_set:
+        min_dist = float('inf')
+        for p in skel_set:
+            d = (p[0] - start[0])**2 + (p[1] - start[1])**2
+            if d < min_dist:
+                min_dist = d
+                start = p
+
+    if end not in skel_set:
+        min_dist = float('inf')
+        for p in skel_set:
+            d = (p[0] - end[0])**2 + (p[1] - end[1])**2
+            if d < min_dist:
+                min_dist = d
+                end = p
+
+    if start == end:
+        return [start]
+
+    # BFS to find shortest path, avoiding previously traced pixels
+    queue = deque([(start, [start])])
+    visited = {start}
+
+    while queue:
+        current, path = queue.popleft()
+
+        if len(path) > max_steps:
+            continue
+
+        # Check if we reached the end (within 3 pixels)
+        dist_to_end = ((current[0] - end[0])**2 + (current[1] - end[1])**2)**0.5
+        if dist_to_end < 3 or current == end:
+            return path + [end] if current != end else path
+
+        # Explore neighbors, avoiding already-traced pixels
+        for neighbor in adj.get(current, []):
+            if neighbor not in visited:
+                # Skip pixels we've already traced (except near start/end)
+                if neighbor in avoid_pixels:
+                    dist_to_start = ((neighbor[0] - start[0])**2 + (neighbor[1] - start[1])**2)**0.5
+                    dist_to_end_n = ((neighbor[0] - end[0])**2 + (neighbor[1] - end[1])**2)**0.5
+                    # Only allow if very close to start or end (within 5 pixels)
+                    if dist_to_start > 5 and dist_to_end_n > 5:
+                        continue
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+
+    # No path found - return None (don't fallback to allowing double-back)
+    return None
+
+
+def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, avoid_pixels=None):
+    """Trace along skeleton from start until entering target region.
+
+    Instead of pathfinding to a specific point, this follows the skeleton
+    and stops as soon as any point falls within the target region.
+
+    Args:
+        start: (x, y) starting point
+        target_region: numpad region number (1-9) to reach
+        bbox: (x_min, y_min, x_max, y_max) glyph bounding box
+        adj: adjacency dict from _analyze_skeleton
+        skel_set: set of skeleton pixels
+        max_steps: maximum path length
+        avoid_pixels: set of pixels to avoid
+
+    Returns:
+        List of (x, y) points along the path, or None if no path found.
+    """
+    if avoid_pixels is None:
+        avoid_pixels = set()
+
+    start = tuple(start) if not isinstance(start, tuple) else start
+
+    # If start not on skeleton, find nearest
+    if start not in skel_set:
+        min_dist = float('inf')
+        for p in skel_set:
+            d = (p[0] - start[0])**2 + (p[1] - start[1])**2
+            if d < min_dist:
+                min_dist = d
+                start = p
+
+    def point_in_region(point, region):
+        """Check if point falls within a numpad region."""
+        x, y = point
+        x_min, y_min, x_max, y_max = bbox
+        w = x_max - x_min
+        h = y_max - y_min
+        if w == 0 or h == 0:
+            return False
+        nx = (x - x_min) / w
+        ny = (y - y_min) / h
+        col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
+        row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
+        point_region = (2 - row) * 3 + col + 1
+        return point_region == region
+
+    # Check if we're already in the target region
+    if point_in_region(start, target_region):
+        return [start]
+
+    # Calculate target region center for direction guidance
+    NUMPAD_POS = {
+        7: (0.0, 0.0), 8: (0.5, 0.0), 9: (1.0, 0.0),
+        4: (0.0, 0.5), 5: (0.5, 0.5), 6: (1.0, 0.5),
+        1: (0.0, 1.0), 2: (0.5, 1.0), 3: (1.0, 1.0),
+    }
+    x_min, y_min, x_max, y_max = bbox
+    frac_x, frac_y = NUMPAD_POS[target_region]
+    target_center = (x_min + frac_x * (x_max - x_min),
+                     y_min + frac_y * (y_max - y_min))
+
+    # Use greedy traversal - prefer neighbors closer to target region
+    path = [start]
+    visited = {start}
+    current = start
+
+    for _ in range(max_steps):
+        neighbors = adj.get(current, [])
+        if not neighbors:
+            break
+
+        # Filter out visited and avoided pixels (strictly - no exceptions)
+        valid_neighbors = []
+        for n in neighbors:
+            if n in visited:
+                continue
+            if n in avoid_pixels:
+                continue  # Strictly avoid all already-traced pixels
+            valid_neighbors.append(n)
+
+        if not valid_neighbors:
+            break
+
+        # Choose next neighbor - prefer the one closest to target region center
+        best = None
+        best_dist = float('inf')
+        for n in valid_neighbors:
+            # Distance to target region center
+            dist = ((n[0] - target_center[0])**2 + (n[1] - target_center[1])**2)**0.5
+            if dist < best_dist:
+                best_dist = dist
+                best = n
+
+        if best is None:
+            break
+
+        visited.add(best)
+        path.append(best)
+        current = best
+
+        # Check if we've entered the target region
+        if point_in_region(current, target_region):
+            return path
+
+    # Didn't reach target region - return path so far (partial success)
+    # This allows the stroke to continue as far as possible
+    return path if len(path) > 1 else None
+
+
+def _resample_path(path, num_points=20):
+    """Resample a path to have approximately num_points evenly spaced points."""
+    if len(path) <= 2:
+        return path
+
+    # Calculate cumulative distances
+    dists = [0]
+    for i in range(1, len(path)):
+        d = ((path[i][0] - path[i-1][0])**2 + (path[i][1] - path[i-1][1])**2)**0.5
+        dists.append(dists[-1] + d)
+
+    total_len = dists[-1]
+    if total_len < 1:
+        return path
+
+    # Sample at even intervals
+    result = [path[0]]
+    target_spacing = total_len / (num_points - 1)
+
+    for i in range(1, num_points - 1):
+        target_dist = i * target_spacing
+        # Find the segment containing this distance
+        for j in range(1, len(dists)):
+            if dists[j] >= target_dist:
+                # Interpolate between path[j-1] and path[j]
+                t = (target_dist - dists[j-1]) / (dists[j] - dists[j-1]) if dists[j] != dists[j-1] else 0
+                x = path[j-1][0] + t * (path[j][0] - path[j-1][0])
+                y = path[j-1][1] + t * (path[j][1] - path[j-1][1])
+                result.append((x, y))
+                break
+
+    result.append(path[-1])
+    return result
+
+
+def _quick_stroke_score(strokes, mask, stroke_width=8):
+    """Quick scoring function for comparing stroke variants.
+
+    Returns a score based on coverage (how much of the glyph is covered)
+    minus overshoot penalty (strokes outside the glyph).
+    Higher is better.
+    """
+    from PIL import Image, ImageDraw
+
+    h, w = mask.shape
+    stroke_img = Image.new('L', (w, h), 255)
+    draw = ImageDraw.Draw(stroke_img)
+
+    for stroke in strokes:
+        if len(stroke) >= 2:
+            points = [(p[0], p[1]) for p in stroke]
+            draw.line(points, fill=0, width=stroke_width)
+
+    stroke_mask = np.array(stroke_img) < 128
+    glyph_mask = mask > 0
+
+    glyph_pixels = glyph_mask.sum()
+    if glyph_pixels == 0:
+        return 0.0
+
+    covered = (glyph_mask & stroke_mask).sum()
+    coverage = covered / glyph_pixels
+
+    stroke_pixels = stroke_mask.sum()
+    if stroke_pixels == 0:
+        return 0.0
+
+    outside = (stroke_mask & ~glyph_mask).sum()
+    overshoot = outside / stroke_pixels
+
+    # Score: coverage minus overshoot penalty
+    return coverage - (overshoot * 0.5)
+
+
+def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=True,
+                                   template=None, return_variant=False):
+    """Generate minimal strokes by combining template topology with skeleton keypoints.
+
+    1. Template provides stroke count and connectivity structure
+    2. Skeleton analysis finds actual positions of endpoints, junctions, vertices
+    3. Identify skeleton segments by direction (vertical, horizontal, curved)
+    4. Map template strokes to appropriate skeleton segments
+
+    Args:
+        font_path: Path to font file
+        char: Character to generate strokes for
+        canvas_size: Size of canvas (default 224)
+        trace_paths: Whether to trace paths between waypoints
+        template: Optional specific template to use (skips variant selection)
+        return_variant: If True, returns (strokes, variant_name) tuple
+
+    Returns:
+        List of strokes as [[[x,y], ...], ...] or None on failure.
+        If return_variant=True, returns (strokes, variant_name) or (None, None).
+    """
+    # Track variant name for return_variant option
+    _variant_name = None
+
+    # If no template provided, try all variants and pick the best
+    if template is None:
+        variants = NUMPAD_TEMPLATE_VARIANTS.get(char)
+        if not variants:
+            return (None, None) if return_variant else None
+
+        if len(variants) == 1:
+            # Only one variant, use it directly
+            _variant_name = list(variants.keys())[0]
+            template = list(variants.values())[0]
+        else:
+            # Try all variants and pick the best
+            best_strokes = None
+            best_variant = None
+            best_score = -1
+
+            font_path_resolved = resolve_font_path(font_path)
+            mask = render_glyph_mask(font_path_resolved, char, canvas_size)
+            if mask is None:
+                return (None, None) if return_variant else None
+
+            for var_name, variant_template in variants.items():
+                strokes = minimal_strokes_from_skeleton(
+                    font_path, char, canvas_size, trace_paths,
+                    template=variant_template, return_variant=False
+                )
+                if strokes:
+                    # Quick score based on coverage
+                    score = _quick_stroke_score(strokes, mask)
+                    if score > best_score:
+                        best_score = score
+                        best_strokes = strokes
+                        best_variant = var_name
+
+            if return_variant:
+                return best_strokes, best_variant
+            return best_strokes
+
+    # Use provided template (or single variant selected above)
+    if template is None:
+        return (None, None) if return_variant else None
+
+    font_path = resolve_font_path(font_path)
+    mask = render_glyph_mask(font_path, char, canvas_size)
+    if mask is None:
+        return None
+
+    # Get glyph bounding box
+    rows, cols = np.where(mask)
+    if len(rows) == 0:
+        return None
+    bbox = (float(cols.min()), float(rows.min()),
+            float(cols.max()), float(rows.max()))
+
+    # Analyze skeleton to find key points
+    info = _analyze_skeleton(mask)
+    if info is None:
+        return None
+
+    # Find skeleton segments and classify by direction
+    segments = _find_skeleton_segments(info)
+
+    # Classify segments by angle
+    vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
+    horizontal_segments = [s for s in segments if abs(s['angle']) <= 30 or abs(s['angle']) >= 150]
+
+    # Get junction centroids
+    junction_centroids = []
+    for cluster in info['junction_clusters']:
+        cx = sum(p[0] for p in cluster) / len(cluster)
+        cy = sum(p[1] for p in cluster) / len(cluster)
+        junction_centroids.append((cx, cy))
+
+    # Build tree of all skeleton pixels
+    skel_list = list(info['skel_set'])
+    if not skel_list:
+        return None
+    skel_tree = cKDTree(skel_list)
+
+    def numpad_to_pixel(region):
+        """Map numpad region (1-9) to pixel coordinates (center of region)."""
+        frac_x, frac_y = NUMPAD_POS[region]
+        x = bbox[0] + frac_x * (bbox[2] - bbox[0])
+        y = bbox[1] + frac_y * (bbox[3] - bbox[1])
+        return (x, y)
+
+    def point_in_region(point, region):
+        """Check if a point falls within a numpad region.
+
+        Regions are divided into 3x3 grid:
+          7 | 8 | 9
+          4 | 5 | 6
+          1 | 2 | 3
+        """
+        x, y = point
+        x_min, y_min, x_max, y_max = bbox
+        w = x_max - x_min
+        h = y_max - y_min
+
+        if w == 0 or h == 0:
+            return False
+
+        # Normalize point to 0-1 range
+        nx = (x - x_min) / w
+        ny = (y - y_min) / h
+
+        # Determine which column (0, 1, 2) and row (0, 1, 2)
+        col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
+        row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
+
+        # Convert to numpad region (1-9)
+        # Row 0 = top (7,8,9), Row 1 = middle (4,5,6), Row 2 = bottom (1,2,3)
+        point_region = (2 - row) * 3 + col + 1
+
+        return point_region == region
+
+    def find_skeleton_in_region(region):
+        """Find any skeleton pixel that falls within a region."""
+        for p in skel_list:
+            if point_in_region(p, region):
+                return p
+        return None
+
+    def find_nearest_skeleton(pos):
+        """Find the nearest skeleton pixel to a position."""
+        dist, idx = skel_tree.query(pos)
+        return skel_list[idx]
+
+    def extract_region(wp):
+        """Extract the region number from a waypoint (handles tuples and plain ints)."""
+        if isinstance(wp, tuple):
+            return wp[0] if isinstance(wp[0], int) else None
+        return wp if isinstance(wp, int) else None
+
+    def is_vertical_stroke(stroke_template):
+        """Check if a stroke template represents a vertical line."""
+        if len(stroke_template) != 2:
+            return False
+        # Check if both endpoints are integers (terminals) in same column
+        r1 = extract_region(stroke_template[0])
+        r2 = extract_region(stroke_template[1])
+        if r1 is None or r2 is None:
+            return False
+        # Same column in numpad: (7,4,1), (8,5,2), (9,6,3)
+        col1 = (r1 - 1) % 3
+        col2 = (r2 - 1) % 3
+        return col1 == col2
+
+    def is_horizontal_stroke(stroke_template):
+        """Check if a stroke template represents a horizontal line."""
+        if len(stroke_template) != 2:
+            return False
+        r1 = extract_region(stroke_template[0])
+        r2 = extract_region(stroke_template[1])
+        if r1 is None or r2 is None:
+            return False
+        # Same row in numpad: (7,8,9), (4,5,6), (1,2,3)
+        row1 = (r1 - 1) // 3
+        row2 = (r2 - 1) // 3
+        return row1 == row2
+
+    def find_best_vertical_segment(template_start, template_end):
+        """Find the vertical skeleton segment(s) closest to template positions.
+
+        Chains connected vertical segments to get the full stroke.
+        """
+        if not vertical_segments:
+            return None
+
+        # Filter to only truly vertical segments (not diagonals)
+        truly_vertical = [s for s in vertical_segments if 75 <= abs(s['angle']) <= 105]
+        if not truly_vertical:
+            truly_vertical = vertical_segments  # Fallback
+
+        # Build a graph of connected vertical segments
+        from collections import defaultdict
+
+        junction_to_segs = defaultdict(list)
+        for i, seg in enumerate(truly_vertical):
+            if seg['start_junction'] >= 0:
+                junction_to_segs[seg['start_junction']].append(i)
+            if seg['end_junction'] >= 0:
+                junction_to_segs[seg['end_junction']].append(i)
+
+        # Find chains by grouping segments that share any junction
+        visited = set()
+        chains = []
+
+        for i in range(len(truly_vertical)):
+            if i in visited:
+                continue
+
+            # BFS to find all connected segments
+            chain = []
+            queue = [i]
+            while queue:
+                seg_idx = queue.pop(0)
+                if seg_idx in visited:
+                    continue
+                visited.add(seg_idx)
+                chain.append(seg_idx)
+
+                seg = truly_vertical[seg_idx]
+                # Find segments sharing start or end junction
+                for junc in [seg['start_junction'], seg['end_junction']]:
+                    if junc >= 0:
+                        for other_idx in junction_to_segs[junc]:
+                            if other_idx not in visited:
+                                queue.append(other_idx)
+
+            if chain:
+                chains.append(chain)
+
+        # For each chain, get the full path endpoints
+        best = None
+        best_score = float('inf')
+
+        for chain in chains:
+            # Get all endpoints of segments in chain
+            points = []
+            for seg_idx in chain:
+                seg = truly_vertical[seg_idx]
+                points.append(seg['start'])
+                points.append(seg['end'])
+
+            if not points:
+                continue
+
+            # Find topmost and bottommost points
+            points.sort(key=lambda p: p[1])  # Sort by y
+            top = points[0]
+            bottom = points[-1]
+
+            # Score by match to template
+            d1 = ((top[0] - template_start[0])**2 +
+                  (top[1] - template_start[1])**2)**0.5
+            d2 = ((bottom[0] - template_end[0])**2 +
+                  (bottom[1] - template_end[1])**2)**0.5
+            d1r = ((bottom[0] - template_start[0])**2 +
+                   (bottom[1] - template_start[1])**2)**0.5
+            d2r = ((top[0] - template_end[0])**2 +
+                   (top[1] - template_end[1])**2)**0.5
+
+            score = min(d1 + d2, d1r + d2r)
+            if score < best_score:
+                best_score = score
+                if d1 + d2 <= d1r + d2r:
+                    best = (top, bottom)
+                else:
+                    best = (bottom, top)
+
+        return best
+
+    strokes = []
+
+    # Track apex extensions for vertices (skeleton point -> glyph apex)
+    apex_extensions = {}  # {point_index: (skel_pt, glyph_apex_pt)}
+
+    for stroke_template in template:
+        stroke_points = []
+        waypoint_info = []  # Parallel list storing (is_curve, region) for each waypoint
+
+        # Check for special cases: pure vertical or horizontal strokes
+        if is_vertical_stroke(stroke_template):
+            r1 = extract_region(stroke_template[0])
+            r2 = extract_region(stroke_template[1])
+            p1 = numpad_to_pixel(r1)
+            p2 = numpad_to_pixel(r2)
+            seg = find_best_vertical_segment(p1, p2)
+            if seg:
+                stroke_points = [[float(seg[0][0]), float(seg[0][1])],
+                                [float(seg[1][0]), float(seg[1][1])]]
+            else:
+                # Fallback to nearest skeleton pixels
+                stroke_points = [[float(find_nearest_skeleton(p1)[0]),
+                                 float(find_nearest_skeleton(p1)[1])],
+                                [float(find_nearest_skeleton(p2)[0]),
+                                 float(find_nearest_skeleton(p2)[1])]]
+            waypoint_info = [(False, r1), (False, r2)]  # Terminals, not curves
+        else:
+            # General case: map each waypoint to skeleton
+            for wp in stroke_template:
+                is_vertex = False
+                is_curve = False
+                hint = None
+
+                # Parse waypoint - can be int, string, or tuple (pos, hint)
+                if isinstance(wp, tuple):
+                    wp_val, hint = wp
+                else:
+                    wp_val = wp
+
+                if isinstance(wp_val, int):
+                    region = wp_val
+                else:
+                    m = re.match(r'^v\((\d)\)$', str(wp_val))
+                    if m:
+                        region = int(m.group(1))
+                        is_vertex = True
+                    else:
+                        m = re.match(r'^c\((\d)\)$', str(wp_val))
+                        if m:
+                            region = int(m.group(1))
+                            is_curve = True
+                        else:
+                            continue
+
+                template_pos = numpad_to_pixel(region)
+
+                # Pre-calculate common values
+                mid_x = (bbox[0] + bbox[2]) / 2
+                mid_y = (bbox[1] + bbox[3]) / 2
+                h = bbox[3] - bbox[1]
+                w = bbox[2] - bbox[0]
+                third_h = h / 3
+                top_bound = bbox[1] + third_h
+                bot_bound = bbox[1] + 2 * third_h
+
+                # For terminals (int or tuple with int), find based on hint or position
+                if isinstance(wp_val, int):
+                    # Filter skeleton pixels to those actually IN the target region
+                    region_pixels = [p for p in skel_list if point_in_region(p, region)]
+
+                    # If no pixels in exact region, fall back to vertical third
+                    if not region_pixels:
+                        if template_pos[1] < top_bound:  # Top (positions 7,8,9)
+                            region_pixels = [p for p in skel_list if p[1] < top_bound]
+                        elif template_pos[1] > bot_bound:  # Bottom (positions 1,2,3)
+                            region_pixels = [p for p in skel_list if p[1] > bot_bound]
+                        else:  # Middle (positions 4,5,6)
+                            region_pixels = [p for p in skel_list if top_bound <= p[1] <= bot_bound]
+
+                    if region_pixels:
+                        extremum = None
+
+                        # Check if there's an endpoint in this region - prefer it for terminals
+                        endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region)]
+                        if endpoints_in_region:
+                            # Use the endpoint closest to template position
+                            extremum = min(endpoints_in_region, key=lambda p:
+                                          (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
+                        # Use hint if provided and no endpoint found
+                        elif hint == 'corner':
+                            # Find point closest to the actual corner
+                            def corner_dist(p):
+                                dx = abs(p[0] - template_pos[0])
+                                dy = abs(p[1] - template_pos[1])
+                                return dx + dy
+                            extremum = min(region_pixels, key=corner_dist)
+
+                        elif hint == 'bar':
+                            # Find end of horizontal bar structure
+                            bar_min_y = mid_y - h * 0.05
+                            bar_max_y = mid_y + h * 0.15
+                            bar_pixels = [p for p in region_pixels
+                                         if bar_min_y <= p[1] <= bar_max_y]
+                            if bar_pixels:
+                                if template_pos[0] < mid_x:
+                                    extremum = min(bar_pixels, key=lambda p: p[0])
+                                else:
+                                    extremum = max(bar_pixels, key=lambda p: p[0])
+                            else:
+                                # Fallback to general region search
+                                if template_pos[0] < mid_x:
+                                    extremum = min(region_pixels, key=lambda p: p[0])
+                                else:
+                                    extremum = max(region_pixels, key=lambda p: p[0])
+
+                        elif hint == 'apex':
+                            # Find extremum in vertical direction
+                            if template_pos[1] < mid_y:
+                                extremum = min(region_pixels, key=lambda p: p[1])
+                            else:
+                                extremum = max(region_pixels, key=lambda p: p[1])
+
+                        elif hint == 'top':
+                            # Explicitly get topmost pixel in region
+                            extremum = min(region_pixels, key=lambda p: p[1])
+
+                        elif hint == 'bottom':
+                            # Explicitly get bottommost pixel in region
+                            extremum = max(region_pixels, key=lambda p: p[1])
+
+                        elif hint == 'stem':
+                            # Find point on vertical stem (same x as previous point if exists)
+                            if stroke_points:
+                                prev_x = stroke_points[-1][0]
+                                stem_pixels = [p for p in region_pixels
+                                              if abs(p[0] - prev_x) < w * 0.15]
+                                if stem_pixels:
+                                    if template_pos[1] < mid_y:
+                                        extremum = min(stem_pixels, key=lambda p: p[1])
+                                    else:
+                                        extremum = max(stem_pixels, key=lambda p: p[1])
+                            if extremum is None:
+                                extremum = find_nearest_skeleton(template_pos)
+
+                        elif hint == 'diag':
+                            # Find point along diagonal from previous point
+                            if stroke_points:
+                                prev = stroke_points[-1]
+                                # Find point that extends diagonal direction
+                                def diag_score(p):
+                                    return abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1])
+                                extremum = min(region_pixels, key=diag_score)
+                            else:
+                                extremum = find_nearest_skeleton(template_pos)
+
+                        elif hint == 'base':
+                            # Find point on baseline (bottommost in region)
+                            extremum = max(region_pixels, key=lambda p: p[1])
+
+                        else:
+                            # No hint - use default logic based on position
+                            is_corner_pos = region in [7, 9, 1, 3]
+
+                            if is_corner_pos:
+                                def corner_dist(p):
+                                    dx = abs(p[0] - template_pos[0])
+                                    dy = abs(p[1] - template_pos[1])
+                                    return dx + dy
+                                extremum = min(region_pixels, key=corner_dist)
+                            elif region == 8:
+                                extremum = min(region_pixels, key=lambda p: p[1])
+                            elif region == 2:
+                                extremum = max(region_pixels, key=lambda p: p[1])
+                            elif template_pos[0] < mid_x:
+                                extremum = min(region_pixels, key=lambda p: p[0])
+                            else:
+                                extremum = max(region_pixels, key=lambda p: p[0])
+
+                        stroke_points.append([float(extremum[0]), float(extremum[1])])
+                        waypoint_info.append((is_curve, region))
+                        continue
+
+                if is_vertex:
+                    # For vertices, find the extremum skeleton pixel based on template position
+                    # v(8) = top apex, v(2) = bottom apex, v(4/6) = waist level sides
+                    mid_x = (bbox[0] + bbox[2]) / 2
+                    mid_y = (bbox[1] + bbox[3]) / 2
+                    third_h = (bbox[3] - bbox[1]) / 3
+                    top_bound = bbox[1] + third_h
+                    bot_bound = bbox[1] + 2 * third_h
+
+                    # Determine which region to search based on template position
+                    if template_pos[1] < top_bound:  # Top row (7,8,9)
+                        # Find topmost skeleton pixel for path tracing,
+                        # and track actual glyph apex for extension
+                        if skel_list:
+                            topmost = min(skel_list, key=lambda p: p[1])
+                            skel_x, skel_y = topmost[0], topmost[1]
+                            # Search for glyph pixels in a narrow band above skeleton
+                            col_start = max(0, int(skel_x) - 5)
+                            col_end = min(mask.shape[1], int(skel_x) + 6)
+                            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
+                            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
+                            if len(glyph_rows) > 0:
+                                glyph_top_idx = glyph_rows.argmin()
+                                glyph_top_y = glyph_rows[glyph_top_idx]
+                                glyph_top_x = glyph_cols[glyph_top_idx]
+                                if glyph_top_y < skel_y:
+                                    # Store skeleton point for tracing, track glyph apex
+                                    point_idx = len(stroke_points)
+                                    stroke_points.append([float(skel_x), float(skel_y)])
+                                    waypoint_info.append((is_curve, region))
+                                    apex_extensions[point_idx] = ('top', [float(glyph_top_x), float(glyph_top_y)])
+                                else:
+                                    stroke_points.append([float(skel_x), float(skel_y)])
+                                    waypoint_info.append((is_curve, region))
+                            else:
+                                stroke_points.append([float(skel_x), float(skel_y)])
+                                waypoint_info.append((is_curve, region))
+                        else:
+                            stroke_points.append([float(template_pos[0]), float(template_pos[1])])
+                            waypoint_info.append((is_curve, region))
+                    elif template_pos[1] > bot_bound:  # Bottom row (1,2,3)
+                        # Find bottommost skeleton pixel for path tracing,
+                        # and track actual glyph nadir for extension
+                        if skel_list:
+                            bottommost = max(skel_list, key=lambda p: p[1])
+                            skel_x, skel_y = bottommost[0], bottommost[1]
+                            col_start = max(0, int(skel_x) - 5)
+                            col_end = min(mask.shape[1], int(skel_x) + 6)
+                            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
+                            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
+                            if len(glyph_rows) > 0:
+                                glyph_bot_idx = glyph_rows.argmax()
+                                glyph_bot_y = glyph_rows[glyph_bot_idx]
+                                glyph_bot_x = glyph_cols[glyph_bot_idx]
+                                if glyph_bot_y > skel_y:
+                                    point_idx = len(stroke_points)
+                                    stroke_points.append([float(skel_x), float(skel_y)])
+                                    waypoint_info.append((is_curve, region))
+                                    apex_extensions[point_idx] = ('bottom', [float(glyph_bot_x), float(glyph_bot_y)])
+                                else:
+                                    stroke_points.append([float(skel_x), float(skel_y)])
+                                    waypoint_info.append((is_curve, region))
+                            else:
+                                stroke_points.append([float(skel_x), float(skel_y)])
+                                waypoint_info.append((is_curve, region))
+                        else:
+                            stroke_points.append([float(template_pos[0]), float(template_pos[1])])
+                            waypoint_info.append((is_curve, region))
+                    else:  # Middle row (4,5,6) - waist level
+                        waist_tolerance = (bbox[3] - bbox[1]) * 0.15
+                        waist_pixels = [p for p in skel_list
+                                       if abs(p[1] - mid_y) < waist_tolerance]
+
+                        if waist_pixels:
+                            # Get the extremum based on horizontal position
+                            if template_pos[0] < mid_x:  # Left side (4)
+                                vertex_pt = min(waist_pixels, key=lambda p: p[0])
+                            else:  # Right side (6)
+                                vertex_pt = max(waist_pixels, key=lambda p: p[0])
+                            stroke_points.append([float(vertex_pt[0]), float(vertex_pt[1])])
+                            waypoint_info.append((is_curve, region))
+                        else:
+                            nearest = find_nearest_skeleton(template_pos)
+                            stroke_points.append([float(nearest[0]), float(nearest[1])])
+                            waypoint_info.append((is_curve, region))
+                else:
+                    # For curves c(n), find the apex (extremum) in the direction of the template
+                    is_curve = not isinstance(wp, int) and str(wp).startswith('c(')
+                    if is_curve:
+                        # Determine which region to search based on template position
+                        mid_x = (bbox[0] + bbox[2]) / 2
+                        waist_y = (bbox[1] + bbox[3]) / 2
+                        # Add small margin around waist to separate top/bottom bumps
+                        waist_margin = (bbox[3] - bbox[1]) * 0.05
+
+                        # Filter skeleton pixels well above or below waist
+                        if template_pos[1] < waist_y:  # Above waist (positions 7,8,9)
+                            region_pixels = [p for p in skel_list if p[1] < waist_y - waist_margin]
+                        else:  # Below waist (positions 1,2,3)
+                            region_pixels = [p for p in skel_list if p[1] > waist_y + waist_margin]
+
+                        if region_pixels:
+                            # Find apex based on template position direction
+                            if template_pos[0] > mid_x:  # Right side (positions 3,6,9)
+                                # Rightmost point in region (farthest from stem)
+                                apex = max(region_pixels, key=lambda p: p[0])
+                            elif template_pos[0] < mid_x:  # Left side (positions 1,4,7)
+                                # Leftmost point in region
+                                apex = min(region_pixels, key=lambda p: p[0])
+                            else:  # Center (positions 2,5,8)
+                                # Just use nearest
+                                apex = find_nearest_skeleton(template_pos)
+                            stroke_points.append([float(apex[0]), float(apex[1])])
+                            waypoint_info.append((True, region))  # is_curve=True
+                        else:
+                            nearest = find_nearest_skeleton(template_pos)
+                            stroke_points.append([float(nearest[0]), float(nearest[1])])
+                            waypoint_info.append((True, region))  # is_curve=True
+                    else:
+                        # For terminals, find skeleton pixel IN the target region
+                        # Prefer pixels actually in the region over nearest to center
+                        region_pixels = [p for p in skel_list if point_in_region(p, region)]
+                        if region_pixels:
+                            # Find the one nearest to the region center
+                            nearest = min(region_pixels, key=lambda p:
+                                         (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+                        else:
+                            # Fallback to nearest skeleton pixel if none in region
+                            nearest = find_nearest_skeleton(template_pos)
+                        stroke_points.append([float(nearest[0]), float(nearest[1])])
+                        waypoint_info.append((False, region))  # is_curve=False
+
+        if len(stroke_points) >= 2:
+            if trace_paths:
+
+                # Trace skeleton paths between consecutive keypoints
+                full_path = []
+                already_traced = set()  # Track pixels we've already traced to prevent double-backs
+
+                # Start from first waypoint
+                current_pt = (int(round(stroke_points[0][0])), int(round(stroke_points[0][1])))
+
+                for i in range(len(stroke_points) - 1):
+                    # Use current_pt (where we actually are) not stroke_points[i]
+                    start_pt = current_pt
+                    end_pt = (int(round(stroke_points[i+1][0])), int(round(stroke_points[i+1][1])))
+
+                    # Check if target waypoint is a curve (use region-based tracing)
+                    target_is_curve, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, None)
+
+                    if target_is_curve and target_region is not None:
+                        # Use region-based tracing: trace until we enter the target region
+                        traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
+                                                  avoid_pixels=already_traced)
+                        # If failed, retry without avoidance (allows "there and back" templates)
+                        if traced is None:
+                            traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
+                                                      avoid_pixels=None)
+                    else:
+                        # Use point-to-point tracing for terminals and vertices
+                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                       avoid_pixels=already_traced)
+                        # If failed, retry without avoidance (allows retracing same pixels)
+                        if traced is None:
+                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                          avoid_pixels=None)
+
+                    if traced:
+                        # Add traced points (skip first point if not first segment to avoid duplicates)
+                        if i == 0:
+                            full_path.extend(traced)
+                            already_traced.update(traced)
+                        else:
+                            full_path.extend(traced[1:])
+                            already_traced.update(traced[1:])
+                        # Update current_pt to where we actually ended
+                        current_pt = traced[-1]
+                    else:
+                        # No path found (would require double-back) - just stop here
+                        # Don't add endpoint if it would require backtracking
+                        if i == 0:
+                            full_path.append(start_pt)
+                            already_traced.add(start_pt)
+                        # Skip remaining waypoints - stroke ends where skeleton ends
+                        break
+
+                # Apply apex extensions: insert apex points into the traced path
+                # For each extension, find where in full_path the skeleton point is
+                # and insert/replace with the glyph apex
+                for point_idx, (direction, apex_pt) in apex_extensions.items():
+                    # Find the skeleton point in stroke_points
+                    if point_idx < len(stroke_points):
+                        skel_pt = stroke_points[point_idx]
+                        skel_x, skel_y = int(round(skel_pt[0])), int(round(skel_pt[1]))
+
+                        # Find this point in full_path and extend
+                        for j, fp in enumerate(full_path):
+                            if abs(fp[0] - skel_x) <= 2 and abs(fp[1] - skel_y) <= 2:
+                                # Found the skeleton point - insert apex at correct position
+                                apex_tuple = (int(round(apex_pt[0])), int(round(apex_pt[1])))
+                                if direction == 'top':
+                                    # Insert apex before this point (at the start if it's the beginning)
+                                    full_path.insert(j, apex_tuple)
+                                else:  # 'bottom'
+                                    # Insert apex after this point
+                                    full_path.insert(j + 1, apex_tuple)
+                                break
+
+                # Clear apex_extensions for next stroke
+                apex_extensions.clear()
+
+                # Resample to reasonable number of points
+                if len(full_path) > 3:
+                    resampled = _resample_path(full_path, num_points=min(30, len(full_path)))
+                    stroke_points = [[float(p[0]), float(p[1])] for p in resampled]
+                else:
+                    stroke_points = [[float(p[0]), float(p[1])] for p in full_path]
+
+            strokes.append(stroke_points)
+
+    if return_variant:
+        return (strokes if strokes else None, _variant_name)
+    return strokes if strokes else None
+
+
 def template_to_strokes(font_path, char, canvas_size=224, return_markers=False):
     """Generate strokes using numpad-grid template and contour midpoint algorithm.
 
@@ -2529,6 +3719,30 @@ def get_db():
     return conn
 
 
+def ensure_test_tables():
+    """Ensure test tracking tables exist."""
+    db = get_db()
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS test_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            font_id INTEGER NOT NULL,
+            run_date TEXT NOT NULL,
+            chars_tested INTEGER NOT NULL,
+            chars_ok INTEGER NOT NULL,
+            avg_score REAL,
+            avg_coverage REAL,
+            avg_overshoot REAL,
+            avg_stroke_count REAL,
+            avg_topology REAL,
+            results_json TEXT,
+            FOREIGN KEY (font_id) REFERENCES fonts(id)
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_font ON test_runs(font_id)")
+    db.commit()
+    db.close()
+
+
 def resolve_font_path(font_path):
     """Resolve a possibly-relative font path against BASE_DIR."""
     if os.path.isabs(font_path):
@@ -2744,10 +3958,427 @@ def api_render(font_id):
     return send_file(io.BytesIO(img_bytes), mimetype='image/png')
 
 
+@app.route('/api/thin-preview/<int:font_id>')
+def api_thin_preview(font_id):
+    """Render thinned glyph mask as PNG for previewing thinning effect.
+
+    Query params:
+        c: character (required)
+        thin: number of thinning iterations (default 5)
+    """
+    from skimage.morphology import thin
+
+    char = request.args.get('c')
+    if not char:
+        return "Missing ?c= parameter", 400
+
+    thin_iterations = int(request.args.get('thin', 5))
+
+    db = get_db()
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+    if not font:
+        return "Font not found", 404
+
+    mask = render_glyph_mask(font['file_path'], char)
+    if mask is None:
+        return "Could not render glyph", 500
+
+    # Apply topology-preserving thinning
+    if thin_iterations > 0:
+        thinned = thin(mask, max_num_iter=thin_iterations)
+    else:
+        thinned = mask
+
+    # Create image: white background, gray for original, black for thinned
+    img = np.full((224, 224, 3), 255, dtype=np.uint8)
+    img[mask] = [200, 200, 200]  # Original glyph in light gray
+    img[thinned] = [0, 0, 0]     # Thinned result in black
+
+    pil_img = Image.fromarray(img)
+    buf = io.BytesIO()
+    pil_img.save(buf, format='PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
+
 STROKE_COLORS = [
     (255, 80, 80), (80, 180, 255), (80, 220, 80), (255, 180, 40),
     (200, 100, 255), (255, 120, 200), (100, 220, 220), (180, 180, 80),
 ]
+
+
+def check_case_mismatch(font_path, threshold=0.80):
+    """Check if lowercase letters match their uppercase counterparts.
+
+    Returns a list of lowercase letters that appear identical to uppercase.
+    Normalizes glyphs to same size before comparing to catch small-caps fonts.
+
+    Args:
+        font_path: Path to font file
+        threshold: Similarity threshold (0-1). Higher = more similar required to flag.
+
+    Returns:
+        List of lowercase letters that match uppercase (e.g., ['r', 'g'])
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    # Letters to check
+    letters_to_check = 'abcdefghijklmnopqrstuvwxyz'
+    mismatched = []
+
+    try:
+        font_size = 100
+        pil_font = ImageFont.truetype(font_path, font_size)
+    except Exception:
+        return []
+
+    # Normalized comparison size
+    norm_size = 64
+
+    for lower in letters_to_check:
+        upper = lower.upper()
+
+        try:
+            # Get bounding boxes
+            l_bbox = pil_font.getbbox(lower)
+            u_bbox = pil_font.getbbox(upper)
+
+            if not l_bbox or not u_bbox:
+                continue
+
+            l_w = l_bbox[2] - l_bbox[0]
+            l_h = l_bbox[3] - l_bbox[1]
+            u_w = u_bbox[2] - u_bbox[0]
+            u_h = u_bbox[3] - u_bbox[1]
+
+            if l_w < 5 or l_h < 5 or u_w < 5 or u_h < 5:
+                continue
+
+            # Render lowercase at its natural size with padding
+            l_img = Image.new('L', (l_w + 10, l_h + 10), 255)
+            l_draw = ImageDraw.Draw(l_img)
+            l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), lower, fill=0, font=pil_font)
+
+            # Render uppercase at its natural size with padding
+            u_img = Image.new('L', (u_w + 10, u_h + 10), 255)
+            u_draw = ImageDraw.Draw(u_img)
+            u_draw.text((5 - u_bbox[0], 5 - u_bbox[1]), upper, fill=0, font=pil_font)
+
+            # Scale both to same normalized size for comparison
+            l_scaled = l_img.resize((norm_size, norm_size), Image.Resampling.BILINEAR)
+            u_scaled = u_img.resize((norm_size, norm_size), Image.Resampling.BILINEAR)
+
+            l_arr = np.array(l_scaled) < 128
+            u_arr = np.array(u_scaled) < 128
+
+            # Compare using intersection over union (IoU)
+            intersection = np.sum(l_arr & u_arr)
+            union = np.sum(l_arr | u_arr)
+
+            if union > 0:
+                iou = intersection / union
+                if iou >= threshold:
+                    mismatched.append(lower)
+
+        except Exception:
+            continue
+
+    return mismatched
+
+
+@app.route('/api/check-connected/<int:font_id>')
+def api_check_connected(font_id):
+    """Check if font renders text with appropriate shape count.
+
+    Returns shape count for "Hello World" - should be 10-15 for normal fonts.
+    < 10 means connected/cursive, > 15 means overly decorative.
+    """
+    from scipy import ndimage
+
+    db = get_db()
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+    if not font:
+        return jsonify(error="Font not found"), 404
+
+    font_path = resolve_font_path(font['file_path'])
+    text = "Hello World"  # 10 letters
+
+    import os
+    if not os.path.exists(font_path):
+        return jsonify(error="Font file missing"), 404
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        font_size = 60
+        try:
+            pil_font = ImageFont.truetype(font_path, font_size)
+        except Exception as e:
+            return jsonify(error=f"Can't load font: {e}"), 500
+        bbox = pil_font.getbbox(text)
+        if not bbox:
+            return jsonify(error="Could not render"), 500
+
+        width = bbox[2] - bbox[0] + 20
+        height = bbox[3] - bbox[1] + 20
+
+        img = Image.new('L', (width, height), 255)
+        draw = ImageDraw.Draw(img)
+        draw.text((10 - bbox[0], 10 - bbox[1]), text, fill=0, font=pil_font)
+
+        # Count connected components
+        arr = np.array(img) < 128
+        labeled, num_shapes = ndimage.label(arr)
+
+        # Check width of largest component (cursive detection)
+        max_width_pct = 0
+        if num_shapes > 0:
+            for i in range(1, num_shapes + 1):
+                component = (labeled == i)
+                cols = np.any(component, axis=0)
+                comp_width = np.sum(cols)
+                width_pct = comp_width / width
+                if width_pct > max_width_pct:
+                    max_width_pct = width_pct
+
+        # Check for holes in letter "l" (cursive fonts have loops)
+        l_has_hole = False
+        try:
+            l_bbox = pil_font.getbbox('l')
+            if l_bbox:
+                l_width = l_bbox[2] - l_bbox[0] + 10
+                l_height = l_bbox[3] - l_bbox[1] + 10
+                l_img = Image.new('L', (l_width, l_height), 255)
+                l_draw = ImageDraw.Draw(l_img)
+                l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), 'l', fill=0, font=pil_font)
+                l_arr = np.array(l_img) < 128
+                # Fill holes and compare
+                filled = ndimage.binary_fill_holes(l_arr)
+                holes = filled & ~l_arr
+                l_has_hole = bool(np.any(holes))
+        except:
+            pass
+
+        # Check for "!" glyph - should have exactly 2 components (dot + line)
+        exclaim_ok = False
+        exclaim_shapes = 0
+        try:
+            e_bbox = pil_font.getbbox('!')
+            if e_bbox:
+                e_width = e_bbox[2] - e_bbox[0] + 10
+                e_height = e_bbox[3] - e_bbox[1] + 10
+                e_img = Image.new('L', (e_width, e_height), 255)
+                e_draw = ImageDraw.Draw(e_img)
+                e_draw.text((5 - e_bbox[0], 5 - e_bbox[1]), '!', fill=0, font=pil_font)
+                e_arr = np.array(e_img) < 128
+                _, exclaim_shapes = ndimage.label(e_arr)
+                exclaim_ok = exclaim_shapes == 2
+        except:
+            pass
+
+        # Check for lowercase/uppercase case mismatches
+        case_mismatches = check_case_mismatch(font_path)
+
+        # Bad if: wrong shape count OR largest component too wide OR "l" has hole OR "!" missing/invalid
+        bad_shapes = num_shapes < 10 or num_shapes > 15
+        bad_width = max_width_pct > 0.225
+        bad_hole = l_has_hole
+        bad_exclaim = not exclaim_ok
+        bad = bad_shapes or bad_width or bad_hole or bad_exclaim
+
+        return jsonify(
+            shapes=int(num_shapes),
+            min_required=10,
+            max_allowed=15,
+            max_width_pct=round(float(max_width_pct) * 100, 1),
+            l_has_hole=l_has_hole,
+            exclaim_ok=exclaim_ok,
+            exclaim_shapes=int(exclaim_shapes),
+            case_mismatches=case_mismatches,
+            case_mismatch_count=len(case_mismatches),
+            bad=bool(bad),
+            reason='exclaim' if bad_exclaim and not bad_hole and not bad_width and not bad_shapes else ('hole' if bad_hole and not bad_shapes and not bad_width else ('width' if bad_width and not bad_shapes else ('shapes' if bad_shapes else None)))
+        )
+
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+@app.route('/api/reject-connected', methods=['POST'])
+def api_reject_connected():
+    """Check all fonts and reject those with bad shape counts (< 10 or > 15 shapes in 'Hello World')."""
+    from scipy import ndimage
+
+    db = get_db()
+    # Get non-rejected fonts (no entry in font_removals with reason_id 8)
+    fonts = db.execute("""
+        SELECT f.id, f.file_path
+        FROM fonts f
+        LEFT JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = 8
+        WHERE fr.id IS NULL
+    """).fetchall()
+
+    rejected = []
+    checked = 0
+
+    for font in fonts:
+        font_path = resolve_font_path(font['file_path'])
+        text = "Hello World"
+
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+
+            font_size = 60
+            pil_font = ImageFont.truetype(font_path, font_size)
+            bbox = pil_font.getbbox(text)
+            if not bbox:
+                continue
+
+            width = bbox[2] - bbox[0] + 20
+            height = bbox[3] - bbox[1] + 20
+
+            img = Image.new('L', (width, height), 255)
+            draw = ImageDraw.Draw(img)
+            draw.text((10 - bbox[0], 10 - bbox[1]), text, fill=0, font=pil_font)
+
+            arr = np.array(img) < 128
+            labeled, num_shapes = ndimage.label(arr)
+
+            # Check width of largest component
+            max_width_pct = 0
+            if num_shapes > 0:
+                for i in range(1, num_shapes + 1):
+                    component = (labeled == i)
+                    cols = np.any(component, axis=0)
+                    comp_width = np.sum(cols)
+                    width_pct = comp_width / width
+                    if width_pct > max_width_pct:
+                        max_width_pct = width_pct
+
+            # Check for holes in letter "l"
+            l_has_hole = False
+            try:
+                l_bbox = pil_font.getbbox('l')
+                if l_bbox:
+                    l_width = l_bbox[2] - l_bbox[0] + 10
+                    l_height = l_bbox[3] - l_bbox[1] + 10
+                    l_img = Image.new('L', (l_width, l_height), 255)
+                    l_draw = ImageDraw.Draw(l_img)
+                    l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), 'l', fill=0, font=pil_font)
+                    l_arr = np.array(l_img) < 128
+                    filled = ndimage.binary_fill_holes(l_arr)
+                    holes = filled & ~l_arr
+                    l_has_hole = bool(np.any(holes))
+            except:
+                pass
+
+            # Check for "!" glyph - should have exactly 2 components
+            exclaim_ok = False
+            exclaim_shapes = 0
+            try:
+                e_bbox = pil_font.getbbox('!')
+                if e_bbox:
+                    e_width = e_bbox[2] - e_bbox[0] + 10
+                    e_height = e_bbox[3] - e_bbox[1] + 10
+                    e_img = Image.new('L', (e_width, e_height), 255)
+                    e_draw = ImageDraw.Draw(e_img)
+                    e_draw.text((5 - e_bbox[0], 5 - e_bbox[1]), '!', fill=0, font=pil_font)
+                    e_arr = np.array(e_img) < 128
+                    _, exclaim_shapes = ndimage.label(e_arr)
+                    exclaim_ok = exclaim_shapes == 2
+            except:
+                pass
+
+            # Check for case mismatches (lowercase = uppercase)
+            case_mismatches = check_case_mismatch(font_path)
+
+            checked += 1
+
+            bad_shapes = num_shapes < 10 or num_shapes > 15
+            bad_width = max_width_pct > 0.225
+            bad_hole = l_has_hole
+            bad_exclaim = not exclaim_ok
+            bad_case = len(case_mismatches) > 0
+
+            if bad_shapes or bad_width or bad_hole or bad_exclaim or bad_case:
+                # Insert rejection into font_removals table
+                if num_shapes < 10:
+                    reason = f'Connected letters: {num_shapes} shapes < 10 required'
+                elif num_shapes > 15:
+                    reason = f'Too decorative: {num_shapes} shapes > 15 max'
+                elif bad_width:
+                    reason = f'Cursive: largest component spans {max_width_pct*100:.1f}% width (>22.5%)'
+                elif bad_hole:
+                    reason = f'Cursive: letter "l" has hole/loop'
+                elif bad_exclaim:
+                    reason = f'Missing/invalid "!" glyph ({exclaim_shapes} shapes, need 2)'
+                elif bad_case:
+                    reason = f'Case mismatch: lowercase matches uppercase for: {", ".join(case_mismatches)}'
+                db.execute(
+                    "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)",
+                    (font['id'], reason)
+                )
+                rejected.append({'id': font['id'], 'shapes': num_shapes, 'width_pct': round(max_width_pct*100, 1), 'l_hole': l_has_hole, 'exclaim_ok': exclaim_ok, 'case_mismatches': case_mismatches})
+
+        except Exception:
+            continue
+
+    db.commit()
+    db.close()
+
+    return jsonify(ok=True, checked=checked, rejected=len(rejected), fonts=rejected)
+
+
+@app.route('/api/font-sample/<int:font_id>')
+def api_font_sample(font_id):
+    """Render sample text in a font as PNG for font list preview."""
+    text = request.args.get('text', 'Hello World!')
+    height = int(request.args.get('h', 40))
+
+    db = get_db()
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+    if not font:
+        return "Font not found", 404
+
+    font_path = resolve_font_path(font['file_path'])
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        # Find font size that fits the height
+        font_size = int(height * 0.85)
+        try:
+            pil_font = ImageFont.truetype(font_path, font_size)
+        except Exception:
+            return "Could not load font", 500
+
+        # Get text dimensions
+        bbox = pil_font.getbbox(text)
+        if not bbox:
+            return "Could not render text", 500
+
+        text_width = bbox[2] - bbox[0] + 10
+        text_height = height
+
+        # Create image with transparent background
+        img = Image.new('RGBA', (text_width, text_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Draw text in white
+        x = 5 - bbox[0]
+        y = (height - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        draw.text((x, y), text, fill=(255, 255, 255, 255), font=pil_font)
+
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        return f"Error: {e}", 500
 
 
 @app.route('/api/preview/<int:font_id>')
@@ -2783,10 +4414,54 @@ def api_preview(font_id):
     rgba[glyph_mask, 3] = 60
     bg = Image.fromarray(rgba, 'RGBA')
 
+    draw = ImageDraw.Draw(bg)
+
+    # Draw 9-region grid (numpad/nonants) if requested
+    show_grid = request.args.get('grid', '').lower() in ('1', 'true', 'yes')
+    if show_grid:
+        # Find glyph bounding box
+        rows_idx, cols_idx = np.where(glyph_mask)
+        if len(rows_idx) > 0:
+            x_min, x_max = cols_idx.min(), cols_idx.max()
+            y_min, y_max = rows_idx.min(), rows_idx.max()
+            w = x_max - x_min
+            h = y_max - y_min
+
+            # Draw vertical lines at 1/3 and 2/3
+            grid_color = (100, 100, 255, 180)
+            x1 = x_min + w / 3
+            x2 = x_min + 2 * w / 3
+            draw.line([(x1, y_min), (x1, y_max)], fill=grid_color, width=1)
+            draw.line([(x2, y_min), (x2, y_max)], fill=grid_color, width=1)
+
+            # Draw horizontal lines at 1/3 and 2/3
+            y1 = y_min + h / 3
+            y2 = y_min + 2 * h / 3
+            draw.line([(x_min, y1), (x_max, y1)], fill=grid_color, width=1)
+            draw.line([(x_min, y2), (x_max, y2)], fill=grid_color, width=1)
+
+            # Draw bounding box
+            draw.rectangle([(x_min, y_min), (x_max, y_max)], outline=grid_color, width=1)
+
+            # Label regions 1-9 (numpad layout: 7 8 9 / 4 5 6 / 1 2 3)
+            label_color = (80, 80, 200, 220)
+            positions = {
+                7: (x_min + w/6, y_min + h/6),
+                8: (x_min + w/2, y_min + h/6),
+                9: (x_min + 5*w/6, y_min + h/6),
+                4: (x_min + w/6, y_min + h/2),
+                5: (x_min + w/2, y_min + h/2),
+                6: (x_min + 5*w/6, y_min + h/2),
+                1: (x_min + w/6, y_min + 5*h/6),
+                2: (x_min + w/2, y_min + 5*h/6),
+                3: (x_min + 5*w/6, y_min + 5*h/6),
+            }
+            for num, (px, py) in positions.items():
+                draw.text((px - 4, py - 6), str(num), fill=label_color)
+
     # Draw strokes
     if row and row['strokes_raw']:
         strokes = json.loads(row['strokes_raw'])
-        draw = ImageDraw.Draw(bg)
         for si, stroke in enumerate(strokes):
             color = STROKE_COLORS[si % len(STROKE_COLORS)]
             if len(stroke) >= 2:
@@ -3290,6 +4965,333 @@ def api_unreject_font(font_id):
     db.commit()
     db.close()
     return jsonify(ok=True, status='unrejected')
+
+
+@app.route('/api/unreject-all', methods=['POST'])
+def api_unreject_all():
+    """Remove all manual rejections (reason_id = 8)."""
+    db = get_db()
+    result = db.execute("DELETE FROM font_removals WHERE reason_id = 8")
+    restored = result.rowcount
+    db.commit()
+    db.close()
+    return jsonify(ok=True, restored=restored)
+
+
+@app.route('/api/test-run/<int:font_id>', methods=['POST'])
+def api_run_tests(font_id):
+    """Run stroke quality tests for all characters in a font."""
+    from test_minimal_strokes import test_letter
+
+    ensure_test_tables()
+
+    db = get_db()
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    if not font:
+        db.close()
+        return jsonify(error="Font not found"), 404
+
+    font_path = resolve_font_path(font['file_path'])
+
+    # Test all characters
+    chars = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+    results = []
+
+    for char in chars:
+        result = test_letter(font_path, char)
+        # Also save the stroke data for historical comparison
+        try:
+            strokes = minimal_strokes_from_skeleton(font_path, char, 224)
+            if strokes:
+                result['strokes'] = strokes
+        except Exception:
+            pass
+        results.append(result)
+
+    # Calculate averages
+    ok_results = [r for r in results if r['status'] == 'ok']
+    n = len(ok_results) if ok_results else 1
+
+    avg_score = sum(r['score'] for r in ok_results) / n if ok_results else 0
+    avg_coverage = sum(r['coverage'] for r in ok_results) / n if ok_results else 0
+    avg_overshoot = sum(r['overshoot'] for r in ok_results) / n if ok_results else 0
+    avg_stroke_count = sum(r['stroke_count_score'] for r in ok_results) / n if ok_results else 0
+    avg_topology = sum(r['topology_score'] for r in ok_results) / n if ok_results else 0
+
+    # Store in database
+    from datetime import datetime
+    run_date = datetime.now().isoformat()
+
+    db.execute("""
+        INSERT INTO test_runs (font_id, run_date, chars_tested, chars_ok,
+            avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology,
+            results_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (font_id, run_date, len(results), len(ok_results),
+          avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology,
+          json.dumps(results)))
+    db.commit()
+    db.close()
+
+    # Find worst character (lowest score)
+    worst_char = None
+    worst_score = 1.0
+    for r in ok_results:
+        if r['score'] < worst_score:
+            worst_score = r['score']
+            worst_char = r['char']
+
+    # Include detailed results if requested
+    include_details = request.args.get('details', 'false').lower() == 'true'
+
+    response = {
+        'ok': True,
+        'chars_tested': len(results),
+        'chars_ok': len(ok_results),
+        'avg_score': round(avg_score, 3),
+        'avg_coverage': round(avg_coverage, 3),
+        'avg_overshoot': round(avg_overshoot, 3),
+        'avg_stroke_count': round(avg_stroke_count, 3),
+        'avg_topology': round(avg_topology, 3),
+        'worst_char': worst_char,
+        'worst_score': round(worst_score, 3) if worst_char else None
+    }
+
+    if include_details:
+        response['results'] = results
+
+    return jsonify(response)
+
+
+@app.route('/api/test-history/<int:font_id>')
+def api_test_history(font_id):
+    """Get test run history for a font."""
+    ensure_test_tables()
+
+    limit = request.args.get('limit', 10, type=int)
+
+    db = get_db()
+    runs = db.execute("""
+        SELECT id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology
+        FROM test_runs
+        WHERE font_id = ?
+        ORDER BY run_date DESC
+        LIMIT ?
+    """, (font_id, limit)).fetchall()
+    db.close()
+
+    return jsonify(runs=[dict(r) for r in runs])
+
+
+@app.route('/api/test-run-detail/<int:run_id>')
+def api_test_run_detail(run_id):
+    """Get detailed results for a specific test run."""
+    ensure_test_tables()
+
+    db = get_db()
+    run = db.execute("""
+        SELECT * FROM test_runs WHERE id = ?
+    """, (run_id,)).fetchone()
+    db.close()
+
+    if not run:
+        return jsonify(error="Run not found"), 404
+
+    result = dict(run)
+    if result.get('results_json'):
+        result['results'] = json.loads(result['results_json'])
+        del result['results_json']
+
+    return jsonify(result)
+
+
+@app.route('/api/preview-from-run/<int:run_id>')
+def api_preview_from_run(run_id):
+    """Render a stroke preview from stored test run data.
+
+    Query params:
+        c: character to render
+        font_id: font ID (to get the glyph mask)
+    """
+    char = request.args.get('c', 'A')
+    font_id = request.args.get('font_id', type=int)
+
+    ensure_test_tables()
+    db = get_db()
+    run = db.execute("SELECT * FROM test_runs WHERE id = ?", (run_id,)).fetchone()
+
+    if not run:
+        db.close()
+        return "Run not found", 404
+
+    # Parse results to find the character's strokes
+    results = json.loads(run['results_json']) if run['results_json'] else []
+    char_result = None
+    for r in results:
+        if r.get('char') == char:
+            char_result = r
+            break
+
+    if not char_result or 'strokes' not in char_result:
+        db.close()
+        # Return a placeholder image indicating no data
+        from PIL import Image, ImageDraw
+        img = Image.new('RGB', (224, 224), (26, 26, 46))
+        draw = ImageDraw.Draw(img)
+        draw.text((60, 100), "No stroke data", fill=(100, 100, 100))
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+
+    strokes = char_result['strokes']
+
+    # Get font path to render glyph background
+    if not font_id:
+        font_id = run['font_id']
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+
+    if not font:
+        return "Font not found", 404
+
+    font_path = resolve_font_path(font['file_path'])
+
+    # Render the preview with stored strokes
+    from PIL import Image, ImageDraw
+
+    # Get glyph mask for background
+    mask = render_glyph_mask(font_path, char, 224)
+
+    # Create image
+    img = Image.new('RGB', (224, 224), (26, 26, 46))
+    draw = ImageDraw.Draw(img)
+
+    # Draw glyph silhouette
+    if mask is not None:
+        for y in range(mask.shape[0]):
+            for x in range(mask.shape[1]):
+                if mask[y, x] > 0:
+                    img.putpixel((x, y), (60, 60, 80))
+
+    # Draw strokes
+    colors = [(126, 184, 247), (247, 184, 126), (184, 247, 126), (247, 126, 184)]
+    for i, stroke in enumerate(strokes):
+        if len(stroke) >= 2:
+            color = colors[i % len(colors)]
+            points = [(int(p[0]), int(p[1])) for p in stroke]
+            draw.line(points, fill=color, width=3)
+            # Draw endpoints
+            draw.ellipse([points[0][0]-4, points[0][1]-4,
+                         points[0][0]+4, points[0][1]+4], fill=(100, 255, 100))
+            draw.ellipse([points[-1][0]-4, points[-1][1]-4,
+                         points[-1][0]+4, points[-1][1]+4], fill=(255, 100, 100))
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
+
+@app.route('/api/compare-runs')
+def api_compare_runs():
+    """Compare two test runs and return differences.
+
+    Query params:
+        run1: older run ID
+        run2: newer run ID
+        OR
+        font_id: compare last two runs for this font
+    """
+    ensure_test_tables()
+    db = get_db()
+
+    run1_id = request.args.get('run1', type=int)
+    run2_id = request.args.get('run2', type=int)
+    font_id = request.args.get('font_id', type=int)
+
+    if font_id and not (run1_id and run2_id):
+        # Get last two runs for this font
+        runs = db.execute("""
+            SELECT id FROM test_runs WHERE font_id = ?
+            ORDER BY run_date DESC LIMIT 2
+        """, (font_id,)).fetchall()
+        if len(runs) < 2:
+            db.close()
+            return jsonify(error="Need at least 2 runs to compare"), 400
+        run2_id = runs[0]['id']  # newer
+        run1_id = runs[1]['id']  # older
+
+    if not run1_id or not run2_id:
+        db.close()
+        return jsonify(error="Must specify run1 & run2, or font_id"), 400
+
+    run1 = db.execute("SELECT * FROM test_runs WHERE id = ?", (run1_id,)).fetchone()
+    run2 = db.execute("SELECT * FROM test_runs WHERE id = ?", (run2_id,)).fetchone()
+    db.close()
+
+    if not run1 or not run2:
+        return jsonify(error="Run not found"), 404
+
+    results1 = json.loads(run1['results_json']) if run1['results_json'] else []
+    results2 = json.loads(run2['results_json']) if run2['results_json'] else []
+
+    # Build lookup by char
+    map1 = {r['char']: r for r in results1}
+    map2 = {r['char']: r for r in results2}
+
+    comparisons = []
+    all_chars = set(map1.keys()) | set(map2.keys())
+
+    for char in sorted(all_chars):
+        r1 = map1.get(char, {})
+        r2 = map2.get(char, {})
+
+        old_score = r1.get('score', 0) if r1.get('status') == 'ok' else None
+        new_score = r2.get('score', 0) if r2.get('status') == 'ok' else None
+
+        if old_score is not None and new_score is not None:
+            delta = new_score - old_score
+        else:
+            delta = None
+
+        comparisons.append({
+            'char': char,
+            'old_score': old_score,
+            'new_score': new_score,
+            'delta': round(delta, 3) if delta is not None else None,
+            'old_coverage': r1.get('coverage'),
+            'new_coverage': r2.get('coverage'),
+            'old_topology': r1.get('topology_score'),
+            'new_topology': r2.get('topology_score'),
+        })
+
+    # Sort by delta (biggest regressions first)
+    comparisons.sort(key=lambda x: x['delta'] if x['delta'] is not None else 0)
+
+    return jsonify(
+        ok=True,
+        run1_id=run1_id,
+        run2_id=run2_id,
+        run1_date=run1['run_date'],
+        run2_date=run2['run_date'],
+        font_id=run1['font_id'],
+        old_avg=run1['avg_score'],
+        new_avg=run2['avg_score'],
+        comparisons=comparisons
+    )
+
+
+@app.route('/compare/<int:font_id>')
+def compare_page(font_id):
+    """Show comparison page for a font's last two test runs."""
+    db = get_db()
+    font = db.execute("SELECT * FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+    if not font:
+        return "Font not found", 404
+    return render_template('compare.html', font=font)
 
 
 def _ray_to_border(mask, x, y, dx, dy, max_steps=300):
@@ -4703,6 +6705,71 @@ def api_skeleton(font_id):
     return jsonify(strokes=strokes)
 
 
+@app.route('/api/minimal-strokes-batch/<int:font_id>', methods=['POST'])
+def api_minimal_strokes_batch(font_id):
+    """Generate minimal strokes (template + skeleton) for all characters and save to DB."""
+    db = get_db()
+    font = db.execute("SELECT * FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    if not font:
+        db.close()
+        return jsonify(error="Font not found"), 404
+
+    # Ensure template_variant column exists
+    try:
+        db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
+        db.commit()
+    except:
+        pass  # Column already exists
+
+    generated = 0
+    skipped = 0
+    failed = 0
+    variants_used = {}
+
+    for char in CHARS:
+        # Skip chars that already have stroke data (unless force=true)
+        force = request.args.get('force', '').lower() == 'true'
+        if not force:
+            existing = db.execute(
+                "SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL",
+                (font_id, char)
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+
+        # Generate minimal strokes using template + skeleton tracing
+        strokes, variant = minimal_strokes_from_skeleton(font['file_path'], char, return_variant=True)
+        if not strokes:
+            failed += 1
+            continue
+
+        strokes_json = json.dumps(strokes)
+        if variant:
+            variants_used[char] = variant
+
+        # Upsert into database
+        row = db.execute(
+            "SELECT id FROM characters WHERE font_id = ? AND char = ?",
+            (font_id, char)
+        ).fetchone()
+        if row:
+            db.execute(
+                "UPDATE characters SET strokes_raw = ?, template_variant = ? WHERE id = ?",
+                (strokes_json, variant, row['id'])
+            )
+        else:
+            db.execute(
+                "INSERT INTO characters (font_id, char, strokes_raw, template_variant) VALUES (?, ?, ?, ?)",
+                (font_id, char, strokes_json, variant)
+            )
+        generated += 1
+
+    db.commit()
+    db.close()
+    return jsonify(ok=True, generated=generated, skipped=skipped, failed=failed, variants=variants_used)
+
+
 @app.route('/api/skeleton-batch/<int:font_id>', methods=['POST'])
 def api_skeleton_batch(font_id):
     """Generate skeleton strokes for all default characters of a font and save to DB."""
@@ -4769,15 +6836,59 @@ def api_skeleton_batch(font_id):
     return jsonify(ok=True, generated=generated, results=results)
 
 
+@app.route('/api/minimal-strokes/<int:font_id>')
+def api_minimal_strokes(font_id):
+    """Generate minimal strokes from template + skeleton analysis.
+
+    Returns simple strokes with just key points (3-5 points per stroke).
+    """
+    char = request.args.get('c')
+    if not char:
+        return jsonify(error="Missing ?c= parameter"), 400
+
+    variant = request.args.get('variant')
+
+    db = get_db()
+    font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
+    db.close()
+    if not font:
+        return jsonify(error="Font not found"), 404
+
+    font_path = resolve_font_path(font['file_path'])
+
+    # If variant specified, use that template directly
+    if variant:
+        variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
+        if variant not in variants:
+            return jsonify(error=f"Unknown variant '{variant}' for '{char}'", available=list(variants.keys())), 400
+        template = variants[variant]
+        strokes = minimal_strokes_from_skeleton(font_path, char, canvas_size=224, template=template)
+        if not strokes:
+            return jsonify(error=f"Could not generate strokes for '{char}' with variant '{variant}'"), 400
+        return jsonify(strokes=strokes, variant=variant)
+
+    strokes, used_variant = minimal_strokes_from_skeleton(font_path, char, canvas_size=224, return_variant=True)
+
+    if not strokes:
+        return jsonify(error=f"Could not generate minimal strokes for '{char}'"), 400
+
+    return jsonify(strokes=strokes, variant=used_variant)
+
+
 @app.route('/api/diffvg/<int:font_id>', methods=['POST'])
 def api_diffvg(font_id):
     """Generate or refine strokes using DiffVG gradient-based optimization in Docker/GPU.
 
     If strokes are provided, refines them. If empty/missing, generates from letter template.
+    Query params:
+        c: character (required)
+        thin: number of topology-preserving thinning iterations (default 0)
     """
     char = request.args.get('c')
     if not char:
         return jsonify(error="Missing ?c= parameter"), 400
+
+    thin_iterations = int(request.args.get('thin', 0))
 
     if _diffvg_docker is None:
         return jsonify(error="DiffVG Docker not available"), 503
@@ -4799,12 +6910,17 @@ def api_diffvg(font_id):
         clean_strokes = [[[p[0], p[1]] for p in s] for s in valid_strokes]
         source = 'refined'
     else:
-        # Generate from letter template
-        template_result = template_to_strokes(font_path, char, canvas_size=224)
-        if not template_result:
+        # Generate minimal strokes from template + skeleton
+        clean_strokes = minimal_strokes_from_skeleton(font_path, char, canvas_size=224)
+        if not clean_strokes:
+            # Fall back to template_to_strokes
+            clean_strokes = template_to_strokes(font_path, char, canvas_size=224)
+        if not clean_strokes:
             return jsonify(error=f"No template available for '{char}'"), 400
-        clean_strokes = template_result
         source = 'generated'
+        # Log how minimal the strokes are
+        total_pts = sum(len(s) for s in clean_strokes)
+        print(f"DiffVG input: {len(clean_strokes)} strokes, {total_pts} total points")
 
     result = _diffvg_docker.optimize(
         font_path=font_path,
@@ -4813,6 +6929,7 @@ def api_diffvg(font_id):
         canvas_size=224,
         num_iterations=500,
         stroke_width=8.0,
+        thin_iterations=thin_iterations,
         timeout=300,
     )
 
