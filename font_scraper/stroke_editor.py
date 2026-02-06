@@ -120,16 +120,7 @@ LETTER_TEMPLATES = {
 #   int        → termination (stroke starts/ends at glyph edge near region)
 #   'v(n)'     → sharp vertex (abrupt direction change)
 #   'c(n)'     → smooth curve vertex (smooth direction change)
-# Waypoint hints for enriched templates:
-#   'bar'    - end of horizontal bar structure (not vertical stem)
-#   'apex'   - extremum point (topmost if in top half, bottommost if in bottom half)
-#   'top'    - explicitly topmost pixel in region
-#   'bottom' - explicitly bottommost pixel in region
-#   'corner' - actual corner of glyph bbox
-#   'diag'   - point on diagonal stroke
-#   'stem'   - point on vertical stem
-#   'base'   - point on baseline/bottom edge
-# Format: position alone (7) or tuple with hint ((6, 'bar'))
+# Format: position alone (7) or tuple (deprecated, hints removed)
 #
 # NUMPAD_TEMPLATE_VARIANTS: Maps character -> dict of variant_name -> template
 # Each character can have multiple valid stroke patterns. The system will try
@@ -138,200 +129,200 @@ LETTER_TEMPLATES = {
 NUMPAD_TEMPLATE_VARIANTS = {
     # --- Uppercase ---
     'A': {
-        'pointed': [[(1, 'corner'), 'v(8)', (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
-        'flat_top': [[(1, 'corner'), (7, 'corner'), (9, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+        'pointed': [[1, 'v(8)', 3], [4, 6]],
+        'flat_top': [[1, 7, 9, 3], [4, 6]],
     },
     'B': {
-        'default': [[(7, 'corner'), (1, 'corner')], [(7, 'stem'), 'c(9)', 'v(6)', 'c(3)', (1, 'stem')]],
+        'default': [[7, 1], [7, 'c(9)', 'v(6)', 'c(3)', 1]],
     },
     'C': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')]],
+        'default': [[9, 'c(7)', 'c(1)', 3]],
     },
     'D': {
-        'default': [[(7, 'corner'), (1, 'corner')], [(7, 'stem'), 'c(9)', 'c(3)', (1, 'stem')]],
+        'default': [[7, 1], [7, 'c(9)', 'c(3)', 1]],
     },
     'E': {
-        'default': [[(9, 'corner'), (7, 'corner'), (1, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+        'default': [[9, 7, 1, 3], [4, 6]],
     },
     'F': {
-        'default': [[(9, 'corner'), (7, 'corner'), (1, 'corner')], [(4, 'bar'), (6, 'bar')]],
+        'default': [[9, 7, 1], [4, 6]],
     },
     'G': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner'), 6], [6, 5]],
+        'default': [[9, 'c(7)', 'c(1)', 3, 6], [6, 5]],
     },
     'H': {
-        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), (3, 'corner')], [(4, 'bar'), (6, 'bar')]],
+        'default': [[7, 1], [9, 3], [4, 6]],
     },
     'I': {
-        'default': [[(8, 'apex'), (2, 'apex')]],
+        'default': [[8, 2]],
     },
     'J': {
-        'default': [[(8, 'apex'), 'c(1)']],
+        'default': [[8, 'c(1)']],
     },
     'K': {
-        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), 'v(4)', (3, 'corner')]],
+        'default': [[7, 1], [9, 'v(4)', 3]],
     },
     'L': {
-        'default': [[(7, 'corner'), (1, 'corner'), (3, 'corner')]],
+        'default': [[7, 1, 3]],
     },
     'M': {
-        'default': [[(1, 'corner'), (7, 'corner'), 'v(2)', (9, 'corner'), (3, 'corner')]],
+        'default': [[1, 7, 'v(2)', 9, 3]],
     },
     'N': {
-        'default': [[(1, 'corner'), (7, 'corner'), (3, 'corner'), (9, 'corner')]],
+        'default': [[1, 7, 3, 9]],
     },
     'O': {
-        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
+        'closed': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
     },
     'P': {
-        'default': [[(1, 'corner'), (7, 'corner'), 'c(9)', 'c(6)', (4, 'bar')]],
+        'default': [[1, 7, 'c(9)', 'c(6)', 4]],
     },
     'Q': {
-        'default': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')], [5, (3, 'corner')]],
+        'default': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8], [5, 3]],
     },
     'R': {
-        'default': [[(1, 'corner'), (7, 'corner'), 'c(9)', 'c(6)', (4, 'bar')], [(4, 'diag'), (3, 'corner')]],
+        'default': [[1, 7, 'c(9)', 'c(6)', 4], [4, 3]],
     },
     'S': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(4)', 'c(6)', 'c(3)', (1, 'corner')]],
+        'default': [[9, 'c(7)', 'c(4)', 'c(6)', 'c(3)', 1]],
     },
     'T': {
-        'default': [[(7, 'corner'), (9, 'corner')], [(8, 'apex'), (2, 'apex')]],
+        'default': [[7, 9], [8, 2]],
     },
     'U': {
-        'default': [[(7, 'corner'), 'c(1)', 'c(3)', (9, 'corner')]],
+        'default': [[7, 'c(1)', 'c(3)', 9]],
     },
     'V': {
-        'default': [[(7, 'corner'), 'v(2)', (9, 'corner')]],
+        'default': [[7, 'v(2)', 9]],
     },
     'W': {
-        'default': [[(7, 'corner'), 'v(1)', 'v(5)', 'v(3)', (9, 'corner')]],
+        'default': [[7, 'v(1)', 'v(5)', 'v(3)', 9]],
     },
     'X': {
-        'default': [[(7, 'corner'), (3, 'corner')], [(9, 'corner'), (1, 'corner')]],
+        'default': [[7, 3], [9, 1]],
     },
     'Y': {
-        'default': [[(7, 'corner'), 'v(5)', (9, 'corner')], [5, (2, 'apex')]],
+        'default': [[7, 'v(5)', 9], [5, 2]],
     },
     'Z': {
-        'default': [[(7, 'corner'), (9, 'corner'), (1, 'corner'), (3, 'corner')]],
+        'default': [[7, 9, 1, 3]],
     },
 
     # --- Lowercase ---
     'a': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')], [(9, 'stem'), (3, 'stem')]],
+        'default': [[9, 'c(7)', 'c(1)', 3], [9, 3]],
     },
     'b': {
-        'default': [[(7, 'corner'), (1, 'corner'), 'c(3)', 'c(9)', (4, 'bar')]],
+        'default': [[7, 1, 'c(3)', 'c(9)', 4]],
     },
     'c': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')]],
+        'default': [[9, 'c(7)', 'c(1)', 3]],
     },
     'd': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', (3, 'corner')], [(9, 'stem'), (3, 'stem')]],
+        'default': [[9, 'c(7)', 'c(1)', 3], [9, 3]],
     },
     'e': {
         'default': [[6, 4, 'c(1)', 'c(3)', 'c(6)']],
     },
     'f': {
-        'default': [[9, 'c(8)', (2, 'apex')], [(4, 'bar'), (6, 'bar')]],
+        'default': [[9, 'c(8)', 2], [4, 6]],
     },
     'g': {
         'default': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [9, 'c(3)']],
     },
     'h': {
-        'default': [[(7, 'corner'), (1, 'corner')], [4, 'c(9)', (3, 'corner')]],
+        'default': [[7, 1], [4, 'c(9)', 3]],
     },
     'i': {
-        'default': [[(8, 'apex'), (2, 'apex')]],
+        'default': [[8, 2]],
     },
     'j': {
-        'default': [[(8, 'apex'), 'c(1)']],
+        'default': [[8, 'c(1)']],
     },
     'k': {
-        'default': [[(7, 'corner'), (1, 'corner')], [(9, 'corner'), 'v(4)', (3, 'corner')]],
+        'default': [[7, 1], [9, 'v(4)', 3]],
     },
     'l': {
-        'default': [[(8, 'apex'), (2, 'apex')]],
+        'default': [[8, 2]],
     },
     'm': {
-        'default': [[(1, 'corner'), 4, 'c(8)', 5], [5, 'c(9)', (3, 'corner')]],
+        'default': [[1, 4, 'c(8)', 5], [5, 'c(9)', 3]],
     },
     'n': {
-        'default': [[(1, 'corner'), 4, 'c(9)', (3, 'corner')]],
+        'default': [[1, 4, 'c(9)', 3]],
     },
     'o': {
-        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
+        'closed': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
     },
     'p': {
-        'default': [[4, 'c(7)', 'c(9)', 'c(6)', (1, 'corner')]],
+        'default': [[4, 'c(7)', 'c(9)', 'c(6)', 1]],
     },
     'q': {
-        'default': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [(9, 'stem'), (3, 'stem')]],
+        'default': [[9, 'c(7)', 'c(1)', 'c(3)', 9], [9, 3]],
     },
     'r': {
-        'default': [[(1, 'corner'), 4, 'c(9)']],
+        'default': [[1, 4, 'c(9)']],
     },
     's': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(4)', 'c(6)', 'c(3)', (1, 'corner')]],
+        'default': [[9, 'c(7)', 'c(4)', 'c(6)', 'c(3)', 1]],
     },
     't': {
-        'default': [[(8, 'apex'), (2, 'apex')], [(7, 'bar'), (9, 'bar')]],
+        'default': [[8, 2], [7, 9]],
     },
     'u': {
-        'default': [[(7, 'corner'), 'c(1)', 'c(3)', (9, 'corner')], [(9, 'stem'), (3, 'stem')]],
+        'default': [[7, 'c(1)', 'c(3)', 9], [9, 3]],
     },
     'v': {
-        'default': [[(7, 'corner'), 'v(2)', (9, 'corner')]],
+        'default': [[7, 'v(2)', 9]],
     },
     'w': {
-        'default': [[(7, 'corner'), 'v(1)', 'v(5)', 'v(3)', (9, 'corner')]],
+        'default': [[7, 'v(1)', 'v(5)', 'v(3)', 9]],
     },
     'x': {
-        'default': [[(7, 'corner'), (3, 'corner')], [(9, 'corner'), (1, 'corner')]],
+        'default': [[7, 3], [9, 1]],
     },
     'y': {
-        'default': [[(7, 'corner'), 'v(5)'], [(9, 'corner'), 'v(5)', 'c(1)']],
+        'default': [[7, 'v(5)'], [9, 'v(5)', 'c(1)']],
     },
     'z': {
-        'default': [[(7, 'corner'), (9, 'corner'), (1, 'corner'), (3, 'corner')]],
+        'default': [[7, 9, 1, 3]],
     },
 
     # --- Digits ---
     '0': {
-        'closed': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)', (8, 'apex')]],
-        'open': [[(8, 'apex'), 'c(7)', 'c(1)', 'c(3)', 'c(9)']],  # Incomplete loop from top
+        'closed': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)', 8]],
+        'open': [[8, 'c(7)', 'c(1)', 'c(3)', 'c(9)']],  # Incomplete loop from top
         'ccw_open': [[7, 'c(4)', 'c(1)', 'c(2)', 'c(3)', 'c(6)', 'c(9)', 'c(8)', 'c(7)', 4]],  # Full CCW loop: 7-4-1-2-3-6-9-8-7-4
     },
     '1': {
-        'with_serif': [[(7, 'diag'), (8, 'apex'), (2, 'apex')]],
-        'simple': [[(8, 'apex'), (2, 'apex')]],
+        'with_serif': [[7, 8, 2]],
+        'simple': [[8, 2]],
         'with_base': [[4, 'v(8)', 2], [1, 2, 3]],  # Diagonal (4→8→2) + horizontal base
     },
     '2': {
         'default': [[7, 'v(4)', 1, 3]],  # Endpoints: 7 -> junction at 4 -> 1 or 3
     },
     '3': {
-        'default': [[(7, 'corner'), 'c(9)', 'v(4)', 'c(3)', (1, 'corner')]],
+        'default': [[7, 'c(9)', 'v(4)', 'c(3)', 1]],
     },
     '4': {
-        'open': [[(7, 'corner'), 'v(4)', (6, 'bar')], [(9, 'apex'), (3, 'base')]],
-        'closed': [[(7, 'corner'), 'v(4)', (6, 'bar'), (9, 'apex')], [(9, 'apex'), (3, 'base')]],
+        'open': [[7, 'v(4)', 6], [9, 3]],
+        'closed': [[7, 'v(4)', 6, 9], [9, 3]],
     },
     '5': {
-        'default': [[(9, 'corner'), (7, 'corner'), (4, 'bar'), 'c(6)', 'c(3)', (1, 'corner')]],
+        'default': [[9, 7, 4, 'c(6)', 'c(3)', 1]],
     },
     '6': {
-        'default': [[(9, 'corner'), 'c(7)', 'c(1)', 'c(3)', 'c(6)', (4, 'bar')]],
+        'default': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 4]],
     },
     '7': {
-        'default': [[(7, 'corner'), (9, 'corner'), (1, 'diag')]],
+        'default': [[7, 9, 1]],
     },
     '8': {
         'default': [[5, 'c(8)', 'c(7)', 'c(4)', 5], [5, 'c(2)', 'c(3)', 'c(6)', 5]],
     },
     '9': {
-        'default': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', (1, 'corner')]],
+        'default': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', 1]],
     },
 }
 
@@ -3056,77 +3047,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             # Use the endpoint closest to template position
                             extremum = min(endpoints_in_region, key=lambda p:
                                           (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
-
-                        # Use hint if provided and no endpoint found
-                        elif hint == 'corner':
-                            # Find point closest to the actual corner
-                            def corner_dist(p):
-                                dx = abs(p[0] - template_pos[0])
-                                dy = abs(p[1] - template_pos[1])
-                                return dx + dy
-                            extremum = min(region_pixels, key=corner_dist)
-
-                        elif hint == 'bar':
-                            # Find end of horizontal bar structure
-                            bar_min_y = mid_y - h * 0.05
-                            bar_max_y = mid_y + h * 0.15
-                            bar_pixels = [p for p in region_pixels
-                                         if bar_min_y <= p[1] <= bar_max_y]
-                            if bar_pixels:
-                                if template_pos[0] < mid_x:
-                                    extremum = min(bar_pixels, key=lambda p: p[0])
-                                else:
-                                    extremum = max(bar_pixels, key=lambda p: p[0])
-                            else:
-                                # Fallback to general region search
-                                if template_pos[0] < mid_x:
-                                    extremum = min(region_pixels, key=lambda p: p[0])
-                                else:
-                                    extremum = max(region_pixels, key=lambda p: p[0])
-
-                        elif hint == 'apex':
-                            # Find extremum in vertical direction
-                            if template_pos[1] < mid_y:
-                                extremum = min(region_pixels, key=lambda p: p[1])
-                            else:
-                                extremum = max(region_pixels, key=lambda p: p[1])
-
-                        elif hint == 'top':
-                            # Explicitly get topmost pixel in region
-                            extremum = min(region_pixels, key=lambda p: p[1])
-
-                        elif hint == 'bottom':
-                            # Explicitly get bottommost pixel in region
-                            extremum = max(region_pixels, key=lambda p: p[1])
-
-                        elif hint == 'stem':
-                            # Find point on vertical stem (same x as previous point if exists)
-                            if stroke_points:
-                                prev_x = stroke_points[-1][0]
-                                stem_pixels = [p for p in region_pixels
-                                              if abs(p[0] - prev_x) < w * 0.15]
-                                if stem_pixels:
-                                    if template_pos[1] < mid_y:
-                                        extremum = min(stem_pixels, key=lambda p: p[1])
-                                    else:
-                                        extremum = max(stem_pixels, key=lambda p: p[1])
-                            if extremum is None:
-                                extremum = find_nearest_skeleton(template_pos)
-
-                        elif hint == 'diag':
-                            # Find point along diagonal from previous point
-                            if stroke_points:
-                                prev = stroke_points[-1]
-                                # Find point that extends diagonal direction
-                                def diag_score(p):
-                                    return abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1])
-                                extremum = min(region_pixels, key=diag_score)
-                            else:
-                                extremum = find_nearest_skeleton(template_pos)
-
-                        elif hint == 'base':
-                            # Find point on baseline (bottommost in region)
-                            extremum = max(region_pixels, key=lambda p: p[1])
 
                         else:
                             # No hint - use default logic based on position
