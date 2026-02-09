@@ -120,6 +120,7 @@ LETTER_TEMPLATES = {
 #   int        → termination (stroke starts/ends at glyph edge near region)
 #   'v(n)'     → sharp vertex (abrupt direction change)
 #   'c(n)'     → smooth curve vertex (smooth direction change)
+#   'i(n)'     → intersection (go straight through, for self-crossing strokes)
 # Format: position alone (7) or tuple (deprecated, hints removed)
 #
 # NUMPAD_TEMPLATE_VARIANTS: Maps character -> dict of variant_name -> template
@@ -314,12 +315,14 @@ NUMPAD_TEMPLATE_VARIANTS = {
     },
     '6': {
         'default': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 4]],
+        'end_at_1': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 1]],
     },
     '7': {
         'default': [[7, 9, 1]],
     },
     '8': {
-        'default': [[5, 'c(8)', 'c(7)', 'c(4)', 5], [5, 'c(2)', 'c(3)', 'c(6)', 5]],
+        'default': [[8, 'c(7)', 'c(4)', 'c(1)', 'c(2)', 'c(3)', 'c(6)', 'c(9)', 8]],
+        'from_9': [[9, 8, 7, 4, 5, 6, 3, 2, 1, 'i(5)', 9]],
     },
     '9': {
         'default': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', 1]],
@@ -2966,7 +2969,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
 
     for stroke_template in template:
         stroke_points = []
-        waypoint_info = []  # Parallel list storing (is_curve, region) for each waypoint
+        waypoint_info = []  # Parallel list storing (is_curve, is_intersection, region) for each waypoint
 
         # Check for special cases: pure vertical or horizontal strokes
         if is_vertical_stroke(stroke_template):
@@ -2984,12 +2987,13 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                  float(find_nearest_skeleton(p1)[1])],
                                 [float(find_nearest_skeleton(p2)[0]),
                                  float(find_nearest_skeleton(p2)[1])]]
-            waypoint_info = [(False, r1), (False, r2)]  # Terminals, not curves
+            waypoint_info = [(False, False, r1), (False, False, r2)]  # (is_curve, is_intersection, region)
         else:
             # General case: map each waypoint to skeleton
             for wp in stroke_template:
                 is_vertex = False
                 is_curve = False
+                is_intersection = False
                 hint = None
 
                 # Parse waypoint - can be int, string, or tuple (pos, hint)
@@ -3011,7 +3015,12 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             region = int(m.group(1))
                             is_curve = True
                         else:
-                            continue
+                            m = re.match(r'^i\((\d)\)$', str(wp_val))
+                            if m:
+                                region = int(m.group(1))
+                                is_intersection = True
+                            else:
+                                continue
 
                 template_pos = numpad_to_pixel(region)
 
@@ -3068,8 +3077,25 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                 extremum = max(region_pixels, key=lambda p: p[0])
 
                         stroke_points.append([float(extremum[0]), float(extremum[1])])
-                        waypoint_info.append((is_curve, region))
+                        waypoint_info.append((is_curve, is_intersection, region))
                         continue
+
+                if is_intersection:
+                    # For intersections, find junction point in the region (where strokes cross)
+                    # Look for junction pixels first, then fall back to center of region
+                    junction_pixels_in_region = [p for p in info.get('junction_pixels', [])
+                                                  if point_in_region(p, region)]
+                    if junction_pixels_in_region:
+                        # Use the junction closest to region center
+                        junction_pt = min(junction_pixels_in_region, key=lambda p:
+                                         (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+                        stroke_points.append([float(junction_pt[0]), float(junction_pt[1])])
+                    else:
+                        # Fall back to nearest skeleton pixel to region center
+                        nearest = find_nearest_skeleton(template_pos)
+                        stroke_points.append([float(nearest[0]), float(nearest[1])])
+                    waypoint_info.append((False, True, region))
+                    continue
 
                 if is_vertex:
                     # For vertices, find the extremum skeleton pixel based on template position
@@ -3100,17 +3126,17 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                     # Store skeleton point for tracing, track glyph apex
                                     point_idx = len(stroke_points)
                                     stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, region))
+                                    waypoint_info.append((is_curve, is_intersection, region))
                                     apex_extensions[point_idx] = ('top', [float(glyph_top_x), float(glyph_top_y)])
                                 else:
                                     stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, region))
+                                    waypoint_info.append((is_curve, is_intersection, region))
                             else:
                                 stroke_points.append([float(skel_x), float(skel_y)])
-                                waypoint_info.append((is_curve, region))
+                                waypoint_info.append((is_curve, is_intersection, region))
                         else:
                             stroke_points.append([float(template_pos[0]), float(template_pos[1])])
-                            waypoint_info.append((is_curve, region))
+                            waypoint_info.append((is_curve, is_intersection, region))
                     elif template_pos[1] > bot_bound:  # Bottom row (1,2,3)
                         # Find bottommost skeleton pixel for path tracing,
                         # and track actual glyph nadir for extension
@@ -3128,17 +3154,17 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                 if glyph_bot_y > skel_y:
                                     point_idx = len(stroke_points)
                                     stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, region))
+                                    waypoint_info.append((is_curve, is_intersection, region))
                                     apex_extensions[point_idx] = ('bottom', [float(glyph_bot_x), float(glyph_bot_y)])
                                 else:
                                     stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, region))
+                                    waypoint_info.append((is_curve, is_intersection, region))
                             else:
                                 stroke_points.append([float(skel_x), float(skel_y)])
-                                waypoint_info.append((is_curve, region))
+                                waypoint_info.append((is_curve, is_intersection, region))
                         else:
                             stroke_points.append([float(template_pos[0]), float(template_pos[1])])
-                            waypoint_info.append((is_curve, region))
+                            waypoint_info.append((is_curve, is_intersection, region))
                     else:  # Middle row (4,5,6) - waist level
                         waist_tolerance = (bbox[3] - bbox[1]) * 0.15
                         waist_pixels = [p for p in skel_list
@@ -3151,11 +3177,11 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             else:  # Right side (6)
                                 vertex_pt = max(waist_pixels, key=lambda p: p[0])
                             stroke_points.append([float(vertex_pt[0]), float(vertex_pt[1])])
-                            waypoint_info.append((is_curve, region))
+                            waypoint_info.append((is_curve, is_intersection, region))
                         else:
                             nearest = find_nearest_skeleton(template_pos)
                             stroke_points.append([float(nearest[0]), float(nearest[1])])
-                            waypoint_info.append((is_curve, region))
+                            waypoint_info.append((is_curve, is_intersection, region))
                 else:
                     # For curves c(n), find the apex (extremum) in the direction of the template
                     is_curve = not isinstance(wp, int) and str(wp).startswith('c(')
@@ -3184,11 +3210,11 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                 # Just use nearest
                                 apex = find_nearest_skeleton(template_pos)
                             stroke_points.append([float(apex[0]), float(apex[1])])
-                            waypoint_info.append((True, region))  # is_curve=True
+                            waypoint_info.append((True, False, region))  # is_curve=True
                         else:
                             nearest = find_nearest_skeleton(template_pos)
                             stroke_points.append([float(nearest[0]), float(nearest[1])])
-                            waypoint_info.append((True, region))  # is_curve=True
+                            waypoint_info.append((True, False, region))  # is_curve=True
                     else:
                         # For terminals, find skeleton pixel IN the target region
                         # Prefer pixels actually in the region over nearest to center
@@ -3201,7 +3227,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             # Fallback to nearest skeleton pixel if none in region
                             nearest = find_nearest_skeleton(template_pos)
                         stroke_points.append([float(nearest[0]), float(nearest[1])])
-                        waypoint_info.append((False, region))  # is_curve=False
+                        waypoint_info.append((False, False, region))  # is_curve=False
 
         if len(stroke_points) >= 2:
             if trace_paths:
@@ -3209,6 +3235,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                 # Trace skeleton paths between consecutive keypoints
                 full_path = []
                 already_traced = set()  # Track pixels we've already traced to prevent double-backs
+                arrival_branch = set()  # Track arrival branch at intersections to avoid backtracking
 
                 # Start from first waypoint
                 current_pt = (int(round(stroke_points[0][0])), int(round(stroke_points[0][1])))
@@ -3218,10 +3245,33 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     start_pt = current_pt
                     end_pt = (int(round(stroke_points[i+1][0])), int(round(stroke_points[i+1][1])))
 
-                    # Check if target waypoint is a curve (use region-based tracing)
-                    target_is_curve, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, None)
+                    # Check if current waypoint was an intersection (we're leaving it)
+                    current_is_intersection = waypoint_info[i][1] if i < len(waypoint_info) else False
 
-                    if target_is_curve and target_region is not None:
+                    # Check if target waypoint is a curve or intersection
+                    target_is_curve, target_is_intersection, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, False, None)
+
+                    if target_is_intersection:
+                        # Tracing TO an intersection - allow crossing already-traced pixels
+                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                       avoid_pixels=None)
+                        # Record the arrival branch (last few pixels before intersection)
+                        if traced and len(traced) >= 2:
+                            arrival_branch = set(traced[-3:])  # Last 3 pixels as arrival branch
+                    elif current_is_intersection and arrival_branch:
+                        # Leaving an intersection - avoid ALL already-traced pixels to force a new path
+                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                       avoid_pixels=already_traced)
+                        if traced is None:
+                            # Fallback: just avoid arrival branch
+                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                           avoid_pixels=arrival_branch)
+                        if traced is None:
+                            # Final fallback without restriction
+                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                           avoid_pixels=None)
+                        arrival_branch = set()  # Clear after use
+                    elif target_is_curve and target_region is not None:
                         # Use region-based tracing: trace until we enter the target region
                         traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
                                                   avoid_pixels=already_traced)
