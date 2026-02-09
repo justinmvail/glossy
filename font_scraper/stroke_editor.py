@@ -623,6 +623,102 @@ def _catmull_rom_segment(p_prev, p0, p1, p_next, step=2.0):
     return [_catmull_rom_point(p_prev, p0, p1, p_next, i / (n - 1)) for i in range(n)]
 
 
+def _snap_inside(pos, mask, snap_indices):
+    """Snap a position to the nearest mask pixel if outside.
+
+    Args:
+        pos: (x, y) position to snap
+        mask: Binary mask array
+        snap_indices: Snap indices from distance_transform_edt(~mask)
+
+    Returns:
+        Snapped (x, y) position
+    """
+    h, w = mask.shape
+    ix = int(round(min(max(pos[0], 0), w - 1)))
+    iy = int(round(min(max(pos[1], 0), h - 1)))
+    if mask[iy, ix]:
+        return pos
+    ny = float(snap_indices[0, iy, ix])
+    nx = float(snap_indices[1, iy, ix])
+    return (nx, ny)
+
+
+def _snap_deep_inside(pos, centroid, dist_in, mask, snap_indices):
+    """Snap a position to be well inside the mask.
+
+    Cast ray from pos toward centroid, find the point with maximum
+    distance-from-edge (deepest inside the glyph).
+
+    Args:
+        pos: (x, y) position to snap
+        centroid: (x, y) glyph centroid
+        dist_in: Distance transform from mask boundary inward
+        mask: Binary mask array
+        snap_indices: Snap indices from distance_transform_edt(~mask)
+
+    Returns:
+        Snapped (x, y) position deep inside mask
+    """
+    h, w = mask.shape
+    ix = int(round(min(max(pos[0], 0), w - 1)))
+    iy = int(round(min(max(pos[1], 0), h - 1)))
+    if mask[iy, ix] and dist_in[iy, ix] >= 5:
+        return pos
+
+    # Walk from pos toward centroid, find deepest point
+    dx = centroid[0] - pos[0]
+    dy = centroid[1] - pos[1]
+    length = (dx * dx + dy * dy) ** 0.5
+    if length < 1:
+        return _snap_inside(pos, mask, snap_indices)
+
+    best_pos = _snap_inside(pos, mask, snap_indices)
+    best_depth = 0
+    steps = int(length)
+    for s in range(steps + 1):
+        t = s / max(steps, 1)
+        x = pos[0] + dx * t
+        y = pos[1] + dy * t
+        jx = int(round(min(max(x, 0), w - 1)))
+        jy = int(round(min(max(y, 0), h - 1)))
+        if mask[jy, jx] and dist_in[jy, jx] > best_depth:
+            best_depth = dist_in[jy, jx]
+            best_pos = (x, y)
+        # Stop early once we've passed through the deepest part
+        # and depth starts decreasing significantly
+        if best_depth > 5 and dist_in[jy, jx] < best_depth * 0.5:
+            break
+    return best_pos
+
+
+def _snap_to_skeleton_region(region, skel_features, glyph_bbox):
+    """Find the closest skeleton feature to the numpad region center.
+
+    Args:
+        region: Numpad region number 1-9
+        skel_features: Dict from _find_skeleton_waypoints
+        glyph_bbox: Glyph bounding box
+
+    Returns:
+        Skeleton point (x, y) or None
+    """
+    if skel_features is None:
+        return None
+    candidates = skel_features.get(region, [])
+    if candidates:
+        return candidates[0]  # Already sorted by distance from region center
+
+    # No feature in this region — find the nearest skeleton point
+    # from all skeleton points
+    target = _numpad_to_pixel(region, glyph_bbox)
+    all_skel = skel_features.get('all_skel', [])
+    if not all_skel:
+        return None
+    best = min(all_skel, key=lambda p: (p[0]-target[0])**2 + (p[1]-target[1])**2)
+    return best
+
+
 def _build_guide_path(waypoints_raw, glyph_bbox, mask, skel_features=None):
     """Build a guide path from parsed waypoints.
 
@@ -649,74 +745,11 @@ def _build_guide_path(waypoints_raw, glyph_bbox, mask, skel_features=None):
     dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
     dist_in = distance_transform_edt(mask)
 
-    def _snap_inside(pos):
-        """Snap a position to the nearest mask pixel if outside."""
-        ix = int(round(min(max(pos[0], 0), w - 1)))
-        iy = int(round(min(max(pos[1], 0), h - 1)))
-        if mask[iy, ix]:
-            return pos
-        ny = float(snap_indices[0, iy, ix])
-        nx = float(snap_indices[1, iy, ix])
-        return (nx, ny)
-
-    def _snap_deep_inside(pos):
-        """Snap a position to be well inside the mask.
-
-        Cast ray from pos toward centroid, find the point with maximum
-        distance-from-edge (deepest inside the glyph).
-        """
-        ix = int(round(min(max(pos[0], 0), w - 1)))
-        iy = int(round(min(max(pos[1], 0), h - 1)))
-        if mask[iy, ix] and dist_in[iy, ix] >= 5:
-            return pos
-
-        # Walk from pos toward centroid, find deepest point
-        dx = centroid[0] - pos[0]
-        dy = centroid[1] - pos[1]
-        length = (dx * dx + dy * dy) ** 0.5
-        if length < 1:
-            return _snap_inside(pos)
-
-        best_pos = _snap_inside(pos)
-        best_depth = 0
-        steps = int(length)
-        for s in range(steps + 1):
-            t = s / max(steps, 1)
-            x = pos[0] + dx * t
-            y = pos[1] + dy * t
-            jx = int(round(min(max(x, 0), w - 1)))
-            jy = int(round(min(max(y, 0), h - 1)))
-            if mask[jy, jx] and dist_in[jy, jx] > best_depth:
-                best_depth = dist_in[jy, jx]
-                best_pos = (x, y)
-            # Stop early once we've passed through the deepest part
-            # and depth starts decreasing significantly
-            if best_depth > 5 and dist_in[jy, jx] < best_depth * 0.5:
-                break
-        return best_pos
-
-    def _snap_to_skeleton(region):
-        """Find the closest skeleton feature to the numpad region center."""
-        if skel_features is None:
-            return None
-        candidates = skel_features.get(region, [])
-        if candidates:
-            return candidates[0]  # Already sorted by distance from region center
-
-        # No feature in this region — find the nearest skeleton point
-        # from all skeleton points
-        target = _numpad_to_pixel(region, glyph_bbox)
-        all_skel = skel_features.get('all_skel', [])
-        if not all_skel:
-            return None
-        best = min(all_skel, key=lambda p: (p[0]-target[0])**2 + (p[1]-target[1])**2)
-        return best
-
     # Map waypoints to pixel positions — prefer skeleton features
     positions = []
     for region, kind in parsed:
         # Try skeleton feature first
-        skel_pos = _snap_to_skeleton(region)
+        skel_pos = _snap_to_skeleton_region(region, skel_features, glyph_bbox)
         if skel_pos is not None:
             pos = (float(skel_pos[0]), float(skel_pos[1]))
         elif kind == 'terminal':
@@ -725,7 +758,8 @@ def _build_guide_path(waypoints_raw, glyph_bbox, mask, skel_features=None):
             if pos is None:
                 return []
         else:
-            pos = _snap_deep_inside(_numpad_to_pixel(region, glyph_bbox))
+            pos = _snap_deep_inside(_numpad_to_pixel(region, glyph_bbox),
+                                    centroid, dist_in, mask, snap_indices)
             ix = int(round(min(max(pos[0], 0), w - 1)))
             iy = int(round(min(max(pos[1], 0), h - 1)))
             if not mask[iy, ix]:
@@ -748,7 +782,7 @@ def _build_guide_path(waypoints_raw, glyph_bbox, mask, skel_features=None):
         if mask[iy, ix]:
             constrained.append((x, y))
         else:
-            constrained.append(_snap_inside((x, y)))
+            constrained.append(_snap_inside((x, y), mask, snap_indices))
 
     return constrained
 
@@ -1240,25 +1274,19 @@ def _affine_transform_strokes(strokes, params, centroid):
     return result
 
 
-def _optimize_affine(font_path, char, canvas_size=224):
-    """Optimise template strokes via affine transforms.
+def _prepare_affine_optimization(font_path, char, canvas_size, strokes_raw, mask):
+    """Setup optimization data structures for affine stroke optimization.
 
-    Stage 1: Global affine (6 params) on all strokes together.
-    Stage 2: Per-stroke translate+scale refinement.
+    Args:
+        font_path: Path to font file
+        char: Character being optimized
+        canvas_size: Canvas size for rendering
+        strokes_raw: Raw strokes from template
+        mask: Glyph mask array
 
-    Returns (strokes, score, mask, glyph_bbox) or None if no template.
+    Returns:
+        Tuple of (stroke_arrays, centroid, glyph_bbox, score_args) or None if setup fails
     """
-    import time as _time
-    from scipy.optimize import minimize, differential_evolution
-
-    strokes_raw = template_to_strokes(font_path, char, canvas_size)
-    if not strokes_raw or len(strokes_raw) == 0:
-        return None
-
-    font_path = resolve_font_path(font_path)
-    mask = render_glyph_mask(font_path, char, canvas_size)
-    if mask is None:
-        return None
     rows, cols = np.where(mask)
     if len(rows) == 0:
         return None
@@ -1290,8 +1318,22 @@ def _optimize_affine(font_path, char, canvas_size=224):
     if not stroke_arrays:
         return None
 
-    # ---- Stage 1: Global affine (6 params) ----
-    # params: tx, ty, sx, sy, theta_deg, shear
+    return stroke_arrays, centroid, glyph_bbox, score_args
+
+
+def _run_global_affine(stroke_arrays, centroid, score_args):
+    """Run Stage 1 global affine optimization on all strokes together.
+
+    Args:
+        stroke_arrays: List of Nx2 numpy arrays, one per stroke
+        centroid: (x, y) center point for affine transform
+        score_args: Tuple of scoring function arguments
+
+    Returns:
+        Tuple of (best_strokes, best_params, best_score)
+    """
+    from scipy.optimize import minimize, differential_evolution
+
     affine_bounds = [(-20, 20), (-20, 20),  # translate
                      (0.7, 1.3), (0.7, 1.3),  # scale
                      (-15, 15),  # rotation degrees
@@ -1322,9 +1364,22 @@ def _optimize_affine(font_path, char, canvas_size=224):
 
     # Apply best global affine
     best_strokes = _affine_transform_strokes(stroke_arrays, best_params, centroid)
+    return best_strokes, best_params, best_score
 
-    # ---- Stage 2: Per-stroke refinement ----
-    # Each stroke gets (dx, dy, sx, sy)
+
+def _run_per_stroke_refinement(best_strokes, best_score, score_args):
+    """Run Stage 2 per-stroke translate+scale refinement.
+
+    Args:
+        best_strokes: List of Nx2 numpy arrays after global affine
+        best_score: Score from global affine stage
+        score_args: Tuple of scoring function arguments
+
+    Returns:
+        Tuple of (final_strokes, final_score)
+    """
+    from scipy.optimize import minimize
+
     n_strokes = len(best_strokes)
 
     def _per_stroke_obj(params):
@@ -1352,15 +1407,45 @@ def _optimize_affine(font_path, char, canvas_size=224):
             pts[:, 0] = c[0] + sx * (pts[:, 0] - c[0]) + dx
             pts[:, 1] = c[1] + sy * (pts[:, 1] - c[1]) + dy
             final_strokes.append(pts)
-        best_score = nm2.fun
+        return final_strokes, nm2.fun
     else:
-        final_strokes = best_strokes
+        return best_strokes, best_score
+
+
+def _optimize_affine(font_path, char, canvas_size=224):
+    """Optimise template strokes via affine transforms.
+
+    Stage 1: Global affine (6 params) on all strokes together.
+    Stage 2: Per-stroke translate+scale refinement.
+
+    Returns (strokes, score, mask, glyph_bbox) or None if no template.
+    """
+    strokes_raw = template_to_strokes(font_path, char, canvas_size)
+    if not strokes_raw or len(strokes_raw) == 0:
+        return None
+
+    font_path = resolve_font_path(font_path)
+    mask = render_glyph_mask(font_path, char, canvas_size)
+    if mask is None:
+        return None
+
+    # Setup optimization data
+    setup = _prepare_affine_optimization(font_path, char, canvas_size, strokes_raw, mask)
+    if setup is None:
+        return None
+    stroke_arrays, centroid, glyph_bbox, score_args = setup
+
+    # Stage 1: Global affine
+    best_strokes, best_params, best_score = _run_global_affine(stroke_arrays, centroid, score_args)
+
+    # Stage 2: Per-stroke refinement
+    final_strokes, final_score = _run_per_stroke_refinement(best_strokes, best_score, score_args)
 
     # Convert back to list format
     result_strokes = [[[round(float(p[0]), 1), round(float(p[1]), 1)]
                        for p in s] for s in final_strokes]
 
-    return result_strokes, float(-best_score), mask, glyph_bbox
+    return result_strokes, float(-final_score), mask, glyph_bbox
 
 
 def _optimize_diffvg(font_path, char, canvas_size=224):
@@ -2005,28 +2090,18 @@ def _score_single_shape(params, shape_type, bbox, uncovered_pts, uncovered_tree,
     return -(coverage - snap_penalty)
 
 
-def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
-    """Generate strokes by optimising shape parameters with a greedy per-shape
-    approach followed by joint refinement.
+def _setup_auto_fit(font_path, char, canvas_size, templates):
+    """Setup data structures for auto_fit_strokes optimization.
 
-    Phase 1: Greedy — optimise each shape against uncovered points
-    Phase 2: Joint NM refinement of all params together
-    Phase 3: Joint DE global search if time remains
+    Args:
+        font_path: Resolved font path
+        char: Character to fit
+        canvas_size: Canvas size
+        templates: Shape templates from SHAPE_TEMPLATES
 
-    Caches winning params in DB so subsequent runs start from the best
-    known position and can improve further.
-
-    Returns list of strokes [[[x,y], ...], ...] or None.
-    If return_markers=True returns (strokes, markers).
+    Returns:
+        Dict with all setup data, or None on failure
     """
-    from scipy.optimize import differential_evolution, minimize
-    import time as _time
-
-    templates = SHAPE_TEMPLATES.get(char)
-    if not templates:
-        return None
-
-    font_path = resolve_font_path(font_path)
     mask = render_glyph_mask(font_path, char, canvas_size)
     if mask is None:
         return None
@@ -2045,7 +2120,6 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     radius = _adaptive_radius(mask, spacing=3)
     h, w = mask.shape
 
-    # Pre-compute nearest-mask-pixel arrays for snap-during-scoring
     dist_map = distance_transform_edt(mask)
     _, snap_indices = distance_transform_edt(~mask, return_indices=True)
     snap_yi = snap_indices[0]
@@ -2054,118 +2128,97 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     shape_types = [t['shape'] for t in templates]
     bounds, slices = _get_param_bounds(templates)
 
-    # Initial guess: prefer cached params, fall back to template defaults
     x0 = []
     for t in templates:
         x0.extend(t['params'])
     x0 = np.array(x0, dtype=float)
 
-    # Strip font_path back to relative for DB lookup
-    rel_path = font_path
-    if rel_path.startswith(BASE_DIR):
-        rel_path = os.path.relpath(font_path, BASE_DIR)
-    cached = _load_cached_params(rel_path, char)
-    cached_score = None
-    if cached is not None and len(cached[0]) == len(x0):
-        x0 = cached[0]
-        cached_score = cached[1]
-
-    for i, (lo, hi) in enumerate(bounds):
-        x0[i] = np.clip(x0[i], lo, hi)
-
-    joint_args = (shape_types, slices, glyph_bbox, cloud_tree, n_cloud,
-                  radius, snap_yi, snap_xi, w, h, dist_map)
-
     bounds_lo = np.array([b[0] for b in bounds])
     bounds_hi = np.array([b[1] for b in bounds])
 
-    def _clamp(x):
-        return np.clip(x, bounds_lo, bounds_hi)
+    return {
+        'mask': mask, 'glyph_bbox': glyph_bbox, 'cloud': cloud,
+        'cloud_tree': cloud_tree, 'n_cloud': n_cloud, 'radius': radius,
+        'h': h, 'w': w, 'dist_map': dist_map, 'snap_yi': snap_yi, 'snap_xi': snap_xi,
+        'shape_types': shape_types, 'bounds': bounds, 'slices': slices,
+        'x0': x0, 'bounds_lo': bounds_lo, 'bounds_hi': bounds_hi,
+    }
 
-    def _score_all_clamped(params, *args):
-        return _score_all_strokes(_clamp(params), *args)
 
-    _t_start = _time.monotonic()
-    _TIME_BUDGET = 3600.0  # seconds (1 hour max)
-    _STALE_THRESHOLD = 0.001  # stop if score improves less than this over a full cycle
-    _STALE_CYCLES = 2  # stop after this many cycles with no meaningful improvement
+def _try_gradient_optimization(font_path, char, canvas_size):
+    """Try DiffVG and affine optimization approaches.
 
-    def _elapsed():
-        return _time.monotonic() - _t_start
+    Args:
+        font_path: Resolved font path
+        char: Character to fit
+        canvas_size: Canvas size
 
-    # ---- Phase 0: Template + Affine + DiffVG optimisation ----
-    affine_strokes_result = None  # (stroke_list, score) if affine produced something
+    Returns:
+        Tuple of (strokes, score) for best result, or (None, 0.0)
+    """
+    best_result = (None, 0.0)
 
     # Try DiffVG first (gradient-based, typically better)
     diffvg_result = _optimize_diffvg(font_path, char, canvas_size)
     if diffvg_result is not None:
         dv_strokes, dv_score, _, _ = diffvg_result
         if dv_strokes and dv_score > 0:
-            affine_strokes_result = (dv_strokes, dv_score)
-            if dv_score >= 0.85:
-                if return_markers:
-                    markers = []
-                    for si, st in enumerate(dv_strokes):
-                        markers.append({'x': st[0][0], 'y': st[0][1],
-                                        'type': 'start', 'label': 'S', 'stroke_id': si})
-                        markers.append({'x': st[-1][0], 'y': st[-1][1],
-                                        'type': 'stop', 'label': 'E', 'stroke_id': si})
-                    return dv_strokes, markers
-                return dv_strokes
+            best_result = (dv_strokes, dv_score)
 
-    # Fall back to affine optimisation
+    # Also try affine optimization
     affine_result = _optimize_affine(font_path, char, canvas_size)
     if affine_result is not None:
         affine_strokes, affine_score, _, _ = affine_result
         aff_stroke_list = [[[round(float(x), 1), round(float(y), 1)] for x, y in s]
                            for s in affine_strokes if len(s) >= 2]
-        if aff_stroke_list:
-            # Keep whichever scored better: DiffVG or affine
-            if affine_strokes_result and affine_strokes_result[1] >= affine_score:
-                pass  # DiffVG already better
-            else:
-                affine_strokes_result = (aff_stroke_list, affine_score)
-            best_strokes, best_score = affine_strokes_result
-            if best_score >= 0.85:
-                if return_markers:
-                    markers = []
-                    for si, st in enumerate(best_strokes):
-                        markers.append({'x': st[0][0], 'y': st[0][1],
-                                        'type': 'start', 'label': 'S', 'stroke_id': si})
-                        markers.append({'x': st[-1][0], 'y': st[-1][1],
-                                        'type': 'stop', 'label': 'E', 'stroke_id': si})
-                    return best_strokes, markers
-                return best_strokes
+        if aff_stroke_list and affine_score > best_result[1]:
+            best_result = (aff_stroke_list, affine_score)
 
-    # ---- Phase 1: Greedy per-shape optimisation ----
-    # Optimise each shape in turn against uncovered points.
-    # This reduces the problem from N*D dims to D dims per shape.
+    return best_result
+
+
+def _greedy_shape_optimization(templates, setup, x0, elapsed_fn, time_budget):
+    """Phase 1: Greedy per-shape optimization.
+
+    Args:
+        templates: Shape templates
+        setup: Setup dict from _setup_auto_fit
+        x0: Initial parameter vector
+        elapsed_fn: Function returning elapsed time
+        time_budget: Total time budget
+
+    Returns:
+        Optimized parameter vector
+    """
+    from scipy.optimize import differential_evolution, minimize
+
     greedy_x = x0.copy()
-    uncovered_mask = np.ones(n_cloud, dtype=bool)
+    uncovered_mask = np.ones(setup['n_cloud'], dtype=bool)
 
     for si in range(len(templates)):
-        if _elapsed() >= _TIME_BUDGET * 0.4:
+        if elapsed_fn() >= time_budget * 0.4:
             break
-        start, end = slices[si]
-        stype = shape_types[si]
-        s_bounds = bounds[start:end]
+        start, end = setup['slices'][si]
+        stype = setup['shape_types'][si]
+        s_bounds = setup['bounds'][start:end]
         s_x0 = greedy_x[start:end].copy()
 
-        # Build tree from currently uncovered points
         uncov_idx = np.where(uncovered_mask)[0]
         if len(uncov_idx) < 5:
             break
-        uncov_pts = cloud[uncov_idx]
+        uncov_pts = setup['cloud'][uncov_idx]
         uncov_tree = cKDTree(uncov_pts)
 
-        s_args = (stype, glyph_bbox, uncov_pts, uncov_tree,
-                  len(uncov_pts), radius, snap_yi, snap_xi, w, h)
+        s_args = (stype, setup['glyph_bbox'], uncov_pts, uncov_tree,
+                  len(uncov_pts), setup['radius'], setup['snap_yi'],
+                  setup['snap_xi'], setup['w'], setup['h'])
 
-        # NM for this shape (clamp to bounds since NM is unconstrained)
-        s_lo = bounds_lo[start:end]
-        s_hi = bounds_hi[start:end]
+        s_lo = setup['bounds_lo'][start:end]
+        s_hi = setup['bounds_hi'][start:end]
+
         def _score_single_clamped(p, *a, _lo=s_lo, _hi=s_hi):
             return _score_single_shape(np.clip(p, _lo, _hi), *a)
+
         nm_r = minimize(
             _score_single_clamped, s_x0, args=s_args, method='Nelder-Mead',
             options={'maxfev': 800, 'xatol': 0.2, 'fatol': 0.002, 'adaptive': True},
@@ -2173,8 +2226,7 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
         best_s = np.clip(nm_r.x, s_lo, s_hi).copy()
         best_sf = nm_r.fun
 
-        # Quick DE for this shape if time permits
-        if _elapsed() < _TIME_BUDGET * 0.35:
+        if elapsed_fn() < time_budget * 0.35:
             try:
                 s_clipped = np.clip(best_s, [b[0] for b in s_bounds],
                                     [b[1] for b in s_bounds])
@@ -2185,43 +2237,63 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
                 )
                 if de_r.fun < best_sf:
                     best_s = de_r.x.copy()
-                    best_sf = de_r.fun
             except Exception:
                 pass
 
-        # Store best params for this shape
         greedy_x[start:end] = best_s
 
-        # Mark newly covered points
-        n_pts_shape = max(60, int(((glyph_bbox[2]-glyph_bbox[0])**2 +
-                                    (glyph_bbox[3]-glyph_bbox[1])**2)**0.5 / 1.5))
-        pts = SHAPE_FNS[stype](tuple(best_s), glyph_bbox, offset=(0, 0),
+        # Mark covered points
+        n_pts_shape = max(60, int(((setup['glyph_bbox'][2]-setup['glyph_bbox'][0])**2 +
+                                    (setup['glyph_bbox'][3]-setup['glyph_bbox'][1])**2)**0.5 / 1.5))
+        pts = SHAPE_FNS[stype](tuple(best_s), setup['glyph_bbox'], offset=(0, 0),
                                n_pts=n_pts_shape)
         if len(pts) > 0:
-            xi = np.clip(np.round(pts[:, 0]).astype(int), 0, w - 1)
-            yi = np.clip(np.round(pts[:, 1]).astype(int), 0, h - 1)
-            snapped_x = snap_xi[yi, xi].astype(float)
-            snapped_y = snap_yi[yi, xi].astype(float)
+            xi = np.clip(np.round(pts[:, 0]).astype(int), 0, setup['w'] - 1)
+            yi = np.clip(np.round(pts[:, 1]).astype(int), 0, setup['h'] - 1)
+            snapped_x = setup['snap_xi'][yi, xi].astype(float)
+            snapped_y = setup['snap_yi'][yi, xi].astype(float)
             snapped = np.column_stack([snapped_x, snapped_y])
-            # Find which cloud points are now covered
-            dists, _ = cloud_tree.query(snapped, k=1)
-            # Use ball query on the uncov_tree
-            hits = cloud_tree.query_ball_point(snapped, radius)
+            hits = setup['cloud_tree'].query_ball_point(snapped, setup['radius'])
             newly_covered = set()
             for lst in hits:
                 newly_covered.update(lst)
             for idx in newly_covered:
                 uncovered_mask[idx] = False
 
-    # ---- Phase 2: Joint NM refinement from greedy solution ----
-    best_x = greedy_x.copy()
-    best_fun = _score_all_strokes(greedy_x, *joint_args)
+    return greedy_x
 
-    # Also compare with original x0
-    x0_fun = _score_all_strokes(x0, *joint_args)
-    if x0_fun < best_fun:
-        best_x = x0.copy()
-        best_fun = x0_fun
+
+def _joint_optimization_cycle(best_x, best_fun, setup, elapsed_fn, time_budget,
+                               stale_threshold=0.001, stale_cycles=2):
+    """Phase 2: Joint NM→DE→NM refinement cycles until stagnation.
+
+    Args:
+        best_x: Starting parameter vector
+        best_fun: Starting score
+        setup: Setup dict from _setup_auto_fit
+        elapsed_fn: Function returning elapsed time
+        time_budget: Total time budget
+        stale_threshold: Improvement threshold for stagnation detection
+        stale_cycles: Number of stale cycles before stopping
+
+    Returns:
+        Tuple of (best_x, best_fun, cached_score)
+    """
+    from scipy.optimize import differential_evolution, minimize
+
+    joint_args = (setup['shape_types'], setup['slices'], setup['glyph_bbox'],
+                  setup['cloud_tree'], setup['n_cloud'], setup['radius'],
+                  setup['snap_yi'], setup['snap_xi'], setup['w'], setup['h'],
+                  setup['dist_map'])
+    bounds = setup['bounds']
+    bounds_lo = setup['bounds_lo']
+    bounds_hi = setup['bounds_hi']
+
+    def _clamp(x):
+        return np.clip(x, bounds_lo, bounds_hi)
+
+    def _score_all_clamped(params, *args):
+        return _score_all_strokes(_clamp(params), *args)
 
     def _update_best(x, fun):
         nonlocal best_x, best_fun
@@ -2235,16 +2307,15 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     class _EarlyStop(Exception):
         pass
 
-    # ---- Repeating NM → DE → NM cycle until stagnation or time limit ----
     stale_count = 0
-    cycle_num = 0
-    while not _perfect() and _elapsed() < _TIME_BUDGET and stale_count < _STALE_CYCLES:
-        cycle_num += 1
+    cached_score = None
+
+    while not _perfect() and elapsed_fn() < time_budget and stale_count < stale_cycles:
         score_at_cycle_start = best_fun
 
         # NM refinement
-        if not _perfect() and _elapsed() < _TIME_BUDGET:
-            remaining_fev = max(500, int(min(30.0, _TIME_BUDGET - _elapsed()) / 0.0003))
+        if not _perfect() and elapsed_fn() < time_budget:
+            remaining_fev = max(500, int(min(30.0, time_budget - elapsed_fn()) / 0.0003))
             nm_result = minimize(
                 _score_all_clamped, best_x, args=joint_args, method='Nelder-Mead',
                 options={'maxfev': remaining_fev, 'xatol': 0.2, 'fatol': 0.0005,
@@ -2253,39 +2324,30 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
             _update_best(_clamp(nm_result.x), nm_result.fun)
 
         # DE global search
-        if not _perfect() and _elapsed() < _TIME_BUDGET:
+        if not _perfect() and elapsed_fn() < time_budget:
             nm_x = best_x.copy()
             for i, (lo, hi) in enumerate(bounds):
                 nm_x[i] = np.clip(nm_x[i], lo, hi)
 
             def _de_callback(xk, convergence=0):
                 _update_best(xk, _score_all_strokes(xk, *joint_args))
-                if _perfect() or _elapsed() >= _TIME_BUDGET:
+                if _perfect() or elapsed_fn() >= time_budget:
                     raise _EarlyStop()
 
             try:
                 de_result = differential_evolution(
-                    _score_all_strokes,
-                    bounds=bounds,
-                    args=joint_args,
-                    x0=nm_x,
-                    maxiter=200,
-                    popsize=20,
-                    tol=0.002,
-                    seed=None,
-                    mutation=(0.5, 1.0),
-                    recombination=0.7,
-                    polish=False,
-                    disp=False,
-                    callback=_de_callback,
+                    _score_all_strokes, bounds=bounds, args=joint_args,
+                    x0=nm_x, maxiter=200, popsize=20, tol=0.002,
+                    seed=None, mutation=(0.5, 1.0), recombination=0.7,
+                    polish=False, disp=False, callback=_de_callback,
                 )
                 _update_best(de_result.x, de_result.fun)
             except _EarlyStop:
                 pass
 
         # NM polish
-        if not _perfect() and _elapsed() < _TIME_BUDGET:
-            remaining_fev = max(200, int(min(15.0, _TIME_BUDGET - _elapsed()) / 0.0003))
+        if not _perfect() and elapsed_fn() < time_budget:
+            remaining_fev = max(200, int(min(15.0, time_budget - elapsed_fn()) / 0.0003))
             nm2 = minimize(
                 _score_all_clamped, best_x, args=joint_args, method='Nelder-Mead',
                 options={'maxfev': remaining_fev, 'xatol': 0.1, 'fatol': 0.0005,
@@ -2293,77 +2355,210 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
             )
             _update_best(_clamp(nm2.x), nm2.fun)
 
-        # Check for stagnation
-        improvement = score_at_cycle_start - best_fun  # positive = improved
-        if improvement < _STALE_THRESHOLD:
+        improvement = score_at_cycle_start - best_fun
+        if improvement < stale_threshold:
             stale_count += 1
         else:
             stale_count = 0
 
-        # Cache periodically so progress isn't lost
         current_score = float(-best_fun)
         if cached_score is None or current_score > cached_score:
-            _save_cached_params(rel_path, char, best_x, current_score)
             cached_score = current_score
 
-    # Compare shape optimisation vs affine — use whichever scored higher
-    final_score = float(-best_fun)
-    if affine_strokes_result and affine_strokes_result[1] > final_score:
-        # Affine was better — return affine strokes directly
-        aff_strokes, aff_score = affine_strokes_result
-        if return_markers:
-            markers = []
-            for si, st in enumerate(aff_strokes):
-                markers.append({'x': st[0][0], 'y': st[0][1],
-                                'type': 'start', 'label': 'S', 'stroke_id': si})
-                markers.append({'x': st[-1][0], 'y': st[-1][1],
-                                'type': 'stop', 'label': 'E', 'stroke_id': si})
-            return aff_strokes, markers
-        return aff_strokes
+    return best_x, best_fun, cached_score
 
-    # Cache the winning params if they improved over what was stored
-    if cached_score is None or final_score > cached_score:
-        _save_cached_params(rel_path, char, best_x, final_score)
 
-    best_shapes = _param_vector_to_shapes(best_x, shape_types, slices, glyph_bbox)
+def _shapes_to_strokes(best_x, templates, setup, mask):
+    """Convert optimized parameters to stroke point lists.
 
-    # Group shapes into strokes based on 'group' key in templates.
-    # Shapes with the same group are joined into one stroke; shapes without
-    # a group get their own stroke.
+    Args:
+        best_x: Optimized parameter vector
+        templates: Shape templates
+        setup: Setup dict
+        mask: Glyph mask
+
+    Returns:
+        List of (shape_strokes, group_id) tuples for each group
+    """
     from collections import OrderedDict
-    groups = OrderedDict()  # group_key -> list of (shape_idx, stype, pts)
+
+    best_shapes = _param_vector_to_shapes(best_x, setup['shape_types'],
+                                          setup['slices'], setup['glyph_bbox'])
+
+    groups = OrderedDict()
     _auto_gid = 1000
-    for si, (tmpl, stype, pts) in enumerate(zip(templates, shape_types, best_shapes)):
+    for si, (tmpl, stype, pts) in enumerate(zip(templates, setup['shape_types'], best_shapes)):
         gid = tmpl.get('group')
         if gid is None:
             gid = _auto_gid
             _auto_gid += 1
         groups.setdefault(gid, []).append((si, stype, pts))
 
-    strokes = []
-    all_markers = []
-    stroke_idx = 0
+    result = []
     for gid, members in groups.items():
-        # Process each shape in the group
-        shape_strokes = []  # list of point lists for each shape in group
+        shape_strokes = []
         for si, stype, pts in members:
             point_list = [(float(p[0]), float(p[1])) for p in pts]
             point_list = _smooth_stroke(point_list, sigma=2.0)
             point_list = _constrain_to_mask(point_list, mask)
             if len(point_list) >= 2:
                 shape_strokes.append((si, stype, point_list))
+        if shape_strokes:
+            result.append((shape_strokes, gid))
 
-        if not shape_strokes:
-            continue
+    return result
 
+
+def _generate_stroke_markers(strokes, return_markers):
+    """Generate markers for stroke endpoints and curves.
+
+    Args:
+        strokes: List of stroke dicts with 'stroke', 'shapes', 'chain' keys
+        return_markers: Whether to generate markers
+
+    Returns:
+        List of marker dicts if return_markers, else empty list
+    """
+    if not return_markers:
+        return []
+
+    all_markers = []
+    for stroke_idx, stroke_info in enumerate(strokes):
+        final_stroke = stroke_info['stroke']
+        all_markers.append({
+            'x': final_stroke[0][0], 'y': final_stroke[0][1],
+            'type': 'start', 'label': 'S', 'stroke_id': stroke_idx
+        })
+        all_markers.append({
+            'x': final_stroke[-1][0], 'y': final_stroke[-1][1],
+            'type': 'stop', 'label': 'E', 'stroke_id': stroke_idx
+        })
+
+        # Add curve markers for arcs/loops
+        shapes_to_check = stroke_info.get('chain', stroke_info['shapes'])
+        for si, stype, point_list in shapes_to_check:
+            if stype in ('arc_right', 'arc_left', 'loop', 'u_arc'):
+                mid_pt = point_list[len(point_list) // 2]
+                all_markers.append({
+                    'x': round(mid_pt[0], 1), 'y': round(mid_pt[1], 1),
+                    'type': 'curve', 'label': 'C', 'stroke_id': stroke_idx
+                })
+
+    return all_markers
+
+
+def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
+    """Generate strokes by optimising shape parameters with a greedy per-shape
+    approach followed by joint refinement.
+
+    Phase 0: DiffVG/Affine template matching
+    Phase 1: Greedy — optimise each shape against uncovered points
+    Phase 2: Joint NM→DE→NM refinement cycles
+
+    Caches winning params in DB so subsequent runs start from the best
+    known position and can improve further.
+
+    Returns list of strokes [[[x,y], ...], ...] or None.
+    If return_markers=True returns (strokes, markers).
+    """
+    import time as _time
+
+    templates = SHAPE_TEMPLATES.get(char)
+    if not templates:
+        return None
+
+    font_path = resolve_font_path(font_path)
+
+    # Setup optimization data structures
+    setup = _setup_auto_fit(font_path, char, canvas_size, templates)
+    if setup is None:
+        return None
+
+    _t_start = _time.monotonic()
+    _TIME_BUDGET = 3600.0
+
+    def _elapsed():
+        return _time.monotonic() - _t_start
+
+    # Load cached params
+    rel_path = font_path
+    if rel_path.startswith(BASE_DIR):
+        rel_path = os.path.relpath(font_path, BASE_DIR)
+    cached = _load_cached_params(rel_path, char)
+    x0 = setup['x0']
+    cached_score = None
+    if cached is not None and len(cached[0]) == len(x0):
+        x0 = cached[0]
+        cached_score = cached[1]
+
+    for i, (lo, hi) in enumerate(setup['bounds']):
+        x0[i] = np.clip(x0[i], lo, hi)
+
+    # ---- Phase 0: Try gradient-based optimization ----
+    affine_strokes_result = _try_gradient_optimization(font_path, char, canvas_size)
+    if affine_strokes_result[0] is not None and affine_strokes_result[1] >= 0.85:
+        strokes = affine_strokes_result[0]
+        if return_markers:
+            markers = []
+            for si, st in enumerate(strokes):
+                markers.append({'x': st[0][0], 'y': st[0][1],
+                                'type': 'start', 'label': 'S', 'stroke_id': si})
+                markers.append({'x': st[-1][0], 'y': st[-1][1],
+                                'type': 'stop', 'label': 'E', 'stroke_id': si})
+            return strokes, markers
+        return strokes
+
+    # ---- Phase 1: Greedy per-shape optimization ----
+    greedy_x = _greedy_shape_optimization(templates, setup, x0, _elapsed, _TIME_BUDGET)
+
+    # ---- Phase 2: Joint refinement ----
+    joint_args = (setup['shape_types'], setup['slices'], setup['glyph_bbox'],
+                  setup['cloud_tree'], setup['n_cloud'], setup['radius'],
+                  setup['snap_yi'], setup['snap_xi'], setup['w'], setup['h'],
+                  setup['dist_map'])
+
+    best_x = greedy_x.copy()
+    best_fun = _score_all_strokes(greedy_x, *joint_args)
+
+    x0_fun = _score_all_strokes(x0, *joint_args)
+    if x0_fun < best_fun:
+        best_x = x0.copy()
+        best_fun = x0_fun
+
+    best_x, best_fun, _ = _joint_optimization_cycle(
+        best_x, best_fun, setup, _elapsed, _TIME_BUDGET)
+
+    # Compare with gradient optimization result
+    final_score = float(-best_fun)
+    if affine_strokes_result[0] is not None and affine_strokes_result[1] > final_score:
+        strokes = affine_strokes_result[0]
+        if return_markers:
+            markers = []
+            for si, st in enumerate(strokes):
+                markers.append({'x': st[0][0], 'y': st[0][1],
+                                'type': 'start', 'label': 'S', 'stroke_id': si})
+                markers.append({'x': st[-1][0], 'y': st[-1][1],
+                                'type': 'stop', 'label': 'E', 'stroke_id': si})
+            return strokes, markers
+        return strokes
+
+    # Cache winning params
+    if cached_score is None or final_score > cached_score:
+        _save_cached_params(rel_path, char, best_x, final_score)
+
+    # Convert to strokes
+    shape_groups = _shapes_to_strokes(best_x, templates, setup, setup['mask'])
+
+    strokes = []
+    all_markers = []
+    stroke_idx = 0
+    for shape_strokes, gid in shape_groups:
         if len(shape_strokes) == 1:
-            # Single shape → single stroke
             si, stype, point_list = shape_strokes[0]
             final_stroke = [[round(x, 1), round(y, 1)] for x, y in point_list]
+            chain = shape_strokes
         else:
-            # Multiple shapes → join by finding nearest endpoints.
-            # Try both orientations of the first shape and pick the
-            # chain with the shortest total gap distance.
+            # Join multiple shapes by nearest endpoints
             def _build_chain(start_shape, rest):
                 chain = [start_shape]
                 remaining = list(rest)
@@ -2377,13 +2572,9 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
                         d_start = (last_end[0] - rpts[0][0])**2 + (last_end[1] - rpts[0][1])**2
                         d_end = (last_end[0] - rpts[-1][0])**2 + (last_end[1] - rpts[-1][1])**2
                         if d_start < best_dist:
-                            best_dist = d_start
-                            best_idx = ri
-                            best_flip = False
+                            best_dist, best_idx, best_flip = d_start, ri, False
                         if d_end < best_dist:
-                            best_dist = d_end
-                            best_idx = ri
-                            best_flip = True
+                            best_dist, best_idx, best_flip = d_end, ri, True
                     total_gap += best_dist ** 0.5
                     chosen = remaining.pop(best_idx)
                     if best_flip:
@@ -2393,23 +2584,19 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
 
             s0 = shape_strokes[0]
             s0_flip = (s0[0], s0[1], list(reversed(s0[2])))
-            rest = shape_strokes[1:]
-            chain_fwd, gap_fwd = _build_chain(s0, rest)
-            chain_rev, gap_rev = _build_chain(s0_flip, rest)
+            chain_fwd, gap_fwd = _build_chain(s0, shape_strokes[1:])
+            chain_rev, gap_rev = _build_chain(s0_flip, shape_strokes[1:])
             chain = chain_fwd if gap_fwd <= gap_rev else chain_rev
 
-            # Concatenate all shape points into one stroke
             combined = []
             for ci, (csi, cstype, cpts) in enumerate(chain):
                 if ci > 0:
-                    # Add vertex marker at the join point
                     jpt = cpts[0]
                     if return_markers:
                         all_markers.append({
                             'x': round(jpt[0], 1), 'y': round(jpt[1], 1),
                             'type': 'vertex', 'label': 'V', 'stroke_id': stroke_idx
                         })
-                    # Skip first few points if they overlap with end of previous
                     skip = 0
                     if combined:
                         last = combined[-1]
@@ -2436,15 +2623,11 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
                 'x': final_stroke[-1][0], 'y': final_stroke[-1][1],
                 'type': 'stop', 'label': 'E', 'stroke_id': stroke_idx
             })
-            # Add curve markers for arcs/loops within this stroke
-            for si, stype, point_list in (shape_strokes if len(shape_strokes) == 1
-                                          else chain):
+            for si, stype, point_list in chain:
                 if stype in ('arc_right', 'arc_left', 'loop', 'u_arc'):
-                    # Find midpoint of this shape in the final stroke
                     mid_pt = point_list[len(point_list) // 2]
                     all_markers.append({
-                        'x': round(mid_pt[0], 1),
-                        'y': round(mid_pt[1], 1),
+                        'x': round(mid_pt[0], 1), 'y': round(mid_pt[1], 1),
                         'type': 'curve', 'label': 'C', 'stroke_id': stroke_idx
                     })
 
@@ -2855,6 +3038,394 @@ def _quick_stroke_score(strokes, mask, stroke_width=8):
 
     # Score: coverage minus overshoot penalty
     return coverage - (overshoot * 0.5)
+
+
+# ============================================================================
+# Helper functions for minimal_strokes_from_skeleton
+# ============================================================================
+
+def _numpad_to_pixel(region, bbox):
+    """Map numpad region (1-9) to pixel coordinates (center of region)."""
+    frac_x, frac_y = NUMPAD_POS[region]
+    x = bbox[0] + frac_x * (bbox[2] - bbox[0])
+    y = bbox[1] + frac_y * (bbox[3] - bbox[1])
+    return (x, y)
+
+
+def _extract_waypoint_region(wp):
+    """Extract the region number from a waypoint (handles tuples and plain ints)."""
+    if isinstance(wp, tuple):
+        return wp[0] if isinstance(wp[0], int) else None
+    return wp if isinstance(wp, int) else None
+
+
+def _is_vertical_stroke(stroke_template):
+    """Check if a stroke template represents a vertical line."""
+    if len(stroke_template) != 2:
+        return False
+    r1 = _extract_waypoint_region(stroke_template[0])
+    r2 = _extract_waypoint_region(stroke_template[1])
+    if r1 is None or r2 is None:
+        return False
+    # Same column in numpad: (7,4,1), (8,5,2), (9,6,3)
+    col1 = (r1 - 1) % 3
+    col2 = (r2 - 1) % 3
+    return col1 == col2
+
+
+def _find_best_vertical_segment(vertical_segments, template_start, template_end):
+    """Find the vertical skeleton segment(s) closest to template positions.
+
+    Chains connected vertical segments to get the full stroke.
+    """
+    if not vertical_segments:
+        return None
+
+    # Filter to only truly vertical segments (not diagonals)
+    truly_vertical = [s for s in vertical_segments if 75 <= abs(s['angle']) <= 105]
+    if not truly_vertical:
+        truly_vertical = vertical_segments  # Fallback
+
+    # Build a graph of connected vertical segments
+    junction_to_segs = defaultdict(list)
+    for i, seg in enumerate(truly_vertical):
+        if seg['start_junction'] >= 0:
+            junction_to_segs[seg['start_junction']].append(i)
+        if seg['end_junction'] >= 0:
+            junction_to_segs[seg['end_junction']].append(i)
+
+    # Find chains by grouping segments that share any junction
+    visited = set()
+    chains = []
+
+    for i in range(len(truly_vertical)):
+        if i in visited:
+            continue
+
+        # BFS to find all connected segments
+        chain = []
+        queue = [i]
+        while queue:
+            seg_idx = queue.pop(0)
+            if seg_idx in visited:
+                continue
+            visited.add(seg_idx)
+            chain.append(seg_idx)
+
+            seg = truly_vertical[seg_idx]
+            # Find segments sharing start or end junction
+            for junc in [seg['start_junction'], seg['end_junction']]:
+                if junc >= 0:
+                    for other_idx in junction_to_segs[junc]:
+                        if other_idx not in visited:
+                            queue.append(other_idx)
+
+        if chain:
+            chains.append(chain)
+
+    # For each chain, get the full path endpoints
+    best = None
+    best_score = float('inf')
+
+    for chain in chains:
+        # Get all endpoints of segments in chain
+        points = []
+        for seg_idx in chain:
+            seg = truly_vertical[seg_idx]
+            points.append(seg['start'])
+            points.append(seg['end'])
+
+        if not points:
+            continue
+
+        # Find topmost and bottommost points
+        points.sort(key=lambda p: p[1])  # Sort by y
+        top = points[0]
+        bottom = points[-1]
+
+        # Score by match to template
+        d1 = ((top[0] - template_start[0])**2 +
+              (top[1] - template_start[1])**2)**0.5
+        d2 = ((bottom[0] - template_end[0])**2 +
+              (bottom[1] - template_end[1])**2)**0.5
+        d1r = ((bottom[0] - template_start[0])**2 +
+               (bottom[1] - template_start[1])**2)**0.5
+        d2r = ((top[0] - template_end[0])**2 +
+               (top[1] - template_end[1])**2)**0.5
+
+        score = min(d1 + d2, d1r + d2r)
+        if score < best_score:
+            best_score = score
+            if d1 + d2 <= d1r + d2r:
+                best = (top, bottom)
+            else:
+                best = (bottom, top)
+
+    return best
+
+
+def _select_best_variant(char, font_path, canvas_size):
+    """Try all variants for a character and return the best one.
+
+    Returns (best_strokes, best_variant_name) or (None, None) if no variants.
+    """
+    variants = NUMPAD_TEMPLATE_VARIANTS.get(char)
+    if not variants:
+        return None, None
+
+    if len(variants) == 1:
+        return list(variants.keys())[0], list(variants.values())[0]
+
+    # Try all variants and pick the best
+    font_path_resolved = resolve_font_path(font_path)
+    mask = render_glyph_mask(font_path_resolved, char, canvas_size)
+    if mask is None:
+        return None, None
+
+    best_strokes = None
+    best_variant = None
+    best_score = -1
+
+    for var_name, variant_template in variants.items():
+        strokes = minimal_strokes_from_skeleton(
+            font_path, char, canvas_size, trace_paths=True,
+            template=variant_template, return_variant=False
+        )
+        if strokes:
+            score = _quick_stroke_score(strokes, mask)
+            if score > best_score:
+                best_score = score
+                best_strokes = strokes
+                best_variant = var_name
+
+    return best_variant, best_strokes
+
+
+def _find_terminal_waypoint(wp_val, region, template_pos, skel_list, info, bbox,
+                            top_bound, bot_bound, mid_x, next_direction):
+    """Find the skeleton position for a terminal waypoint (plain int)."""
+    # Filter skeleton pixels to those actually IN the target region
+    region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
+
+    # If no pixels in exact region, fall back to vertical third
+    if not region_pixels:
+        if template_pos[1] < top_bound:  # Top (positions 7,8,9)
+            region_pixels = [p for p in skel_list if p[1] < top_bound]
+        elif template_pos[1] > bot_bound:  # Bottom (positions 1,2,3)
+            region_pixels = [p for p in skel_list if p[1] > bot_bound]
+        else:  # Middle (positions 4,5,6)
+            region_pixels = [p for p in skel_list if top_bound <= p[1] <= bot_bound]
+
+    if not region_pixels:
+        return None
+
+    extremum = None
+
+    # If there's a direction hint for the next segment, place waypoint
+    # at the extreme position to give room to move in that direction
+    if next_direction == 'down':
+        extremum = min(region_pixels, key=lambda p: p[1])
+    elif next_direction == 'up':
+        extremum = max(region_pixels, key=lambda p: p[1])
+    elif next_direction == 'left':
+        extremum = max(region_pixels, key=lambda p: p[0])
+    elif next_direction == 'right':
+        extremum = min(region_pixels, key=lambda p: p[0])
+    # Check if there's an endpoint in this region - prefer it for terminals
+    elif info['endpoints']:
+        endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region, bbox)]
+        if endpoints_in_region:
+            extremum = min(endpoints_in_region, key=lambda p:
+                          (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
+    if extremum is None:
+        # No hint - use default logic based on position
+        is_corner_pos = region in [7, 9, 1, 3]
+
+        if is_corner_pos:
+            def corner_dist(p):
+                dx = abs(p[0] - template_pos[0])
+                dy = abs(p[1] - template_pos[1])
+                return dx + dy
+            extremum = min(region_pixels, key=corner_dist)
+        elif region == 8:
+            extremum = min(region_pixels, key=lambda p: p[1])
+        elif region == 2:
+            extremum = max(region_pixels, key=lambda p: p[1])
+        elif template_pos[0] < mid_x:
+            extremum = min(region_pixels, key=lambda p: p[0])
+        else:
+            extremum = max(region_pixels, key=lambda p: p[0])
+
+    return extremum
+
+
+def _find_vertex_waypoint(region, template_pos, skel_list, mask, bbox,
+                          top_bound, bot_bound, mid_x, mid_y, rows, cols):
+    """Find the skeleton position for a vertex waypoint v(n).
+
+    Returns (skeleton_point, apex_extension_or_None).
+    apex_extension is ('top'/'bottom', [apex_x, apex_y]) if glyph extends beyond skeleton.
+    """
+    if template_pos[1] < top_bound:  # Top row (7,8,9)
+        if skel_list:
+            topmost = min(skel_list, key=lambda p: p[1])
+            skel_x, skel_y = topmost[0], topmost[1]
+            # Search for glyph pixels in a narrow band above skeleton
+            col_start = max(0, int(skel_x) - 5)
+            col_end = min(mask.shape[1], int(skel_x) + 6)
+            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
+            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
+            if len(glyph_rows) > 0:
+                glyph_top_idx = glyph_rows.argmin()
+                glyph_top_y = glyph_rows[glyph_top_idx]
+                glyph_top_x = glyph_cols[glyph_top_idx]
+                if glyph_top_y < skel_y:
+                    return (skel_x, skel_y), ('top', [float(glyph_top_x), float(glyph_top_y)])
+            return (skel_x, skel_y), None
+        return (template_pos[0], template_pos[1]), None
+
+    elif template_pos[1] > bot_bound:  # Bottom row (1,2,3)
+        if skel_list:
+            bottommost = max(skel_list, key=lambda p: p[1])
+            skel_x, skel_y = bottommost[0], bottommost[1]
+            col_start = max(0, int(skel_x) - 5)
+            col_end = min(mask.shape[1], int(skel_x) + 6)
+            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
+            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
+            if len(glyph_rows) > 0:
+                glyph_bot_idx = glyph_rows.argmax()
+                glyph_bot_y = glyph_rows[glyph_bot_idx]
+                glyph_bot_x = glyph_cols[glyph_bot_idx]
+                if glyph_bot_y > skel_y:
+                    return (skel_x, skel_y), ('bottom', [float(glyph_bot_x), float(glyph_bot_y)])
+            return (skel_x, skel_y), None
+        return (template_pos[0], template_pos[1]), None
+
+    else:  # Middle row (4,5,6) - waist level
+        waist_tolerance = (bbox[3] - bbox[1]) * 0.15
+        waist_pixels = [p for p in skel_list
+                       if abs(p[1] - mid_y) < waist_tolerance]
+        if waist_pixels:
+            if template_pos[0] < mid_x:  # Left side (4)
+                vertex_pt = min(waist_pixels, key=lambda p: p[0])
+            else:  # Right side (6)
+                vertex_pt = max(waist_pixels, key=lambda p: p[0])
+            return vertex_pt, None
+        # Fallback - find nearest
+        if skel_list:
+            skel_tree = cKDTree(skel_list)
+            _, idx = skel_tree.query(template_pos)
+            return skel_list[idx], None
+        return (template_pos[0], template_pos[1]), None
+
+
+def _find_curve_waypoint(region, template_pos, skel_list, skel_tree, mid_x, mid_y, waist_margin):
+    """Find the skeleton position for a curve waypoint c(n)."""
+    # Filter skeleton pixels well above or below waist (mid_y)
+    if template_pos[1] < mid_y:  # Above waist (positions 7,8,9)
+        region_pixels = [p for p in skel_list if p[1] < mid_y - waist_margin]
+    else:  # Below waist (positions 1,2,3)
+        region_pixels = [p for p in skel_list if p[1] > mid_y + waist_margin]
+
+    if region_pixels:
+        # Find apex based on template position direction
+        if template_pos[0] > mid_x:  # Right side (positions 3,6,9)
+            apex = max(region_pixels, key=lambda p: p[0])
+        elif template_pos[0] < mid_x:  # Left side (positions 1,4,7)
+            apex = min(region_pixels, key=lambda p: p[0])
+        else:  # Center (positions 2,5,8)
+            _, idx = skel_tree.query(template_pos)
+            apex = skel_list[idx]
+        return apex
+
+    # Fallback to nearest skeleton pixel
+    _, idx = skel_tree.query(template_pos)
+    return skel_list[idx]
+
+
+def _trace_stroke_path(stroke_points, waypoint_info, segment_directions, segment_straight,
+                       info, global_traced):
+    """Trace skeleton paths between consecutive waypoints.
+
+    Returns the full traced path as a list of (x, y) tuples.
+    """
+    full_path = []
+    already_traced = set(global_traced)
+    arrival_branch = set()
+
+    current_pt = (int(round(stroke_points[0][0])), int(round(stroke_points[0][1])))
+
+    for i in range(len(stroke_points) - 1):
+        start_pt = current_pt
+        end_pt = (int(round(stroke_points[i+1][0])), int(round(stroke_points[i+1][1])))
+
+        seg_direction = segment_directions.get(i)
+        seg_straight = segment_straight.get(i, False)
+        current_is_intersection = waypoint_info[i][1] if i < len(waypoint_info) else False
+        target_is_curve, target_is_intersection, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, False, None)
+
+        config = SegmentConfig(direction=seg_direction, straight=seg_straight)
+
+        # Determine avoidance strategy based on context
+        if config.straight:
+            traced = _generate_straight_line(start_pt, end_pt)
+        elif target_is_intersection:
+            traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                   avoid_pixels=None)
+            if traced and len(traced) >= 2:
+                arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
+        elif current_is_intersection and arrival_branch:
+            traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                   avoid_pixels=already_traced,
+                                   fallback_avoid=arrival_branch)
+            arrival_branch = set()
+        elif target_is_curve and target_region is not None:
+            # Get bbox from info if available, otherwise skip region-based tracing
+            traced = _trace_to_region(start_pt, target_region, info.get('bbox'), info['adj'], info['skel_set'],
+                                      avoid_pixels=already_traced)
+            if traced is None:
+                traced = _trace_to_region(start_pt, target_region, info.get('bbox'), info['adj'], info['skel_set'],
+                                          avoid_pixels=None)
+        else:
+            traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                   avoid_pixels=already_traced)
+
+        if traced:
+            if i == 0:
+                full_path.extend(traced)
+                already_traced.update(traced)
+            else:
+                full_path.extend(traced[1:])
+                already_traced.update(traced[1:])
+            current_pt = traced[-1]
+        else:
+            if i == 0:
+                full_path.append(start_pt)
+                already_traced.add(start_pt)
+            break
+
+    return full_path, already_traced
+
+
+def _apply_apex_extensions(full_path, stroke_points, apex_extensions):
+    """Apply apex extensions to the traced path.
+
+    Inserts glyph apex points at the appropriate positions.
+    """
+    for point_idx, (direction, apex_pt) in apex_extensions.items():
+        if point_idx < len(stroke_points):
+            skel_pt = stroke_points[point_idx]
+            skel_x, skel_y = int(round(skel_pt[0])), int(round(skel_pt[1]))
+
+            for j, fp in enumerate(full_path):
+                if abs(fp[0] - skel_x) <= 2 and abs(fp[1] - skel_y) <= 2:
+                    apex_tuple = (int(round(apex_pt[0])), int(round(apex_pt[1])))
+                    if direction == 'top':
+                        full_path.insert(j, apex_tuple)
+                    else:  # 'bottom'
+                        full_path.insert(j + 1, apex_tuple)
+                    break
 
 
 def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=True,
@@ -4204,6 +4775,122 @@ def check_case_mismatch(font_path, threshold=0.80):
     return mismatched
 
 
+def _render_text_for_analysis(pil_font, text):
+    """Render text using PIL font and return binary array plus dimensions.
+
+    Args:
+        pil_font: PIL ImageFont object
+        text: Text string to render
+
+    Returns:
+        Tuple of (binary_array, width, height) or (None, 0, 0) on failure
+    """
+    bbox = pil_font.getbbox(text)
+    if not bbox:
+        return None, 0, 0
+
+    width = bbox[2] - bbox[0] + 20
+    height = bbox[3] - bbox[1] + 20
+
+    img = Image.new('L', (width, height), 255)
+    draw = ImageDraw.Draw(img)
+    draw.text((10 - bbox[0], 10 - bbox[1]), text, fill=0, font=pil_font)
+
+    arr = np.array(img) < 128
+    return arr, width, height
+
+
+def _analyze_shape_metrics(arr, width):
+    """Analyze connected components and compute shape metrics.
+
+    Args:
+        arr: Binary numpy array of rendered text
+        width: Image width for percentage calculation
+
+    Returns:
+        Tuple of (num_shapes, max_width_pct, labeled_array)
+    """
+    from scipy import ndimage
+
+    labeled, num_shapes = ndimage.label(arr)
+
+    max_width_pct = 0
+    if num_shapes > 0:
+        for i in range(1, num_shapes + 1):
+            component = (labeled == i)
+            cols = np.any(component, axis=0)
+            comp_width = np.sum(cols)
+            width_pct = comp_width / width
+            if width_pct > max_width_pct:
+                max_width_pct = width_pct
+
+    return num_shapes, max_width_pct, labeled
+
+
+def _check_char_holes(pil_font, char):
+    """Check if a character has holes (cursive detection).
+
+    Args:
+        pil_font: PIL ImageFont object
+        char: Character to check
+
+    Returns:
+        True if character has holes, False otherwise
+    """
+    from scipy import ndimage
+
+    try:
+        bbox = pil_font.getbbox(char)
+        if not bbox:
+            return False
+
+        width = bbox[2] - bbox[0] + 10
+        height = bbox[3] - bbox[1] + 10
+
+        img = Image.new('L', (width, height), 255)
+        draw = ImageDraw.Draw(img)
+        draw.text((5 - bbox[0], 5 - bbox[1]), char, fill=0, font=pil_font)
+
+        arr = np.array(img) < 128
+        filled = ndimage.binary_fill_holes(arr)
+        holes = filled & ~arr
+        return bool(np.any(holes))
+    except Exception:
+        return False
+
+
+def _check_char_shape_count(pil_font, char, expected):
+    """Check if a character has expected number of connected components.
+
+    Args:
+        pil_font: PIL ImageFont object
+        char: Character to check
+        expected: Expected shape count
+
+    Returns:
+        Tuple of (is_ok, actual_count)
+    """
+    from scipy import ndimage
+
+    try:
+        bbox = pil_font.getbbox(char)
+        if not bbox:
+            return False, 0
+
+        width = bbox[2] - bbox[0] + 10
+        height = bbox[3] - bbox[1] + 10
+
+        img = Image.new('L', (width, height), 255)
+        draw = ImageDraw.Draw(img)
+        draw.text((5 - bbox[0], 5 - bbox[1]), char, fill=0, font=pil_font)
+
+        arr = np.array(img) < 128
+        _, num_shapes = ndimage.label(arr)
+        return num_shapes == expected, num_shapes
+    except Exception:
+        return False, 0
+
+
 @app.route('/api/check-connected/<int:font_id>')
 def api_check_connected(font_id):
     """Check if font renders text with appropriate shape count.
@@ -4211,8 +4898,6 @@ def api_check_connected(font_id):
     Returns shape count for "Hello World" - should be 10-15 for normal fonts.
     < 10 means connected/cursive, > 15 means overly decorative.
     """
-    from scipy import ndimage
-
     db = get_db()
     font = db.execute("SELECT file_path FROM fonts WHERE id = ?", (font_id,)).fetchone()
     db.close()
@@ -4220,80 +4905,29 @@ def api_check_connected(font_id):
         return jsonify(error="Font not found"), 404
 
     font_path = resolve_font_path(font['file_path'])
-    text = "Hello World"  # 10 letters
 
-    import os
     if not os.path.exists(font_path):
         return jsonify(error="Font file missing"), 404
 
     try:
-        from PIL import Image, ImageDraw, ImageFont
-
         font_size = 60
         try:
             pil_font = ImageFont.truetype(font_path, font_size)
         except Exception as e:
             return jsonify(error=f"Can't load font: {e}"), 500
-        bbox = pil_font.getbbox(text)
-        if not bbox:
+
+        # Render and analyze "Hello World"
+        arr, width, height = _render_text_for_analysis(pil_font, "Hello World")
+        if arr is None:
             return jsonify(error="Could not render"), 500
 
-        width = bbox[2] - bbox[0] + 20
-        height = bbox[3] - bbox[1] + 20
+        num_shapes, max_width_pct, _ = _analyze_shape_metrics(arr, width)
 
-        img = Image.new('L', (width, height), 255)
-        draw = ImageDraw.Draw(img)
-        draw.text((10 - bbox[0], 10 - bbox[1]), text, fill=0, font=pil_font)
+        # Check for holes in letter "l"
+        l_has_hole = _check_char_holes(pil_font, 'l')
 
-        # Count connected components
-        arr = np.array(img) < 128
-        labeled, num_shapes = ndimage.label(arr)
-
-        # Check width of largest component (cursive detection)
-        max_width_pct = 0
-        if num_shapes > 0:
-            for i in range(1, num_shapes + 1):
-                component = (labeled == i)
-                cols = np.any(component, axis=0)
-                comp_width = np.sum(cols)
-                width_pct = comp_width / width
-                if width_pct > max_width_pct:
-                    max_width_pct = width_pct
-
-        # Check for holes in letter "l" (cursive fonts have loops)
-        l_has_hole = False
-        try:
-            l_bbox = pil_font.getbbox('l')
-            if l_bbox:
-                l_width = l_bbox[2] - l_bbox[0] + 10
-                l_height = l_bbox[3] - l_bbox[1] + 10
-                l_img = Image.new('L', (l_width, l_height), 255)
-                l_draw = ImageDraw.Draw(l_img)
-                l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), 'l', fill=0, font=pil_font)
-                l_arr = np.array(l_img) < 128
-                # Fill holes and compare
-                filled = ndimage.binary_fill_holes(l_arr)
-                holes = filled & ~l_arr
-                l_has_hole = bool(np.any(holes))
-        except:
-            pass
-
-        # Check for "!" glyph - should have exactly 2 components (dot + line)
-        exclaim_ok = False
-        exclaim_shapes = 0
-        try:
-            e_bbox = pil_font.getbbox('!')
-            if e_bbox:
-                e_width = e_bbox[2] - e_bbox[0] + 10
-                e_height = e_bbox[3] - e_bbox[1] + 10
-                e_img = Image.new('L', (e_width, e_height), 255)
-                e_draw = ImageDraw.Draw(e_img)
-                e_draw.text((5 - e_bbox[0], 5 - e_bbox[1]), '!', fill=0, font=pil_font)
-                e_arr = np.array(e_img) < 128
-                _, exclaim_shapes = ndimage.label(e_arr)
-                exclaim_ok = exclaim_shapes == 2
-        except:
-            pass
+        # Check for "!" glyph - should have exactly 2 components
+        exclaim_ok, exclaim_shapes = _check_char_shape_count(pil_font, '!', 2)
 
         # Check for lowercase/uppercase case mismatches
         case_mismatches = check_case_mismatch(font_path)
@@ -4326,8 +4960,6 @@ def api_check_connected(font_id):
 @app.route('/api/reject-connected', methods=['POST'])
 def api_reject_connected():
     """Check all fonts and reject those with bad shape counts (< 10 or > 15 shapes in 'Hello World')."""
-    from scipy import ndimage
-
     db = get_db()
     # Get non-rejected fonts (no entry in font_removals with reason_id 8)
     fonts = db.execute("""
@@ -4342,71 +4974,23 @@ def api_reject_connected():
 
     for font in fonts:
         font_path = resolve_font_path(font['file_path'])
-        text = "Hello World"
 
         try:
-            from PIL import Image, ImageDraw, ImageFont
-
             font_size = 60
             pil_font = ImageFont.truetype(font_path, font_size)
-            bbox = pil_font.getbbox(text)
-            if not bbox:
+
+            # Render and analyze "Hello World"
+            arr, width, height = _render_text_for_analysis(pil_font, "Hello World")
+            if arr is None:
                 continue
 
-            width = bbox[2] - bbox[0] + 20
-            height = bbox[3] - bbox[1] + 20
-
-            img = Image.new('L', (width, height), 255)
-            draw = ImageDraw.Draw(img)
-            draw.text((10 - bbox[0], 10 - bbox[1]), text, fill=0, font=pil_font)
-
-            arr = np.array(img) < 128
-            labeled, num_shapes = ndimage.label(arr)
-
-            # Check width of largest component
-            max_width_pct = 0
-            if num_shapes > 0:
-                for i in range(1, num_shapes + 1):
-                    component = (labeled == i)
-                    cols = np.any(component, axis=0)
-                    comp_width = np.sum(cols)
-                    width_pct = comp_width / width
-                    if width_pct > max_width_pct:
-                        max_width_pct = width_pct
+            num_shapes, max_width_pct, _ = _analyze_shape_metrics(arr, width)
 
             # Check for holes in letter "l"
-            l_has_hole = False
-            try:
-                l_bbox = pil_font.getbbox('l')
-                if l_bbox:
-                    l_width = l_bbox[2] - l_bbox[0] + 10
-                    l_height = l_bbox[3] - l_bbox[1] + 10
-                    l_img = Image.new('L', (l_width, l_height), 255)
-                    l_draw = ImageDraw.Draw(l_img)
-                    l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), 'l', fill=0, font=pil_font)
-                    l_arr = np.array(l_img) < 128
-                    filled = ndimage.binary_fill_holes(l_arr)
-                    holes = filled & ~l_arr
-                    l_has_hole = bool(np.any(holes))
-            except:
-                pass
+            l_has_hole = _check_char_holes(pil_font, 'l')
 
             # Check for "!" glyph - should have exactly 2 components
-            exclaim_ok = False
-            exclaim_shapes = 0
-            try:
-                e_bbox = pil_font.getbbox('!')
-                if e_bbox:
-                    e_width = e_bbox[2] - e_bbox[0] + 10
-                    e_height = e_bbox[3] - e_bbox[1] + 10
-                    e_img = Image.new('L', (e_width, e_height), 255)
-                    e_draw = ImageDraw.Draw(e_img)
-                    e_draw.text((5 - e_bbox[0], 5 - e_bbox[1]), '!', fill=0, font=pil_font)
-                    e_arr = np.array(e_img) < 128
-                    _, exclaim_shapes = ndimage.label(e_arr)
-                    exclaim_ok = exclaim_shapes == 2
-            except:
-                pass
+            exclaim_ok, exclaim_shapes = _check_char_shape_count(pil_font, '!', 2)
 
             # Check for case mismatches (lowercase = uppercase)
             case_mismatches = check_case_mismatch(font_path)
@@ -5522,15 +6106,15 @@ def api_center_borders(font_id):
     return jsonify(strokes=result)
 
 
-def _analyze_skeleton(mask):
-    """Skeletonize a mask and return adjacency, junction clusters, and endpoints."""
-    skel = skeletonize(mask)
-    ys, xs = np.where(skel)
-    skel_set = set(zip(xs.tolist(), ys.tolist()))
-    if not skel_set:
-        return None
+def _build_skeleton_adjacency(skel_set):
+    """Build 8-connected adjacency graph from skeleton pixel set.
 
-    # Build adjacency (8-connected)
+    Args:
+        skel_set: Set of (x, y) skeleton pixel coordinates
+
+    Returns:
+        defaultdict mapping each pixel to list of neighboring skeleton pixels
+    """
     adj = defaultdict(list)
     for (x, y) in skel_set:
         for dx in [-1, 0, 1]:
@@ -5540,33 +6124,21 @@ def _analyze_skeleton(mask):
                 n = (x + dx, y + dy)
                 if n in skel_set:
                     adj[(x, y)].append(n)
+    return adj
 
-    # Cluster adjacent junction pixels into single logical junctions
-    junction_pixels = set(p for p in skel_set if len(adj[p]) >= 3)
-    junction_clusters = []  # list of sets
-    assigned = {}  # pixel -> cluster_index
-    for jp in junction_pixels:
-        if jp in assigned:
-            continue
-        cluster = set()
-        queue = [jp]
-        while queue:
-            p = queue.pop()
-            if p in cluster:
-                continue
-            cluster.add(p)
-            assigned[p] = len(junction_clusters)
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    if dx == 0 and dy == 0:
-                        continue
-                    n = (p[0] + dx, p[1] + dy)
-                    if n in junction_pixels and n not in cluster:
-                        queue.append(n)
-        junction_clusters.append(cluster)
 
-    # Merge nearby junction clusters whose centroids are within merge_dist
-    merge_dist = 12
+def _merge_junction_clusters(junction_clusters, junction_pixels, adj, assigned, merge_dist=12):
+    """Merge nearby junction clusters whose centroids are within merge_dist.
+
+    Modifies junction_clusters, junction_pixels, and assigned in place.
+
+    Args:
+        junction_clusters: List of sets, each set containing junction pixel coordinates
+        junction_pixels: Set of all junction pixel coordinates
+        adj: Adjacency graph from _build_skeleton_adjacency
+        assigned: Dict mapping pixel -> cluster_index
+        merge_dist: Maximum distance between cluster centroids to trigger merge
+    """
     merged_flag = True
     while merged_flag:
         merged_flag = False
@@ -5583,7 +6155,6 @@ def _analyze_skeleton(mask):
                 if (dx * dx + dy * dy) ** 0.5 < merge_dist:
                     # Merge j into i, also absorb bridging skeleton pixels
                     # BFS from ci to find shortest path to any pixel in cj
-                    from collections import deque
                     bfs_q = deque()
                     bfs_parent = {}
                     for p in ci:
@@ -5620,6 +6191,45 @@ def _analyze_skeleton(mask):
             if merged_flag:
                 break
 
+
+def _analyze_skeleton(mask):
+    """Skeletonize a mask and return adjacency, junction clusters, and endpoints."""
+    skel = skeletonize(mask)
+    ys, xs = np.where(skel)
+    skel_set = set(zip(xs.tolist(), ys.tolist()))
+    if not skel_set:
+        return None
+
+    # Build adjacency (8-connected)
+    adj = _build_skeleton_adjacency(skel_set)
+
+    # Cluster adjacent junction pixels into single logical junctions
+    junction_pixels = set(p for p in skel_set if len(adj[p]) >= 3)
+    junction_clusters = []  # list of sets
+    assigned = {}  # pixel -> cluster_index
+    for jp in junction_pixels:
+        if jp in assigned:
+            continue
+        cluster = set()
+        queue = [jp]
+        while queue:
+            p = queue.pop()
+            if p in cluster:
+                continue
+            cluster.add(p)
+            assigned[p] = len(junction_clusters)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    n = (p[0] + dx, p[1] + dy)
+                    if n in junction_pixels and n not in cluster:
+                        queue.append(n)
+        junction_clusters.append(cluster)
+
+    # Merge nearby junction clusters
+    _merge_junction_clusters(junction_clusters, junction_pixels, adj, assigned)
+
     endpoints = set(p for p in skel_set if len(adj[p]) == 1)
 
     return {
@@ -5632,56 +6242,57 @@ def _analyze_skeleton(mask):
     }
 
 
-def skeleton_detect_markers(mask, merge_dist=12):
-    """Detect vertex (junction) and termination (endpoint) markers from skeleton.
+def _merge_nearby_points(points, threshold):
+    """Merge nearby points by averaging their positions.
 
-    Vertices = centroids of junction clusters (where 3+ branches meet).
-    Terminations = skeleton endpoints (degree 1 pixels).
-    Nearby vertices are merged. Terminations that fall inside a junction
-    cluster are removed (they're part of the junction, not real endpoints).
+    Args:
+        points: List of [x, y] points
+        threshold: Distance threshold for merging
+
+    Returns:
+        Modified list with nearby points merged
     """
-    info = _analyze_skeleton(mask)
-    if not info:
-        return []
-
-    adj = info['adj']
-    endpoints = info['endpoints']
-    junction_pixels = info['junction_pixels']
-
-    # Vertices: centroid of each junction cluster
-    vertices = []
-    for cluster in info['junction_clusters']:
-        cx = sum(p[0] for p in cluster) / len(cluster)
-        cy = sum(p[1] for p in cluster) / len(cluster)
-        vertices.append([cx, cy])
-
-    # Merge nearby vertices
     merged = True
     while merged:
         merged = False
-        for i in range(len(vertices)):
-            for j in range(i + 1, len(vertices)):
-                dx = vertices[i][0] - vertices[j][0]
-                dy = vertices[i][1] - vertices[j][1]
-                if (dx * dx + dy * dy) ** 0.5 < merge_dist:
-                    vertices[i] = [(vertices[i][0] + vertices[j][0]) / 2,
-                                   (vertices[i][1] + vertices[j][1]) / 2]
-                    vertices.pop(j)
+        for i in range(len(points)):
+            for j in range(i + 1, len(points)):
+                dx = points[i][0] - points[j][0]
+                dy = points[i][1] - points[j][1]
+                if (dx * dx + dy * dy) ** 0.5 < threshold:
+                    points[i] = [(points[i][0] + points[j][0]) / 2,
+                                 (points[i][1] + points[j][1]) / 2]
+                    points.pop(j)
                     merged = True
                     break
             if merged:
                 break
+    return points
 
-    # Classify junction clusters as vertex vs intersection.
-    # A vertex has a convergence stub: a short skeleton path from the
-    # junction to a nearby endpoint, meaning strokes converge to a point
-    # (e.g. apex of A).  The vertex marker moves to the stub tip.
-    # An intersection has no convergence stub: strokes cross through it
-    # (e.g. where A's crossbar meets its legs).
-    assigned = info['assigned']
+
+def _classify_junctions_as_vertices(endpoints, junction_clusters, junction_pixels, adj, assigned, vertices):
+    """Classify junction clusters as vertex vs intersection based on convergence stubs.
+
+    A vertex has a convergence stub: a short skeleton path from the junction to a
+    nearby endpoint, meaning strokes converge to a point (e.g. apex of A).
+    An intersection has no convergence stub: strokes cross through it.
+
+    Args:
+        endpoints: Set of endpoint pixels
+        junction_clusters: List of junction cluster pixel sets
+        junction_pixels: Set of all junction pixels
+        adj: Adjacency graph
+        assigned: Dict mapping pixel -> cluster_index
+        vertices: List of [x, y] vertex positions (will be modified)
+
+    Returns:
+        Tuple of (is_vertex_flags, absorbed_endpoints) where:
+        - is_vertex_flags is list of bool for each junction cluster
+        - absorbed_endpoints is set of endpoints that were used as convergence stubs
+    """
     stub_max_len = 18  # convergence stubs are short artifacts, not real strokes
     absorbed_endpoints = set()
-    is_vertex = [False] * len(info['junction_clusters'])
+    is_vertex = [False] * len(junction_clusters)
 
     for (ex, ey) in endpoints:
         if (ex, ey) in junction_pixels:
@@ -5705,8 +6316,9 @@ def skeleton_detect_markers(mask, merge_dist=12):
             prev, current = current, nxt
         if reached_cluster < 0:
             continue
+
         # Collect direction vectors of OTHER branches leaving this cluster
-        cluster = info['junction_clusters'][reached_cluster]
+        cluster = junction_clusters[reached_cluster]
         path_set = set(path)
         branch_dirs = []
         for cp in cluster:
@@ -5730,8 +6342,7 @@ def skeleton_detect_markers(mask, merge_dist=12):
             continue
 
         # Check if any two branches form a pass-through (roughly opposite
-        # directions, dot < -0.5).  If so, strokes cross here → intersection,
-        # not a convergence vertex.  Threshold -0.5 corresponds to ~120° apart.
+        # directions, dot < -0.5).  Threshold -0.5 corresponds to ~120° apart.
         is_passthrough = False
         for i in range(len(branch_dirs)):
             for j in range(i + 1, len(branch_dirs)):
@@ -5743,17 +6354,14 @@ def skeleton_detect_markers(mask, merge_dist=12):
             if is_passthrough:
                 break
 
-        # Also check convergence: the stub must be opposite ALL branches
-        # (all branches fan out from the junction on the opposite side of
-        # the stub tip).  If the stub aligns with one branch but not others,
-        # it's just extending that branch at a corner, not converging.
-        cluster = info['junction_clusters'][reached_cluster]
+        # Check convergence: the stub must be opposite ALL branches
         ccx = sum(p[0] for p in cluster) / len(cluster)
         ccy = sum(p[1] for p in cluster) / len(cluster)
         sdx, sdy = ex - ccx, ey - ccy
         sl = (sdx * sdx + sdy * sdy) ** 0.5
         if sl > 0.01:
-            sdx /= sl; sdy /= sl
+            sdx /= sl
+            sdy /= sl
         all_branches_opposite = True
         for bd in branch_dirs:
             if sdx * bd[0] + sdy * bd[1] >= -0.5:
@@ -5761,15 +6369,49 @@ def skeleton_detect_markers(mask, merge_dist=12):
                 break
 
         if is_passthrough or not all_branches_opposite:
-            # Not a convergence vertex: either strokes pass through, or
-            # the stub only opposes some branches (corner, not convergence).
+            # Not a convergence vertex
             absorbed_endpoints.add((ex, ey))
             continue
 
-        # Branches converge (no pass-through pair, all opposite stub) → vertex
+        # Branches converge → vertex
         is_vertex[reached_cluster] = True
         vertices[reached_cluster] = [float(ex), float(ey)]
         absorbed_endpoints.add((ex, ey))
+
+    return is_vertex, absorbed_endpoints
+
+
+def skeleton_detect_markers(mask, merge_dist=12):
+    """Detect vertex (junction) and termination (endpoint) markers from skeleton.
+
+    Vertices = centroids of junction clusters (where 3+ branches meet).
+    Terminations = skeleton endpoints (degree 1 pixels).
+    Nearby vertices are merged. Terminations that fall inside a junction
+    cluster are removed (they're part of the junction, not real endpoints).
+    """
+    info = _analyze_skeleton(mask)
+    if not info:
+        return []
+
+    adj = info['adj']
+    endpoints = info['endpoints']
+    junction_pixels = info['junction_pixels']
+    junction_clusters = info['junction_clusters']
+    assigned = info['assigned']
+
+    # Vertices: centroid of each junction cluster
+    vertices = []
+    for cluster in junction_clusters:
+        cx = sum(p[0] for p in cluster) / len(cluster)
+        cy = sum(p[1] for p in cluster) / len(cluster)
+        vertices.append([cx, cy])
+
+    # Merge nearby vertices
+    _merge_nearby_points(vertices, merge_dist)
+
+    # Classify junction clusters as vertex vs intersection
+    is_vertex, absorbed_endpoints = _classify_junctions_as_vertices(
+        endpoints, junction_clusters, junction_pixels, adj, assigned, vertices)
 
     # Keep terminations that aren't inside a junction cluster, aren't
     # too close to a vertex, and weren't absorbed as convergence stubs
@@ -5791,22 +6433,8 @@ def skeleton_detect_markers(mask, merge_dist=12):
         if not too_close:
             terminations.append([float(x), float(y)])
 
-    # Merge terminations that are very close to each other (within 5px)
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(terminations)):
-            for j in range(i + 1, len(terminations)):
-                dx = terminations[i][0] - terminations[j][0]
-                dy = terminations[i][1] - terminations[j][1]
-                if (dx * dx + dy * dy) ** 0.5 < 5:
-                    terminations[i] = [(terminations[i][0] + terminations[j][0]) / 2,
-                                       (terminations[i][1] + terminations[j][1]) / 2]
-                    terminations.pop(j)
-                    merged = True
-                    break
-            if merged:
-                break
+    # Merge terminations that are very close to each other
+    _merge_nearby_points(terminations, 5)
 
     markers = []
     for i, v in enumerate(vertices):
@@ -5818,192 +6446,163 @@ def skeleton_detect_markers(mask, merge_dist=12):
     return markers
 
 
-def skeleton_to_strokes(mask, min_stroke_len=5):
-    """Extract stroke paths from a glyph mask via skeletonization."""
-    info = _analyze_skeleton(mask)
-    if not info:
-        return []
+# ============================================================================
+# Helper functions for skeleton_to_strokes (moved from nested to module level)
+# ============================================================================
 
-    skel_set = info['skel_set']
-    adj = info['adj']
-    junction_pixels = info['junction_pixels']
-    junction_clusters = info['junction_clusters']
-    assigned = info['assigned']
-    endpoints = info['endpoints']
+def _seg_dir(seg, from_end, n=8):
+    """Direction vector at one end of a segment (skip junction pixels)."""
+    if from_end:
+        pts = seg[-min(n, len(seg)):]
+    else:
+        pts = seg[:min(n, len(seg))][::-1]
+    dx = pts[-1][0] - pts[0][0]
+    dy = pts[-1][1] - pts[0][1]
+    length = (dx * dx + dy * dy) ** 0.5
+    return (dx / length, dy / length) if length > 0.01 else (0, 0)
 
-    # For tracing, all junction cluster pixels are stop points
-    stop_set = endpoints | junction_pixels
 
-    visited_edges = set()
-    raw_strokes = []
+def _angle(d1, d2):
+    """Angle between two direction vectors."""
+    dot = d1[0] * d2[0] + d1[1] * d2[1]
+    return np.arccos(max(-1.0, min(1.0, dot)))
 
-    def trace(start, neighbor):
-        edge = (min(start, neighbor), max(start, neighbor))
-        if edge in visited_edges:
-            return None
-        visited_edges.add(edge)
-        path = [start, neighbor]
-        current, prev = neighbor, start
-        while True:
-            if current in stop_set and len(path) > 2:
-                break
-            neighbors = [n for n in adj[current] if n != prev]
-            # Filter to unvisited edges
-            candidates = []
-            for n in neighbors:
-                e = (min(current, n), max(current, n))
-                if e not in visited_edges:
-                    candidates.append((n, e))
-            if not candidates:
-                break
-            # Pick the neighbor that continues straightest (least direction
-            # change from prev→current to current→next).
-            if len(candidates) == 1:
-                next_pt, next_edge = candidates[0]
-            else:
-                # Direction of travel: use last few path points for stability
-                n_look = min(4, len(path))
-                dx_in = current[0] - path[-n_look][0]
-                dy_in = current[1] - path[-n_look][1]
-                len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
-                if len_in > 0.01:
-                    dx_in /= len_in
-                    dy_in /= len_in
-                best_dot = -2
-                next_pt, next_edge = candidates[0]
-                for n, e in candidates:
-                    dx_out = n[0] - current[0]
-                    dy_out = n[1] - current[1]
-                    len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
-                    if len_out > 0.01:
-                        dot = (dx_in * dx_out + dy_in * dy_out) / len_out
-                    else:
-                        dot = 0
-                    if dot > best_dot:
-                        best_dot = dot
-                        next_pt, next_edge = n, e
-            visited_edges.add(next_edge)
-            path.append(next_pt)
-            prev, current = current, next_pt
-        return path
 
-    # Trace from endpoints first, then junction pixels
-    for start in sorted(endpoints):
-        for neighbor in adj[start]:
-            p = trace(start, neighbor)
-            if p and len(p) >= 2:
-                raw_strokes.append(p)
+def _endpoint_cluster(stroke, from_end, assigned):
+    """Which junction cluster does this stroke endpoint belong to?"""
+    pt = tuple(stroke[-1]) if from_end else tuple(stroke[0])
+    return assigned.get(pt, -1)
 
-    for start in sorted(junction_pixels):
-        for neighbor in adj[start]:
-            p = trace(start, neighbor)
-            if p and len(p) >= 2:
-                raw_strokes.append(p)
 
-    # Filter tiny stubs
-    strokes = [s for s in raw_strokes if len(s) >= min_stroke_len]
-
-    # --- Merge strokes through junction clusters ---
-    # For each junction cluster, find pairs of strokes whose endpoints
-    # land in that cluster and whose directions align (continuation).
-
-    def _seg_dir(seg, from_end, n=8):
-        """Direction vector at one end of a segment (skip junction pixels)."""
-        if from_end:
-            pts = seg[-min(n, len(seg)):]
+def _trace_skeleton_segment(start, neighbor, adj, stop_set, visited_edges):
+    """Trace a skeleton path from start through neighbor until a stop point."""
+    edge = (min(start, neighbor), max(start, neighbor))
+    if edge in visited_edges:
+        return None
+    visited_edges.add(edge)
+    path = [start, neighbor]
+    current, prev = neighbor, start
+    while True:
+        if current in stop_set and len(path) > 2:
+            break
+        neighbors = [n for n in adj[current] if n != prev]
+        # Filter to unvisited edges
+        candidates = []
+        for n in neighbors:
+            e = (min(current, n), max(current, n))
+            if e not in visited_edges:
+                candidates.append((n, e))
+        if not candidates:
+            break
+        # Pick the neighbor that continues straightest
+        if len(candidates) == 1:
+            next_pt, next_edge = candidates[0]
         else:
-            pts = seg[:min(n, len(seg))][::-1]
-        dx = pts[-1][0] - pts[0][0]
-        dy = pts[-1][1] - pts[0][1]
-        length = (dx * dx + dy * dy) ** 0.5
-        return (dx / length, dy / length) if length > 0.01 else (0, 0)
+            # Direction of travel: use last few path points for stability
+            n_look = min(4, len(path))
+            dx_in = current[0] - path[-n_look][0]
+            dy_in = current[1] - path[-n_look][1]
+            len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
+            if len_in > 0.01:
+                dx_in /= len_in
+                dy_in /= len_in
+            best_dot = -2
+            next_pt, next_edge = candidates[0]
+            for n, e in candidates:
+                dx_out = n[0] - current[0]
+                dy_out = n[1] - current[1]
+                len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
+                if len_out > 0.01:
+                    dot = (dx_in * dx_out + dy_in * dy_out) / len_out
+                else:
+                    dot = 0
+                if dot > best_dot:
+                    best_dot = dot
+                    next_pt, next_edge = n, e
+        visited_edges.add(next_edge)
+        path.append(next_pt)
+        prev, current = current, next_pt
+    return path
 
-    def _angle(d1, d2):
-        dot = d1[0] * d2[0] + d1[1] * d2[1]
-        return np.arccos(max(-1.0, min(1.0, dot)))
 
-    def _endpoint_cluster(stroke, from_end):
-        """Which junction cluster does this stroke endpoint belong to?"""
-        pt = tuple(stroke[-1]) if from_end else tuple(stroke[0])
-        return assigned.get(pt, -1)
+def _run_merge_pass(strokes, assigned, min_len=0, max_angle=np.pi/4, max_ratio=0):
+    """Merge strokes through junction clusters by direction alignment.
 
-    def _run_merge_pass(strokes, min_len=0, max_angle=np.pi/4,
-                        max_ratio=0):
-        """Merge strokes through junction clusters by direction alignment.
-        max_ratio > 0 means reject pairs where max(len)/min(len) > ratio.
-        """
-        changed = True
-        while changed:
-            changed = False
-            cluster_map = defaultdict(list)
-            for si, s in enumerate(strokes):
-                sc = _endpoint_cluster(s, False)
-                if sc >= 0:
-                    cluster_map[sc].append((si, 'start'))
-                ec = _endpoint_cluster(s, True)
-                if ec >= 0:
-                    cluster_map[ec].append((si, 'end'))
-
-            best_score = float('inf')
-            best_merge = None
-            for cid, entries in cluster_map.items():
-                if len(entries) < 2:
-                    continue
-                for ai in range(len(entries)):
-                    si, side_i = entries[ai]
-                    dir_i = _seg_dir(strokes[si], from_end=(side_i == 'end'))
-                    for bi in range(ai + 1, len(entries)):
-                        sj, side_j = entries[bi]
-                        if sj == si:
-                            continue
-                        li, lj = len(strokes[si]), len(strokes[sj])
-                        if min(li, lj) < min_len:
-                            continue
-                        if max_ratio > 0 and max(li, lj) / max(min(li, lj), 1) > max_ratio:
-                            continue
-                        # Don't merge with a loop stroke (both endpoints at
-                        # the same junction cluster)
-                        sci = _endpoint_cluster(strokes[si], False)
-                        eci = _endpoint_cluster(strokes[si], True)
-                        scj = _endpoint_cluster(strokes[sj], False)
-                        ecj = _endpoint_cluster(strokes[sj], True)
-                        if sci >= 0 and sci == eci:
-                            continue
-                        if scj >= 0 and scj == ecj:
-                            continue
-                        dir_j = _seg_dir(strokes[sj], from_end=(side_j == 'end'))
-                        angle = np.pi - _angle(dir_i, dir_j)
-                        if angle < max_angle and angle < best_score:
-                            best_score = angle
-                            best_merge = (si, side_i, sj, side_j)
-
-            if best_merge:
-                si, side_i, sj, side_j = best_merge
-                seg_i = strokes[si] if side_i == 'end' else list(reversed(strokes[si]))
-                seg_j = strokes[sj] if side_j == 'start' else list(reversed(strokes[sj]))
-                merged_stroke = seg_i + seg_j[1:]
-                hi, lo = max(si, sj), min(si, sj)
-                strokes.pop(hi)
-                strokes.pop(lo)
-                strokes.append(merged_stroke)
-                changed = True
-        return strokes
-
-    # Pass 1: T-junction merge.  At junctions with 3+ strokes, if the
-    # shortest stroke is a cross-branch (both endpoints in junction
-    # clusters) and much shorter than the main branches, merge the two
-    # longest with a relaxed angle threshold.  This handles letters like
-    # B where bumps approach the pinch junction from perpendicular
-    # directions but should form the "3" shape.
+    max_ratio > 0 means reject pairs where max(len)/min(len) > ratio.
+    """
     changed = True
     while changed:
         changed = False
         cluster_map = defaultdict(list)
         for si, s in enumerate(strokes):
-            sc = _endpoint_cluster(s, False)
+            sc = _endpoint_cluster(s, False, assigned)
             if sc >= 0:
                 cluster_map[sc].append((si, 'start'))
-            ec = _endpoint_cluster(s, True)
+            ec = _endpoint_cluster(s, True, assigned)
+            if ec >= 0:
+                cluster_map[ec].append((si, 'end'))
+
+        best_score = float('inf')
+        best_merge = None
+        for cid, entries in cluster_map.items():
+            if len(entries) < 2:
+                continue
+            for ai in range(len(entries)):
+                si, side_i = entries[ai]
+                dir_i = _seg_dir(strokes[si], from_end=(side_i == 'end'))
+                for bi in range(ai + 1, len(entries)):
+                    sj, side_j = entries[bi]
+                    if sj == si:
+                        continue
+                    li, lj = len(strokes[si]), len(strokes[sj])
+                    if min(li, lj) < min_len:
+                        continue
+                    if max_ratio > 0 and max(li, lj) / max(min(li, lj), 1) > max_ratio:
+                        continue
+                    # Don't merge with a loop stroke (both endpoints at same cluster)
+                    sci = _endpoint_cluster(strokes[si], False, assigned)
+                    eci = _endpoint_cluster(strokes[si], True, assigned)
+                    scj = _endpoint_cluster(strokes[sj], False, assigned)
+                    ecj = _endpoint_cluster(strokes[sj], True, assigned)
+                    if sci >= 0 and sci == eci:
+                        continue
+                    if scj >= 0 and scj == ecj:
+                        continue
+                    dir_j = _seg_dir(strokes[sj], from_end=(side_j == 'end'))
+                    angle = np.pi - _angle(dir_i, dir_j)
+                    if angle < max_angle and angle < best_score:
+                        best_score = angle
+                        best_merge = (si, side_i, sj, side_j)
+
+        if best_merge:
+            si, side_i, sj, side_j = best_merge
+            seg_i = strokes[si] if side_i == 'end' else list(reversed(strokes[si]))
+            seg_j = strokes[sj] if side_j == 'start' else list(reversed(strokes[sj]))
+            merged_stroke = seg_i + seg_j[1:]
+            hi, lo = max(si, sj), min(si, sj)
+            strokes.pop(hi)
+            strokes.pop(lo)
+            strokes.append(merged_stroke)
+            changed = True
+    return strokes
+
+
+def _merge_t_junctions(strokes, junction_clusters, assigned):
+    """Merge strokes at T-junctions where a short cross-branch connects two main branches.
+
+    At junctions with 3+ strokes, if the shortest stroke is a cross-branch (both endpoints
+    in junction clusters) and much shorter than the main branches, merge the two longest
+    with a relaxed angle threshold.
+    """
+    changed = True
+    while changed:
+        changed = False
+        cluster_map = defaultdict(list)
+        for si, s in enumerate(strokes):
+            sc = _endpoint_cluster(s, False, assigned)
+            if sc >= 0:
+                cluster_map[sc].append((si, 'start'))
+            ec = _endpoint_cluster(s, True, assigned)
             if ec >= 0:
                 cluster_map[ec].append((si, 'end'))
 
@@ -6016,8 +6615,8 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             shortest_stroke = strokes[shortest_idx]
             second_longest_len = len(strokes[entries_sorted[1][0]])
             # Shortest must be a cross-branch (both ends at junctions)
-            s_sc = _endpoint_cluster(shortest_stroke, False)
-            s_ec = _endpoint_cluster(shortest_stroke, True)
+            s_sc = _endpoint_cluster(shortest_stroke, False, assigned)
+            s_ec = _endpoint_cluster(shortest_stroke, True, assigned)
             if s_sc < 0 or s_ec < 0:
                 continue
             if len(shortest_stroke) >= second_longest_len * 0.4:
@@ -6028,8 +6627,8 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             if si == sj:
                 continue
             # Don't merge if result would be a loop
-            far_i = _endpoint_cluster(strokes[si], from_end=(side_i != 'end'))
-            far_j = _endpoint_cluster(strokes[sj], from_end=(side_j != 'end'))
+            far_i = _endpoint_cluster(strokes[si], from_end=(side_i != 'end'), assigned=assigned)
+            far_j = _endpoint_cluster(strokes[sj], from_end=(side_j != 'end'), assigned=assigned)
             if far_i >= 0 and far_i == far_j:
                 continue
             dir_i = _seg_dir(strokes[si], from_end=(side_i == 'end'))
@@ -6044,29 +6643,26 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                 strokes.pop(lo)
                 strokes.append(merged_stroke)
                 # Also remove the cross-branch (it's now redundant)
-                # Re-find it since indices shifted
                 for sk in range(len(strokes)):
                     s = strokes[sk]
-                    s_sc2 = _endpoint_cluster(s, False)
-                    s_ec2 = _endpoint_cluster(s, True)
+                    s_sc2 = _endpoint_cluster(s, False, assigned)
+                    s_ec2 = _endpoint_cluster(s, True, assigned)
                     if s_sc2 >= 0 and s_ec2 >= 0 and len(s) < second_longest_len * 0.4:
                         if s_sc2 == cid or s_ec2 == cid:
                             strokes.pop(sk)
                             break
                 changed = True
                 break
+    return strokes
 
-    # Pass 2: standard direction-based merge.
-    strokes = _run_merge_pass(strokes, min_len=0)
 
-    # --- Absorb convergence stubs ---
-    # A convergence stub is a short stroke with one endpoint in a
-    # junction cluster and the other end free (e.g. the pointed apex
-    # of letter A where a stub extends from the junction to the true
-    # geometric tip).  We extend every other stroke converging at that
-    # cluster along the stub path so each leg reaches the tip, then
-    # remove the stub entirely.
-    conv_threshold = 18
+def _absorb_convergence_stubs(strokes, junction_clusters, assigned, conv_threshold=18):
+    """Absorb short convergence stubs into longer strokes at junction clusters.
+
+    A convergence stub is a short stroke with one endpoint in a junction cluster
+    and the other end free (e.g. the pointed apex of letter A). Extends all other
+    strokes at the cluster toward the stub tip, then removes the stub.
+    """
     changed = True
     while changed:
         changed = False
@@ -6074,20 +6670,17 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             s = strokes[si]
             if len(s) < 2 or len(s) >= conv_threshold:
                 continue
-            sc = _endpoint_cluster(s, False)
-            ec = _endpoint_cluster(s, True)
+            sc = _endpoint_cluster(s, False, assigned)
+            ec = _endpoint_cluster(s, True, assigned)
 
             # One end in a junction cluster, other end free (or same cluster)
             if sc >= 0 and ec < 0:
                 cluster_id = sc
-                # stub_path: from cluster-end (start) toward free tip (end)
                 stub_path = list(s)
             elif ec >= 0 and sc < 0:
                 cluster_id = ec
-                # stub_path: from cluster-end (end) toward free tip (start)
                 stub_path = list(reversed(s))
             elif sc >= 0 and ec >= 0 and sc == ec:
-                # Both endpoints in same cluster
                 cluster_id = sc
                 cluster = junction_clusters[sc]
                 cx = sum(p[0] for p in cluster) / len(cluster)
@@ -6103,34 +6696,27 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             for sj in range(len(strokes)):
                 if sj == si:
                     continue
-                if _endpoint_cluster(strokes[sj], False) == cluster_id:
+                if _endpoint_cluster(strokes[sj], False, assigned) == cluster_id:
                     others_at_cluster += 1
-                if _endpoint_cluster(strokes[sj], True) == cluster_id:
+                if _endpoint_cluster(strokes[sj], True, assigned) == cluster_id:
                     others_at_cluster += 1
             if others_at_cluster < 2:
                 continue
 
-            # Extend every other stroke at this cluster toward the stub tip.
-            # Instead of appending the literal stub skeleton pixels (which
-            # create a vertical kink/"nipple"), extrapolate each leg's own
-            # direction to the tip's y (or x) level so the path stays smooth.
+            # Extend every other stroke at this cluster toward the stub tip
             stub_tip = stub_path[-1]
+            cluster = junction_clusters[cluster_id]
             for sj in range(len(strokes)):
                 if sj == si:
                     continue
                 s2 = strokes[sj]
-                at_end = _endpoint_cluster(s2, True) == cluster_id
-                at_start = (not at_end) and _endpoint_cluster(s2, False) == cluster_id
+                at_end = _endpoint_cluster(s2, True, assigned) == cluster_id
+                at_start = (not at_end) and _endpoint_cluster(s2, False, assigned) == cluster_id
                 if not at_end and not at_start:
                     continue
 
-                # Get the last few points of the leg before the junction
-                # cluster to determine its incoming direction. Skip any
-                # points that are inside the junction cluster since they
-                # don't reflect the leg's true direction.
-                cluster = junction_clusters[cluster_id]
+                # Get the last few points before the junction to determine direction
                 if at_end:
-                    # Walk backward from end, skip junction pixels
                     tail = []
                     for k in range(len(s2) - 1, -1, -1):
                         pt = tuple(s2[k]) if isinstance(s2[k], (list, tuple)) else s2[k]
@@ -6138,7 +6724,7 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                             break
                         if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
                             tail.insert(0, pt)
-                    leg_end = s2[-1]  # actual last point (in the cluster)
+                    leg_end = s2[-1]
                 else:
                     tail = []
                     for k in range(len(s2)):
@@ -6150,8 +6736,7 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                     tail = list(reversed(tail))
                     leg_end = s2[0]
 
-                # Use the direction from the pre-junction points toward
-                # the junction to extrapolate to the stub tip
+                # Use direction from pre-junction points to extrapolate to stub tip
                 if len(tail) >= 2:
                     dx = tail[-1][0] - tail[0][0]
                     dy = tail[-1][1] - tail[0][1]
@@ -6164,7 +6749,6 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                 steps = max(1, int(round(tip_dist)))
 
                 if leg_len > 0.01:
-                    # Extrapolate along the leg's direction, blending to tip
                     ux, uy = dx / leg_len, dy / leg_len
                     ext_pts = []
                     for k in range(1, steps + 1):
@@ -6190,11 +6774,15 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             strokes.pop(si)
             changed = True
             break
+    return strokes
 
-    # --- Absorb remaining short stubs into neighboring strokes ---
-    # Any stroke shorter than stub_threshold that touches a junction cluster
-    # gets appended to the longest stroke sharing that junction.
-    stub_threshold = 20
+
+def _absorb_junction_stubs(strokes, assigned, stub_threshold=20):
+    """Absorb short stubs into neighboring strokes at junction clusters.
+
+    Any stroke shorter than stub_threshold that touches a junction cluster
+    gets appended to the longest stroke sharing that junction.
+    """
     changed = True
     while changed:
         changed = False
@@ -6202,9 +6790,8 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            # Check which junction clusters this stub touches
-            sc = _endpoint_cluster(s, False)
-            ec = _endpoint_cluster(s, True)
+            sc = _endpoint_cluster(s, False, assigned)
+            ec = _endpoint_cluster(s, True, assigned)
             clusters_touching = set()
             if sc >= 0:
                 clusters_touching.add(sc)
@@ -6223,8 +6810,8 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                     if sj == si:
                         continue
                     s2 = strokes[sj]
-                    tc_start = _endpoint_cluster(s2, False)
-                    tc_end = _endpoint_cluster(s2, True)
+                    tc_start = _endpoint_cluster(s2, False, assigned)
+                    tc_end = _endpoint_cluster(s2, True, assigned)
                     if tc_start == cid and len(s2) > best_len:
                         best_target = sj
                         best_len = len(s2)
@@ -6246,11 +6833,15 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                 strokes.pop(si)
                 changed = True
                 break
+    return strokes
 
-    # --- Proximity-based stub absorption ---
-    # Any remaining short stroke whose endpoint is near a longer stroke's endpoint
-    # gets appended to that stroke.
-    prox_threshold = 20  # max pixel distance to absorb
+
+def _absorb_proximity_stubs(strokes, stub_threshold=20, prox_threshold=20):
+    """Absorb short stubs by proximity to longer stroke endpoints.
+
+    Any remaining short stroke whose endpoint is near a longer stroke's endpoint
+    gets appended to that stroke.
+    """
     changed = True
     while changed:
         changed = False
@@ -6258,7 +6849,6 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            # Try each endpoint of the stub
             best_dist = prox_threshold
             best_target = -1
             best_target_side = None
@@ -6286,10 +6876,15 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
                 strokes.pop(si)
                 changed = True
                 break
+    return strokes
 
-    # --- Remove orphaned short stubs ---
-    # Any stroke shorter than stub_threshold that has an endpoint at a
-    # junction cluster where no other stroke touches is an artifact.
+
+def _remove_orphan_stubs(strokes, assigned, stub_threshold=20):
+    """Remove orphaned short stubs that have no neighbors at their junction clusters.
+
+    Any stroke shorter than stub_threshold that has an endpoint at a junction cluster
+    where no other stroke touches is an artifact.
+    """
     changed = True
     while changed:
         changed = False
@@ -6297,25 +6892,76 @@ def skeleton_to_strokes(mask, min_stroke_len=5):
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            sc = _endpoint_cluster(s, False)
-            ec = _endpoint_cluster(s, True)
-            # Check if any other stroke shares a junction with this stub
+            sc = _endpoint_cluster(s, False, assigned)
+            ec = _endpoint_cluster(s, True, assigned)
             has_neighbor = False
             for sj in range(len(strokes)):
                 if sj == si:
                     continue
-                if sc >= 0 and (_endpoint_cluster(strokes[sj], False) == sc or
-                                _endpoint_cluster(strokes[sj], True) == sc):
+                if sc >= 0 and (_endpoint_cluster(strokes[sj], False, assigned) == sc or
+                                _endpoint_cluster(strokes[sj], True, assigned) == sc):
                     has_neighbor = True
                     break
-                if ec >= 0 and (_endpoint_cluster(strokes[sj], False) == ec or
-                                _endpoint_cluster(strokes[sj], True) == ec):
+                if ec >= 0 and (_endpoint_cluster(strokes[sj], False, assigned) == ec or
+                                _endpoint_cluster(strokes[sj], True, assigned) == ec):
                     has_neighbor = True
                     break
             if not has_neighbor:
                 strokes.pop(si)
                 changed = True
                 break
+    return strokes
+
+
+def skeleton_to_strokes(mask, min_stroke_len=5):
+    """Extract stroke paths from a glyph mask via skeletonization."""
+    info = _analyze_skeleton(mask)
+    if not info:
+        return []
+
+    adj = info['adj']
+    junction_pixels = info['junction_pixels']
+    junction_clusters = info['junction_clusters']
+    assigned = info['assigned']
+    endpoints = info['endpoints']
+
+    # For tracing, all junction cluster pixels are stop points
+    stop_set = endpoints | junction_pixels
+
+    # Trace initial strokes from endpoints and junction pixels
+    visited_edges = set()
+    raw_strokes = []
+    for start in sorted(endpoints):
+        for neighbor in adj[start]:
+            p = _trace_skeleton_segment(start, neighbor, adj, stop_set, visited_edges)
+            if p and len(p) >= 2:
+                raw_strokes.append(p)
+    for start in sorted(junction_pixels):
+        for neighbor in adj[start]:
+            p = _trace_skeleton_segment(start, neighbor, adj, stop_set, visited_edges)
+            if p and len(p) >= 2:
+                raw_strokes.append(p)
+
+    # Filter tiny stubs
+    strokes = [s for s in raw_strokes if len(s) >= min_stroke_len]
+
+    # Pass 1: T-junction merge
+    strokes = _merge_t_junctions(strokes, junction_clusters, assigned)
+
+    # Pass 2: standard direction-based merge
+    strokes = _run_merge_pass(strokes, assigned, min_len=0)
+
+    # Absorb convergence stubs
+    strokes = _absorb_convergence_stubs(strokes, junction_clusters, assigned)
+
+    # Absorb remaining short stubs into neighboring strokes
+    strokes = _absorb_junction_stubs(strokes, assigned)
+
+    # Proximity-based stub absorption
+    strokes = _absorb_proximity_stubs(strokes)
+
+    # Remove orphaned short stubs
+    strokes = _remove_orphan_stubs(strokes, assigned)
 
     # Convert to float coords
     return [[[float(x), float(y)] for x, y in s] for s in strokes]
@@ -6363,12 +7009,123 @@ def api_clear_shape_cache(font_id):
 
 
 @app.route('/api/optimize-stream/<int:font_id>', methods=['GET'])
+class OptimizationStreamState:
+    """Mutable state container for streaming optimization."""
+
+    def __init__(self, shape_types, slices, glyph_bbox, mask, bounds_lo, bounds_hi):
+        self.shape_types = shape_types
+        self.slices = slices
+        self.glyph_bbox = glyph_bbox
+        self.mask = mask
+        self.bounds_lo = bounds_lo
+        self.bounds_hi = bounds_hi
+        self.frame_num = 0
+        self.last_emit = 0.0
+        self.best_x = None
+        self.best_fun = float('inf')
+
+    def clamp(self, x):
+        return np.clip(x, self.bounds_lo, self.bounds_hi)
+
+    def update_best(self, x, fun):
+        if fun < self.best_fun:
+            self.best_x = x.copy()
+            self.best_fun = fun
+
+    def is_perfect(self):
+        return self.best_fun <= -0.99
+
+    def emit_frame(self, x, fun, phase=''):
+        """Build strokes from params and return SSE event JSON."""
+        import time as _time
+        x = self.clamp(x)
+        shapes = _param_vector_to_shapes(x, self.shape_types, self.slices, self.glyph_bbox)
+        stroke_list = []
+        for pts in shapes:
+            pl = [(float(p[0]), float(p[1])) for p in pts]
+            pl = _smooth_stroke(pl, sigma=2.0)
+            pl = _constrain_to_mask(pl, self.mask)
+            if len(pl) >= 2:
+                stroke_list.append([[round(px, 1), round(py, 1)] for px, py in pl])
+        self.frame_num += 1
+        self.last_emit = _time.monotonic()
+        return json.dumps({
+            'frame': self.frame_num,
+            'score': round(float(-fun), 4),
+            'phase': phase,
+            'strokes': stroke_list,
+        })
+
+    def emit_raw_frame(self, stroke_list, score, phase=''):
+        """Emit SSE event for raw strokes (not shape-param based)."""
+        import time as _time
+        self.frame_num += 1
+        self.last_emit = _time.monotonic()
+        return json.dumps({
+            'frame': self.frame_num,
+            'score': round(float(score), 4),
+            'phase': phase,
+            'strokes': stroke_list,
+        })
+
+
+def _stream_phase0_template_matching(font_path, char, state):
+    """Phase 0: Try DiffVG and affine template matching.
+
+    Args:
+        font_path: Resolved font path
+        char: Character to optimize
+        state: OptimizationStreamState
+
+    Yields:
+        SSE frame strings
+        Final yield is tuple (affine_result, done) where affine_result is (strokes, score) or None
+    """
+    affine_strokes_result = None
+
+    # Try DiffVG first
+    diffvg_result = _optimize_diffvg(font_path, char, 224)
+    if diffvg_result is not None:
+        dv_strokes, dv_score, _, _ = diffvg_result
+        if dv_strokes and dv_score > 0:
+            affine_strokes_result = (dv_strokes, dv_score)
+            yield f"data: {state.emit_raw_frame(dv_strokes, dv_score, 'diffvg')}\n\n"
+
+            if dv_score >= 0.85:
+                yield f"data: {state.emit_raw_frame(dv_strokes, dv_score, 'final')}\n\n"
+                yield f"data: {json.dumps({'done': True, 'score': round(dv_score, 4), 'frame': state.frame_num})}\n\n"
+                yield (affine_strokes_result, True)
+                return
+
+    # Also try affine
+    affine_result = _optimize_affine(font_path, char, 224)
+    if affine_result is not None:
+        affine_strokes, affine_score, _, _ = affine_result
+        affine_stroke_list = [[[round(float(x), 1), round(float(y), 1)] for x, y in s]
+                              for s in affine_strokes if len(s) >= 2]
+        if affine_stroke_list:
+            if affine_strokes_result and affine_strokes_result[1] >= affine_score:
+                yield f"data: {state.emit_raw_frame(affine_stroke_list, affine_score, 'affine template (DiffVG better)')}\n\n"
+            else:
+                affine_strokes_result = (affine_stroke_list, affine_score)
+                yield f"data: {state.emit_raw_frame(affine_stroke_list, affine_score, 'affine template')}\n\n"
+
+            if affine_strokes_result[1] >= 0.85:
+                best_strokes, best_score = affine_strokes_result
+                yield f"data: {state.emit_raw_frame(best_strokes, best_score, 'final')}\n\n"
+                yield f"data: {json.dumps({'done': True, 'score': round(best_score, 4), 'frame': state.frame_num})}\n\n"
+                yield (affine_strokes_result, True)
+                return
+
+    yield (affine_strokes_result, False)
+
+
 def api_optimize_stream(font_id):
     """SSE endpoint: streams optimization frames in real time.
 
-    Mirrors the full auto_fit_strokes 4-phase pipeline but yields frames
-    after every improvement or at regular intervals so the frontend can
-    show exactly what the optimizer is doing.
+    Mirrors the full auto_fit_strokes pipeline but yields frames
+    after every improvement so the frontend can show exactly what
+    the optimizer is doing.
 
     Each SSE event is JSON with:
       frame: int, score: float, phase: str, strokes: [[[x,y],...],...]
@@ -6394,38 +7151,28 @@ def api_optimize_stream(font_id):
             yield f"data: {json.dumps({'error': 'no template'})}\n\n"
             return
 
-        mask = render_glyph_mask(font_path, char, 224)
-        if mask is None:
-            yield f"data: {json.dumps({'error': 'no mask'})}\n\n"
+        # Setup using shared helper
+        setup = _setup_auto_fit(font_path, char, 224, templates)
+        if setup is None:
+            yield f"data: {json.dumps({'error': 'setup failed'})}\n\n"
             return
 
-        rows, cols = np.where(mask)
-        if len(rows) == 0:
-            yield f"data: {json.dumps({'error': 'empty mask'})}\n\n"
-            return
+        mask = setup['mask']
+        glyph_bbox = setup['glyph_bbox']
+        cloud = setup['cloud']
+        cloud_tree = setup['cloud_tree']
+        n_cloud = setup['n_cloud']
+        radius = setup['radius']
+        h, w = setup['h'], setup['w']
+        snap_yi, snap_xi = setup['snap_yi'], setup['snap_xi']
+        shape_types = setup['shape_types']
+        bounds = setup['bounds']
+        slices = setup['slices']
+        bounds_lo = setup['bounds_lo']
+        bounds_hi = setup['bounds_hi']
+        dist_map = setup['dist_map']
 
-        glyph_bbox = (float(cols.min()), float(rows.min()),
-                      float(cols.max()), float(rows.max()))
-        cloud = _make_point_cloud(mask, spacing=3)
-        if len(cloud) < 10:
-            yield f"data: {json.dumps({'error': 'cloud too small'})}\n\n"
-            return
-
-        cloud_tree = cKDTree(cloud)
-        n_cloud = len(cloud)
-        radius = _adaptive_radius(mask, spacing=3)
-        h, w = mask.shape
-        dist_map = distance_transform_edt(mask)
-        _, snap_indices = distance_transform_edt(~mask, return_indices=True)
-        snap_yi, snap_xi = snap_indices[0], snap_indices[1]
-
-        shape_types = [t['shape'] for t in templates]
-        bounds, slices = _get_param_bounds(templates)
-
-        x0 = []
-        for t in templates:
-            x0.extend(t['params'])
-        x0 = np.array(x0, dtype=float)
+        x0 = setup['x0'].copy()
 
         rel_path = font_path
         if rel_path.startswith(BASE_DIR):
@@ -6442,110 +7189,38 @@ def api_optimize_stream(font_id):
         joint_args = (shape_types, slices, glyph_bbox, cloud_tree, n_cloud,
                       radius, snap_yi, snap_xi, w, h, dist_map)
 
-        bounds_lo = np.array([b[0] for b in bounds])
-        bounds_hi = np.array([b[1] for b in bounds])
-
-        def _clamp(x):
-            return np.clip(x, bounds_lo, bounds_hi)
+        # Create state object
+        state = OptimizationStreamState(shape_types, slices, glyph_bbox, mask,
+                                        bounds_lo, bounds_hi)
 
         _t_start = _time.monotonic()
-        _TIME_BUDGET = 3600.0  # 1 hour max
+        _TIME_BUDGET = 3600.0
         _STALE_THRESHOLD = 0.001
         _STALE_CYCLES = 2
-        frame_num = [0]
-        last_emit = [0.0]
 
         def _elapsed():
             return _time.monotonic() - _t_start
 
-        def emit_frame(x, fun, phase=''):
-            """Build strokes from params and yield SSE event."""
-            x = _clamp(x)
-            shapes = _param_vector_to_shapes(x, shape_types, slices, glyph_bbox)
-            stroke_list = []
-            for pts in shapes:
-                pl = [(float(p[0]), float(p[1])) for p in pts]
-                pl = _smooth_stroke(pl, sigma=2.0)
-                pl = _constrain_to_mask(pl, mask)
-                if len(pl) >= 2:
-                    stroke_list.append([[round(px, 1), round(py, 1)]
-                                        for px, py in pl])
-            frame_num[0] += 1
-            last_emit[0] = _time.monotonic()
-            return json.dumps({
-                'frame': frame_num[0],
-                'score': round(float(-fun), 4),
-                'phase': phase,
-                'strokes': stroke_list,
-            })
-
-        def emit_raw_frame(stroke_list, score, phase=''):
-            """Emit SSE event for raw strokes (not shape-param based)."""
-            frame_num[0] += 1
-            last_emit[0] = _time.monotonic()
-            return json.dumps({
-                'frame': frame_num[0],
-                'score': round(float(score), 4),
-                'phase': phase,
-                'strokes': stroke_list,
-            })
-
-        # ---- Phase 0: Template + Affine + DiffVG optimisation ----
-        affine_strokes_result = None  # (stroke_list, score) if best Phase-0 result
-
-        # Try DiffVG first (gradient-based, typically better)
-        diffvg_result = _optimize_diffvg(font_path, char, 224)
-        if diffvg_result is not None:
-            dv_strokes, dv_score, _, _ = diffvg_result
-            if dv_strokes and dv_score > 0:
-                affine_strokes_result = (dv_strokes, dv_score)
-                yield f"data: {emit_raw_frame(dv_strokes, dv_score, 'diffvg')}\n\n"
-
-                if dv_score >= 0.85:
-                    yield f"data: {emit_raw_frame(dv_strokes, dv_score, 'final')}\n\n"
-                    yield f"data: {json.dumps({'done': True, 'score': round(dv_score, 4), 'frame': frame_num[0]})}\n\n"
+        # ---- Phase 0: Template matching ----
+        affine_strokes_result = None
+        for item in _stream_phase0_template_matching(font_path, char, state):
+            if isinstance(item, tuple):
+                affine_strokes_result, done = item
+                if done:
                     return
+            else:
+                yield item
 
-        # Also try affine
-        affine_result = _optimize_affine(font_path, char, 224)
-        if affine_result is not None:
-            affine_strokes, affine_score, _, _ = affine_result
-            affine_stroke_list = [[[round(float(x), 1), round(float(y), 1)] for x, y in s]
-                                  for s in affine_strokes if len(s) >= 2]
-            if affine_stroke_list:
-                # Keep whichever scored better
-                if affine_strokes_result and affine_strokes_result[1] >= affine_score:
-                    yield f"data: {emit_raw_frame(affine_stroke_list, affine_score, 'affine template (DiffVG better)')}\n\n"
-                else:
-                    affine_strokes_result = (affine_stroke_list, affine_score)
-                    yield f"data: {emit_raw_frame(affine_stroke_list, affine_score, 'affine template')}\n\n"
-
-                best_p0_strokes, best_p0_score = affine_strokes_result
-                if best_p0_score >= 0.85:
-                    yield f"data: {emit_raw_frame(best_p0_strokes, best_p0_score, 'final')}\n\n"
-                    yield f"data: {json.dumps({'done': True, 'score': round(best_p0_score, 4), 'frame': frame_num[0]})}\n\n"
-                    return
-
-        # Emit initial frame (template defaults or cached params)
+        # Emit initial frame
         init_fun = _score_all_strokes(x0, *joint_args)
-        yield f"data: {emit_frame(x0, init_fun, 'initial')}\n\n"
+        yield f"data: {state.emit_frame(x0, init_fun, 'initial')}\n\n"
 
-        best_x = x0.copy()
-        best_fun = init_fun
-
-        def _update_best(x, fun):
-            nonlocal best_x, best_fun
-            if fun < best_fun:
-                best_x = x.copy()
-                best_fun = fun
-
-        def _perfect():
-            return best_fun <= -0.99
+        state.best_x = x0.copy()
+        state.best_fun = init_fun
 
         # ---- Phase 1: Greedy per-shape ----
         greedy_x = x0.copy()
         uncovered_mask = np.ones(n_cloud, dtype=bool)
-
         n_pts_shape = max(60, int(((glyph_bbox[2]-glyph_bbox[0])**2 +
                                     (glyph_bbox[3]-glyph_bbox[1])**2)**0.5 / 1.5))
 
@@ -6566,186 +7241,147 @@ def api_optimize_stream(font_id):
             s_args = (stype, glyph_bbox, uncov_pts, uncov_tree,
                       len(uncov_pts), radius, snap_yi, snap_xi, w, h)
 
-            # NM for this shape — emit on improvement
-            greedy_best_s = [s_x0.copy()]
-            greedy_best_f = [_score_single_shape(s_x0, *s_args)]
-            greedy_evals = [0]
+            s_lo, s_hi = bounds_lo[start:end], bounds_hi[start:end]
 
-            def _greedy_nm_obj(params, _si=si, _start=start, _end=end,
-                               _s_args=s_args, _gb_s=greedy_best_s,
-                               _gb_f=greedy_best_f, _ge=greedy_evals):
-                params = np.clip(params, bounds_lo[_start:_end], bounds_hi[_start:_end])
-                val = _score_single_shape(params, *_s_args)
-                _ge[0] += 1
-                if val < _gb_f[0]:
-                    _gb_s[0] = params.copy()
-                    _gb_f[0] = val
-                return val
+            def _greedy_nm_obj(params, _s_lo=s_lo, _s_hi=s_hi, _s_args=s_args):
+                return _score_single_shape(np.clip(params, _s_lo, _s_hi), *_s_args)
 
-            nm_r = minimize(
-                _greedy_nm_obj, s_x0, method='Nelder-Mead',
-                options={'maxfev': 800, 'xatol': 0.2, 'fatol': 0.002,
-                         'adaptive': True},
-            )
-            best_s = np.clip(nm_r.x, bounds_lo[start:end], bounds_hi[start:end]).copy()
+            nm_r = minimize(_greedy_nm_obj, s_x0, method='Nelder-Mead',
+                           options={'maxfev': 800, 'xatol': 0.2, 'fatol': 0.002, 'adaptive': True})
+            best_s = np.clip(nm_r.x, s_lo, s_hi).copy()
             best_sf = nm_r.fun
 
-            # Quick DE for this shape
             if _elapsed() < _TIME_BUDGET * 0.35:
                 try:
-                    de_r = differential_evolution(
-                        _score_single_shape, bounds=s_bounds, args=s_args,
-                        x0=best_s, maxiter=30, popsize=12, tol=0.005,
-                        seed=None, polish=False, disp=False,
-                    )
+                    de_r = differential_evolution(_score_single_shape, bounds=s_bounds,
+                                                  args=s_args, x0=best_s, maxiter=30,
+                                                  popsize=12, tol=0.005, polish=False, disp=False)
                     if de_r.fun < best_sf:
                         best_s = de_r.x.copy()
-                        best_sf = de_r.fun
                 except Exception:
                     pass
 
             greedy_x[start:end] = best_s
 
             # Mark covered points
-            pts = SHAPE_FNS[stype](tuple(best_s), glyph_bbox, offset=(0, 0),
-                                   n_pts=n_pts_shape)
+            pts = SHAPE_FNS[stype](tuple(best_s), glyph_bbox, offset=(0, 0), n_pts=n_pts_shape)
             if len(pts) > 0:
                 xi = np.clip(np.round(pts[:, 0]).astype(int), 0, w - 1)
                 yi = np.clip(np.round(pts[:, 1]).astype(int), 0, h - 1)
-                snapped_x = snap_xi[yi, xi].astype(float)
-                snapped_y = snap_yi[yi, xi].astype(float)
-                snapped = np.column_stack([snapped_x, snapped_y])
+                snapped = np.column_stack([snap_xi[yi, xi].astype(float),
+                                           snap_yi[yi, xi].astype(float)])
                 hits = cloud_tree.query_ball_point(snapped, radius)
-                newly_covered = set()
                 for lst in hits:
-                    newly_covered.update(lst)
-                for idx in newly_covered:
-                    uncovered_mask[idx] = False
+                    for idx in lst:
+                        uncovered_mask[idx] = False
 
-            # Emit frame after each shape is placed
             greedy_fun = _score_all_strokes(greedy_x, *joint_args)
-            _update_best(greedy_x, greedy_fun)
+            state.update_best(greedy_x, greedy_fun)
             uncov_remaining = int(uncovered_mask.sum())
-            yield f"data: {emit_frame(greedy_x, greedy_fun, f'greedy shape {si+1}/{len(templates)} ({stype}) uncov={uncov_remaining}')}\n\n"
+            yield f"data: {state.emit_frame(greedy_x, greedy_fun, f'greedy shape {si+1}/{len(templates)} ({stype}) uncov={uncov_remaining}')}\n\n"
 
-        # Compare greedy result with x0
+        # Compare with x0
         x0_fun = _score_all_strokes(x0, *joint_args)
-        if x0_fun < best_fun:
-            best_x = x0.copy()
-            best_fun = x0_fun
+        if x0_fun < state.best_fun:
+            state.best_x = x0.copy()
+            state.best_fun = x0_fun
 
         class _EarlyStop(Exception):
             pass
 
-        # ---- Repeating NM → DE → NM cycle until stagnation or time limit ----
+        # ---- Phase 2: Refinement cycles ----
         stale_count = 0
         cycle_num = 0
-        while not _perfect() and _elapsed() < _TIME_BUDGET and stale_count < _STALE_CYCLES:
+        while not state.is_perfect() and _elapsed() < _TIME_BUDGET and stale_count < _STALE_CYCLES:
             cycle_num += 1
-            score_at_cycle_start = best_fun
+            score_at_cycle_start = state.best_fun
 
-            # -- NM refinement --
-            if not _perfect() and _elapsed() < _TIME_BUDGET:
+            # NM refinement
+            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
                 nm_frames = []
-                nm_best = [best_x.copy()]
-                nm_best_f = [best_fun]
+                nm_best = [state.best_x.copy()]
+                nm_best_f = [state.best_fun]
 
-                def _nm_obj_stream(params, _nb=nm_best, _nbf=nm_best_f, _nf=nm_frames):
-                    params = _clamp(params)
+                def _nm_obj_stream(params, _nb=nm_best, _nbf=nm_best_f, _nf=nm_frames, _cn=cycle_num):
+                    params = state.clamp(params)
                     val = _score_all_strokes(params, *joint_args)
                     now = _time.monotonic()
                     if val < _nbf[0]:
                         _nb[0] = params.copy()
                         _nbf[0] = val
-                        _nf.append(emit_frame(params, val,
-                                   f'cycle {cycle_num} NM improve'))
-                    elif (now - last_emit[0]) > 1.0:
-                        _nf.append(emit_frame(_nb[0], _nbf[0],
-                                   f'cycle {cycle_num} NM'))
+                        _nf.append(state.emit_frame(params, val, f'cycle {_cn} NM improve'))
+                    elif (now - state.last_emit) > 1.0:
+                        _nf.append(state.emit_frame(_nb[0], _nbf[0], f'cycle {_cn} NM'))
                     return val
 
                 remaining_fev = max(500, int(min(30.0, _TIME_BUDGET - _elapsed()) / 0.0003))
-                nm_result = minimize(
-                    _nm_obj_stream, best_x, method='Nelder-Mead',
-                    options={'maxfev': remaining_fev, 'xatol': 0.2, 'fatol': 0.0005,
-                             'adaptive': True},
-                )
-                _update_best(_clamp(nm_result.x), nm_result.fun)
-
+                nm_result = minimize(_nm_obj_stream, state.best_x, method='Nelder-Mead',
+                                    options={'maxfev': remaining_fev, 'xatol': 0.2,
+                                             'fatol': 0.0005, 'adaptive': True})
+                state.update_best(state.clamp(nm_result.x), nm_result.fun)
                 for f in nm_frames:
                     yield f"data: {f}\n\n"
 
-            # -- DE global search --
-            if not _perfect() and _elapsed() < _TIME_BUDGET:
-                nm_x = best_x.copy()
-                for i, (lo, hi) in enumerate(bounds):
-                    nm_x[i] = np.clip(nm_x[i], lo, hi)
-
+            # DE global search
+            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
+                nm_x = state.clamp(state.best_x.copy())
                 de_frames = []
+
                 def de_cb(xk, convergence=0, _df=de_frames, _cn=cycle_num):
                     val = _score_all_strokes(xk, *joint_args)
-                    _update_best(xk, val)
-                    _df.append(emit_frame(best_x, best_fun,
-                                     f'cycle {_cn} DE conv={convergence:.3f}'))
-                    if _perfect() or _elapsed() >= _TIME_BUDGET:
+                    state.update_best(xk, val)
+                    _df.append(state.emit_frame(state.best_x, state.best_fun,
+                                                f'cycle {_cn} DE conv={convergence:.3f}'))
+                    if state.is_perfect() or _elapsed() >= _TIME_BUDGET:
                         raise _EarlyStop()
 
                 try:
-                    de = differential_evolution(
-                        _score_all_strokes, bounds=bounds, args=joint_args,
-                        x0=nm_x, maxiter=200, popsize=20, tol=0.002,
-                        seed=None, mutation=(0.5, 1.0), recombination=0.7,
-                        polish=False, disp=False, callback=de_cb)
-                    _update_best(de.x, de.fun)
+                    de = differential_evolution(_score_all_strokes, bounds=bounds,
+                                               args=joint_args, x0=nm_x, maxiter=200,
+                                               popsize=20, tol=0.002, mutation=(0.5, 1.0),
+                                               recombination=0.7, polish=False, disp=False,
+                                               callback=de_cb)
+                    state.update_best(de.x, de.fun)
                 except _EarlyStop:
                     pass
-
                 for f in de_frames:
                     yield f"data: {f}\n\n"
 
-            # -- NM polish --
-            if not _perfect() and _elapsed() < _TIME_BUDGET:
+            # NM polish
+            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
                 polish_frames = []
-                polish_best = [best_x.copy()]
-                polish_best_f = [best_fun]
+                polish_best = [state.best_x.copy()]
+                polish_best_f = [state.best_fun]
 
-                def _polish_obj(params, _pb=polish_best, _pbf=polish_best_f,
-                                _pf=polish_frames, _cn=cycle_num):
-                    params = _clamp(params)
+                def _polish_obj(params, _pb=polish_best, _pbf=polish_best_f, _pf=polish_frames, _cn=cycle_num):
+                    params = state.clamp(params)
                     val = _score_all_strokes(params, *joint_args)
                     if val < _pbf[0]:
                         _pb[0] = params.copy()
                         _pbf[0] = val
-                        _pf.append(emit_frame(params, val,
-                                   f'cycle {_cn} polish'))
+                        _pf.append(state.emit_frame(params, val, f'cycle {_cn} polish'))
                     return val
 
                 remaining_fev = max(200, int(min(15.0, _TIME_BUDGET - _elapsed()) / 0.0003))
-                nm2 = minimize(
-                    _polish_obj, best_x, method='Nelder-Mead',
-                    options={'maxfev': remaining_fev, 'xatol': 0.1, 'fatol': 0.0005,
-                             'adaptive': True},
-                )
-                _update_best(_clamp(nm2.x), nm2.fun)
-
+                nm2 = minimize(_polish_obj, state.best_x, method='Nelder-Mead',
+                              options={'maxfev': remaining_fev, 'xatol': 0.1,
+                                       'fatol': 0.0005, 'adaptive': True})
+                state.update_best(state.clamp(nm2.x), nm2.fun)
                 for f in polish_frames:
                     yield f"data: {f}\n\n"
 
-            # Check for stagnation
-            improvement = score_at_cycle_start - best_fun  # positive = improved
+            improvement = score_at_cycle_start - state.best_fun
             if improvement < _STALE_THRESHOLD:
                 stale_count += 1
             else:
                 stale_count = 0
 
-            # Cache periodically so progress isn't lost
-            current_score = float(-best_fun)
+            current_score = float(-state.best_fun)
             if cached_score is None or current_score > cached_score:
-                _save_cached_params(rel_path, char, best_x, current_score)
-                cached_score = current_score
+                _save_cached_params(rel_path, char, state.best_x, current_score)
 
         # Determine stop reason
-        if _perfect():
+        if state.is_perfect():
             stop_reason = 'perfect'
         elif stale_count >= _STALE_CYCLES:
             stop_reason = 'converged'
@@ -6754,22 +7390,20 @@ def api_optimize_stream(font_id):
         else:
             stop_reason = 'done'
 
-        # Final frame — pick best of shape optimisation vs affine
-        final_score = float(-best_fun)
+        # Final frame
+        final_score = float(-state.best_fun)
         if affine_strokes_result and affine_strokes_result[1] > final_score:
-            # Affine was better — emit affine strokes as final
             aff_strokes, aff_score = affine_strokes_result
-            yield f"data: {emit_raw_frame(aff_strokes, aff_score, 'final (affine)')}\n\n"
+            yield f"data: {state.emit_raw_frame(aff_strokes, aff_score, 'final (affine)')}\n\n"
             final_score = aff_score
         else:
-            yield f"data: {emit_frame(best_x, best_fun, 'final')}\n\n"
+            yield f"data: {state.emit_frame(state.best_x, state.best_fun, 'final')}\n\n"
 
-        # Save cache (only for shape-param results)
-        if not (affine_strokes_result and affine_strokes_result[1] > float(-best_fun)):
+        if not (affine_strokes_result and affine_strokes_result[1] > float(-state.best_fun)):
             if cached_score is None or final_score > cached_score:
-                _save_cached_params(rel_path, char, best_x, final_score)
+                _save_cached_params(rel_path, char, state.best_x, final_score)
 
-        yield f"data: {json.dumps({'done': True, 'score': round(final_score, 4), 'frame': frame_num[0], 'cycles': cycle_num, 'reason': stop_reason, 'elapsed': round(_elapsed(), 1)})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'score': round(final_score, 4), 'frame': state.frame_num, 'cycles': cycle_num, 'reason': stop_reason, 'elapsed': round(_elapsed(), 1)})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache',
