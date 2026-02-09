@@ -6402,6 +6402,85 @@ def _merge_t_junctions(strokes, junction_clusters, assigned):
     return strokes
 
 
+def _get_stroke_tail(stroke, at_end, cluster):
+    """Get the tail points of a stroke before a junction cluster.
+
+    Args:
+        stroke: The stroke (list of points)
+        at_end: True if junction is at end, False if at start
+        cluster: Set of junction cluster pixels
+
+    Returns:
+        Tuple of (tail_points, leg_end_point)
+    """
+    if at_end:
+        tail = []
+        for k in range(len(stroke) - 1, -1, -1):
+            pt = tuple(stroke[k]) if isinstance(stroke[k], (list, tuple)) else stroke[k]
+            if len(tail) >= 8:
+                break
+            if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
+                tail.insert(0, pt)
+        return tail, stroke[-1]
+    else:
+        tail = []
+        for k in range(len(stroke)):
+            pt = tuple(stroke[k]) if isinstance(stroke[k], (list, tuple)) else stroke[k]
+            if len(tail) >= 8:
+                break
+            if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
+                tail.append(pt)
+        return list(reversed(tail)), stroke[0]
+
+
+def _extend_stroke_to_tip(stroke, at_end, tail, leg_end, stub_tip):
+    """Extend a stroke from its junction end toward a stub tip.
+
+    Args:
+        stroke: The stroke to extend (modified in place)
+        at_end: True if extending from end, False if from start
+        tail: Tail points before junction
+        leg_end: The junction endpoint
+        stub_tip: The tip point to extend toward
+    """
+    # Calculate direction from pre-junction points
+    if len(tail) >= 2:
+        dx = tail[-1][0] - tail[0][0]
+        dy = tail[-1][1] - tail[0][1]
+        leg_len = (dx * dx + dy * dy) ** 0.5
+    else:
+        leg_len = 0
+
+    tip_dx = stub_tip[0] - leg_end[0]
+    tip_dy = stub_tip[1] - leg_end[1]
+    tip_dist = (tip_dx * tip_dx + tip_dy * tip_dy) ** 0.5
+    steps = max(1, int(round(tip_dist)))
+
+    # Generate extension points
+    if leg_len > 0.01:
+        ux, uy = dx / leg_len, dy / leg_len
+        ext_pts = []
+        for k in range(1, steps + 1):
+            t = k / steps
+            ex = leg_end[0] + ux * k
+            ey = leg_end[1] + uy * k
+            px = ex * (1 - t) + stub_tip[0] * t
+            py = ey * (1 - t) + stub_tip[1] * t
+            ext_pts.append((px, py))
+    else:
+        ext_pts = []
+        for k in range(1, steps + 1):
+            t = k / steps
+            ext_pts.append((leg_end[0] + tip_dx * t, leg_end[1] + tip_dy * t))
+
+    # Apply extension
+    if at_end:
+        stroke.extend(ext_pts)
+    else:
+        for p in reversed(ext_pts):
+            stroke.insert(0, p)
+
+
 def _absorb_convergence_stubs(strokes, junction_clusters, assigned, conv_threshold=18):
     """Absorb short convergence stubs into longer strokes at junction clusters.
 
@@ -6461,61 +6540,9 @@ def _absorb_convergence_stubs(strokes, junction_clusters, assigned, conv_thresho
                 if not at_end and not at_start:
                     continue
 
-                # Get the last few points before the junction to determine direction
-                if at_end:
-                    tail = []
-                    for k in range(len(s2) - 1, -1, -1):
-                        pt = tuple(s2[k]) if isinstance(s2[k], (list, tuple)) else s2[k]
-                        if len(tail) >= 8:
-                            break
-                        if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
-                            tail.insert(0, pt)
-                    leg_end = s2[-1]
-                else:
-                    tail = []
-                    for k in range(len(s2)):
-                        pt = tuple(s2[k]) if isinstance(s2[k], (list, tuple)) else s2[k]
-                        if len(tail) >= 8:
-                            break
-                        if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
-                            tail.append(pt)
-                    tail = list(reversed(tail))
-                    leg_end = s2[0]
-
-                # Use direction from pre-junction points to extrapolate to stub tip
-                if len(tail) >= 2:
-                    dx = tail[-1][0] - tail[0][0]
-                    dy = tail[-1][1] - tail[0][1]
-                    leg_len = (dx * dx + dy * dy) ** 0.5
-                else:
-                    leg_len = 0
-                tip_dx = stub_tip[0] - leg_end[0]
-                tip_dy = stub_tip[1] - leg_end[1]
-                tip_dist = (tip_dx * tip_dx + tip_dy * tip_dy) ** 0.5
-                steps = max(1, int(round(tip_dist)))
-
-                if leg_len > 0.01:
-                    ux, uy = dx / leg_len, dy / leg_len
-                    ext_pts = []
-                    for k in range(1, steps + 1):
-                        t = k / steps
-                        ex = leg_end[0] + ux * k
-                        ey = leg_end[1] + uy * k
-                        px = ex * (1 - t) + stub_tip[0] * t
-                        py = ey * (1 - t) + stub_tip[1] * t
-                        ext_pts.append((px, py))
-                else:
-                    ext_pts = []
-                    for k in range(1, steps + 1):
-                        t = k / steps
-                        ext_pts.append((leg_end[0] + tip_dx * t,
-                                        leg_end[1] + tip_dy * t))
-
-                if at_end:
-                    s2.extend(ext_pts)
-                else:
-                    for p in reversed(ext_pts):
-                        s2.insert(0, p)
+                # Get tail and extend toward stub tip
+                tail, leg_end = _get_stroke_tail(s2, at_end, cluster)
+                _extend_stroke_to_tip(s2, at_end, tail, leg_end, stub_tip)
 
             strokes.pop(si)
             changed = True
