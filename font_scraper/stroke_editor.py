@@ -46,7 +46,6 @@ class ParsedWaypoint:
     is_curve: bool = False           # c(n) - smooth curve
     is_vertex: bool = False          # v(n) - sharp vertex
     is_intersection: bool = False    # i(n) - self-crossing point
-    pixel_pos: Tuple[float, float] = None  # Resolved skeleton position
 
 
 # Constants for path tracing
@@ -2634,7 +2633,8 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
 
 def trace_segment(start: Tuple[int, int], end: Tuple[int, int],
                   config: SegmentConfig, adj: Dict, skel_set: Set,
-                  avoid_pixels: Set = None) -> List[Tuple[int, int]]:
+                  avoid_pixels: Set = None,
+                  fallback_avoid: Set = None) -> List[Tuple[int, int]]:
     """Unified segment tracing - handles both straight lines and skeleton paths.
 
     Args:
@@ -2643,24 +2643,28 @@ def trace_segment(start: Tuple[int, int], end: Tuple[int, int],
         config: SegmentConfig with direction and straight settings
         adj: adjacency dict from _analyze_skeleton
         skel_set: set of skeleton pixels
-        avoid_pixels: set of pixels to avoid
+        avoid_pixels: set of pixels to avoid (primary)
+        fallback_avoid: set of pixels to try avoiding if primary fails (before giving up)
 
     Returns:
-        List of (x, y) points along the segment.
+        List of (x, y) points along the segment, or None if no path found.
     """
-    if avoid_pixels is None:
-        avoid_pixels = set()
-
     if config.straight:
         # Draw a direct line, ignoring skeleton
         return _generate_straight_line(start, end)
 
-    # Trace along skeleton
+    # Trace along skeleton with primary avoidance
     traced = _trace_skeleton_path(start, end, adj, skel_set,
                                    avoid_pixels=avoid_pixels,
                                    direction=config.direction)
 
-    # Fallback: retry without avoid_pixels
+    # Fallback 1: try with fallback_avoid set (if provided)
+    if traced is None and fallback_avoid is not None:
+        traced = _trace_skeleton_path(start, end, adj, skel_set,
+                                       avoid_pixels=fallback_avoid,
+                                       direction=config.direction)
+
+    # Fallback 2: retry without any avoidance
     if traced is None:
         traced = _trace_skeleton_path(start, end, adj, skel_set,
                                        avoid_pixels=None,
@@ -3170,16 +3174,12 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                 is_vertex = False
                 is_curve = False
                 is_intersection = False
-                hint = None
 
-                # Parse waypoint - can be int, string, or tuple (pos, hint)
-                if isinstance(wp, tuple):
-                    wp_val, hint = wp
-                else:
-                    wp_val = wp
+                # Parse waypoint - can be int, string, or tuple (legacy: extract first element)
+                wp_val = wp[0] if isinstance(wp, tuple) else wp
 
                 # Check for direction/style hints - skip them here, we'll look ahead
-                if isinstance(wp_val, str) and wp_val in ('down', 'up', 'left', 'right', 'straight'):
+                if isinstance(wp_val, str) and wp_val in ALL_HINTS:
                     wp_idx += 1
                     continue
 
@@ -3211,10 +3211,10 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                 while look_idx < len(stroke_template):
                     next_wp = stroke_template[look_idx]
                     next_val = next_wp[0] if isinstance(next_wp, tuple) else next_wp
-                    if isinstance(next_val, str) and next_val in ('down', 'up', 'left', 'right'):
+                    if isinstance(next_val, str) and next_val in DIRECTION_HINTS:
                         next_direction = next_val
                         look_idx += 1
-                    elif isinstance(next_val, str) and next_val == 'straight':
+                    elif isinstance(next_val, str) and next_val in STYLE_HINTS:
                         next_straight = True
                         look_idx += 1
                     else:
@@ -3476,29 +3476,25 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     # Build segment config from hints
                     config = SegmentConfig(direction=seg_direction, straight=seg_straight)
 
-                    # Handle straight segments first - they override everything
+                    # Determine avoidance strategy based on context
                     if config.straight:
+                        # Straight lines ignore skeleton entirely
                         traced = _generate_straight_line(start_pt, end_pt)
                     elif target_is_intersection:
-                        # Tracing TO an intersection - allow crossing already-traced pixels
-                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                       avoid_pixels=None, direction=config.direction)
-                        # Record the arrival branch (last few pixels before intersection)
+                        # Going TO an intersection - allow crossing traced pixels
+                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                               avoid_pixels=None)
+                        # Record arrival branch for when we leave
                         if traced and len(traced) >= 2:
                             arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
                     elif current_is_intersection and arrival_branch:
-                        # Leaving an intersection - avoid already-traced pixels to force a new path
-                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                       avoid_pixels=already_traced, direction=config.direction)
-                        if traced is None:
-                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                           avoid_pixels=arrival_branch, direction=config.direction)
-                        if traced is None:
-                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                           avoid_pixels=None, direction=config.direction)
+                        # Leaving an intersection - try to take a different path
+                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                               avoid_pixels=already_traced,
+                                               fallback_avoid=arrival_branch)
                         arrival_branch = set()
                     elif target_is_curve and target_region is not None:
-                        # Use region-based tracing for curves
+                        # Region-based tracing for curves
                         traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
                                                   avoid_pixels=already_traced)
                         if traced is None:
