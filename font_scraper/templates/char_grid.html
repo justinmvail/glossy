@@ -66,9 +66,7 @@
 <div class="nav"><a href="/">&larr; All Fonts</a></div>
 <div class="header">
   <h1>{{ font.name }}</h1>
-  <button class="btn" id="minimalBtn" onclick="generateMinimal(false)" style="background:#4a2a6a">Generate All (Minimal)</button>
-  <button class="btn" id="minimalForceBtn" onclick="generateMinimal(true)" style="background:#6a2a4a">Regenerate All (Minimal)</button>
-  <button class="btn" id="drawBtn" onclick="drawAll(event)">Draw All</button>
+  <button class="btn" id="generateBtn" onclick="generateAndDraw()" style="background:#4a2a6a">Generate &amp; Draw</button>
   <button class="btn test" id="testBtn" onclick="runTests()">Run Tests</button>
   <a href="/compare/{{ font.id }}" class="btn" id="compareLink" style="display:none">Compare Runs</a>
   <button class="btn reject" id="rejectBtn" onclick="rejectFont()">Reject Font</button>
@@ -96,48 +94,23 @@
 </div>
 
 <script>
-let pendingReload = null;
-function cancelPendingReload() {
-  if (pendingReload) {
-    clearTimeout(pendingReload);
-    pendingReload = null;
-  }
-}
-
-function generateAll() {
-  cancelPendingReload();
-  document.getElementById('genStatus').textContent = 'Generating...';
-  document.getElementById('skeletonBtn').disabled = true;
-  fetch(`/api/skeleton-batch/{{ font.id }}`, {method: 'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        document.getElementById('genStatus').textContent = `Generated ${d.generated} characters. Reload in 3s or click Draw All.`;
-        pendingReload = setTimeout(() => location.reload(), 3000);
-      } else {
-        document.getElementById('genStatus').textContent = 'Error: ' + (d.error || 'unknown');
-      }
-      document.getElementById('skeletonBtn').disabled = false;
-    });
-}
-
-function generateMinimal(force = false) {
-  cancelPendingReload();
+function generateAndDraw() {
   const status = document.getElementById('genStatus');
-  const btn = document.getElementById('minimalBtn');
-  status.textContent = 'Generating minimal strokes...';
+  const btn = document.getElementById('generateBtn');
+  status.textContent = 'Generating strokes...';
   btn.disabled = true;
-  const url = `/api/minimal-strokes-batch/{{ font.id }}` + (force ? '?force=true' : '');
-  fetch(url, {method: 'POST'})
+
+  fetch(`/api/minimal-strokes-batch/{{ font.id }}?force=true`, {method: 'POST'})
     .then(r => r.json())
     .then(d => {
       if (d.ok) {
-        status.textContent = `Generated ${d.generated}, skipped ${d.skipped}, failed ${d.failed}. Reload in 3s or click Draw All.`;
-        pendingReload = setTimeout(() => location.reload(), 3000);
+        status.textContent = `Generated ${d.generated}, skipped ${d.skipped}, failed ${d.failed}. Drawing...`;
+        // Now draw all previews
+        drawAll();
       } else {
         status.textContent = 'Error: ' + (d.error || 'unknown');
+        btn.disabled = false;
       }
-      btn.disabled = false;
     })
     .catch(err => {
       status.textContent = 'Error: ' + err;
@@ -146,31 +119,14 @@ function generateMinimal(force = false) {
 }
 
 let drawAllLoading = false;
-function drawAll(event) {
-  if (event) event.preventDefault();
-  cancelPendingReload(); // Cancel any pending page reload
-
-  const btn = document.getElementById('drawBtn');
+function drawAll() {
+  const btn = document.getElementById('generateBtn');
   const status = document.getElementById('genStatus');
   const cells = document.querySelectorAll('.cell[data-char]');
-  const isPreview = btn.textContent === 'Hide Previews';
 
   if (drawAllLoading) return;
 
-  if (isPreview) {
-    cells.forEach(cell => {
-      cell.classList.remove('preview');
-      const img = cell.querySelector('img');
-      if (img) img.remove();
-      cell.querySelector('.char-label').style.display = '';
-    });
-    btn.textContent = 'Draw All';
-    status.textContent = '';
-    return;
-  }
-
   drawAllLoading = true;
-  btn.textContent = 'Hide Previews';
   status.textContent = 'Loading previews...';
   let loaded = 0;
   cells.forEach(cell => {
@@ -180,22 +136,25 @@ function drawAll(event) {
     if (existingImg) existingImg.remove();
 
     const img = document.createElement('img');
-    img.src = `/api/preview/{{ font.id }}?c=${encodeURIComponent(ch)}`;
+    // Add cache-buster to get fresh previews after regeneration
+    img.src = `/api/preview/{{ font.id }}?c=${encodeURIComponent(ch)}&t=${Date.now()}`;
     img.onload = () => {
       cell.classList.add('preview');
       cell.querySelector('.char-label').style.display = 'none';
       cell.insertBefore(img, cell.firstChild);
       loaded++;
       if (loaded === cells.length) {
-        status.textContent = '';
+        status.textContent = 'Done';
         drawAllLoading = false;
+        btn.disabled = false;
       }
     };
     img.onerror = () => {
       loaded++;
       if (loaded === cells.length) {
-        status.textContent = '';
+        status.textContent = 'Done';
         drawAllLoading = false;
+        btn.disabled = false;
       }
     };
   });
