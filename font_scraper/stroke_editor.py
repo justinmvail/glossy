@@ -312,6 +312,7 @@ NUMPAD_TEMPLATE_VARIANTS = {
     },
     '5': {
         'default': [[9, 7, 4, 'c(6)', 'c(3)', 1]],
+        'two_stroke': [[9, 8, 7], [4, 5, 6, 3, 2, 1]],
     },
     '6': {
         'default': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 4]],
@@ -2967,6 +2968,9 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     # Track apex extensions for vertices (skeleton point -> glyph apex)
     apex_extensions = {}  # {point_index: (skel_pt, glyph_apex_pt)}
 
+    # Track pixels traced across all strokes to avoid overlapping paths
+    global_traced = set()
+
     for stroke_template in template:
         stroke_points = []
         waypoint_info = []  # Parallel list storing (is_curve, is_intersection, region) for each waypoint
@@ -3234,7 +3238,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
 
                 # Trace skeleton paths between consecutive keypoints
                 full_path = []
-                already_traced = set()  # Track pixels we've already traced to prevent double-backs
+                already_traced = set(global_traced)  # Start with pixels from previous strokes
                 arrival_branch = set()  # Track arrival branch at intersections to avoid backtracking
 
                 # Start from first waypoint
@@ -3331,6 +3335,9 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
 
                 # Clear apex_extensions for next stroke
                 apex_extensions.clear()
+
+                # Add this stroke's pixels to global_traced for multi-stroke templates
+                global_traced.update(already_traced)
 
                 # Resample to reasonable number of points
                 if len(full_path) > 3:
@@ -6804,6 +6811,24 @@ def api_skeleton_batch(font_id):
     db.close()
     generated = sum(1 for v in results.values() if 'strokes' in v)
     return jsonify(ok=True, generated=generated, results=results)
+
+
+@app.route('/api/template-variants')
+def api_template_variants():
+    """Get available template variants for a character."""
+    char = request.args.get('c')
+    if not char:
+        return jsonify(error="Missing ?c= parameter"), 400
+
+    variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
+    # Return variant names and stroke counts
+    result = {}
+    for name, template in variants.items():
+        result[name] = {
+            'stroke_count': len(template),
+            'template': [[str(wp) for wp in stroke] for stroke in template]
+        }
+    return jsonify(variants=result, char=char)
 
 
 @app.route('/api/minimal-strokes/<int:font_id>')
