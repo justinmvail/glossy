@@ -14,14 +14,10 @@ from pathlib import Path
 # Add parent dir to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from stroke_editor import (
-    minimal_strokes_from_skeleton,
-    render_glyph_mask,
-    resolve_font_path,
-    _analyze_skeleton,
-    NUMPAD_TEMPLATES,
-    NUMPAD_POS,
-)
+from stroke_core import min_strokes as minimal_strokes_from_skeleton, _skel as _analyze_skeleton
+from stroke_rendering import render_glyph_mask
+from stroke_flask import resolve_font_path
+from stroke_templates import NUMPAD_TEMPLATES, NUMPAD_POS
 
 
 def compute_stroke_coverage(strokes, mask, stroke_width=8):
@@ -306,6 +302,7 @@ def test_letter(font_path, char, canvas_size=224, verbose=False):
         result['stroke_count_score'] = round(stroke_count_score, 3)
         result['topology_score'] = round(topology_score, 3)
         result['score'] = round(combined, 3)
+        result['strokes'] = strokes
 
         if verbose:
             print(f"  {char}: score={combined:.3f} cov={coverage:.3f} over={overshoot:.3f} "

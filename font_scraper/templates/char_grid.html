@@ -254,19 +254,19 @@ function loadTestHistory() {
             <span class="score ${scoreClass}">${run.avg_score.toFixed(3)}</span>
             <div class="metrics">
               <div class="metric">
-                <span class="metric-val">${run.avg_coverage.toFixed(2)}</span>
+                <span class="metric-val">${(run.avg_coverage ?? 0).toFixed(2)}</span>
                 <span>coverage</span>
               </div>
               <div class="metric">
-                <span class="metric-val">${run.avg_overshoot.toFixed(2)}</span>
+                <span class="metric-val">${(run.avg_overshoot ?? 0).toFixed(2)}</span>
                 <span>overshoot</span>
               </div>
               <div class="metric">
-                <span class="metric-val">${run.avg_stroke_count.toFixed(2)}</span>
+                <span class="metric-val">${(run.avg_stroke_count ?? 0).toFixed(2)}</span>
                 <span>strokes</span>
               </div>
               <div class="metric">
-                <span class="metric-val">${run.avg_topology.toFixed(2)}</span>
+                <span class="metric-val">${(run.avg_topology ?? 0).toFixed(2)}</span>
                 <span>topology</span>
               </div>
               <div class="metric">
