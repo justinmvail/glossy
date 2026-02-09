@@ -3062,6 +3062,162 @@ def _generate_stroke_markers(strokes, return_markers):
     return all_markers
 
 
+def _build_shape_chain(start_shape, rest):
+    """Build a chain of shapes by joining nearest endpoints.
+
+    Args:
+        start_shape: Initial shape tuple (si, stype, points)
+        rest: List of remaining shapes to chain
+
+    Returns:
+        Tuple of (chain, total_gap) where chain is list of shapes
+        and total_gap is sum of connection distances.
+    """
+    chain = [start_shape]
+    remaining = list(rest)
+    total_gap = 0.0
+
+    while remaining:
+        last_end = chain[-1][2][-1]
+        best_dist = float('inf')
+        best_idx = 0
+        best_flip = False
+
+        for ri, (rsi, rstype, rpts) in enumerate(remaining):
+            d_start = (last_end[0] - rpts[0][0])**2 + (last_end[1] - rpts[0][1])**2
+            d_end = (last_end[0] - rpts[-1][0])**2 + (last_end[1] - rpts[-1][1])**2
+            if d_start < best_dist:
+                best_dist, best_idx, best_flip = d_start, ri, False
+            if d_end < best_dist:
+                best_dist, best_idx, best_flip = d_end, ri, True
+
+        total_gap += best_dist ** 0.5
+        chosen = remaining.pop(best_idx)
+        if best_flip:
+            chosen = (chosen[0], chosen[1], list(reversed(chosen[2])))
+        chain.append(chosen)
+
+    return chain, total_gap
+
+
+def _join_shapes_to_stroke(shape_strokes, return_markers, stroke_idx):
+    """Join multiple shapes into a single stroke with optional markers.
+
+    Args:
+        shape_strokes: List of (si, stype, point_list) tuples
+        return_markers: Whether to generate vertex markers
+        stroke_idx: Current stroke index for marker assignment
+
+    Returns:
+        Dict with 'stroke' (point list), 'chain' (shape chain), 'markers' (list)
+    """
+    markers = []
+
+    if len(shape_strokes) == 1:
+        si, stype, point_list = shape_strokes[0]
+        final_stroke = [[round(x, 1), round(y, 1)] for x, y in point_list]
+        return {'stroke': final_stroke, 'chain': shape_strokes, 'markers': markers}
+
+    # Try both directions and pick the one with smaller gaps
+    s0 = shape_strokes[0]
+    s0_flip = (s0[0], s0[1], list(reversed(s0[2])))
+    chain_fwd, gap_fwd = _build_shape_chain(s0, shape_strokes[1:])
+    chain_rev, gap_rev = _build_shape_chain(s0_flip, shape_strokes[1:])
+    chain = chain_fwd if gap_fwd <= gap_rev else chain_rev
+
+    # Combine points, adding vertex markers at joints
+    combined = []
+    for ci, (csi, cstype, cpts) in enumerate(chain):
+        if ci > 0:
+            jpt = cpts[0]
+            if return_markers:
+                markers.append({
+                    'x': round(jpt[0], 1), 'y': round(jpt[1], 1),
+                    'type': 'vertex', 'label': 'V', 'stroke_id': stroke_idx
+                })
+            # Skip overlapping points
+            skip = 0
+            if combined:
+                last = combined[-1]
+                for pi, p in enumerate(cpts):
+                    if ((p[0] - last[0])**2 + (p[1] - last[1])**2) < 4.0:
+                        skip = pi + 1
+                    else:
+                        break
+            combined.extend(cpts[skip:])
+        else:
+            combined.extend(cpts)
+
+    final_stroke = [[round(x, 1), round(y, 1)] for x, y in combined]
+    return {'stroke': final_stroke, 'chain': chain, 'markers': markers}
+
+
+def _simple_stroke_markers(strokes):
+    """Generate simple start/stop markers for strokes (no curve markers).
+
+    Args:
+        strokes: List of stroke point lists
+
+    Returns:
+        List of marker dicts
+    """
+    markers = []
+    for si, st in enumerate(strokes):
+        markers.append({'x': st[0][0], 'y': st[0][1],
+                        'type': 'start', 'label': 'S', 'stroke_id': si})
+        markers.append({'x': st[-1][0], 'y': st[-1][1],
+                        'type': 'stop', 'label': 'E', 'stroke_id': si})
+    return markers
+
+
+def _assemble_strokes_from_shapes(shape_groups, return_markers):
+    """Convert shape groups to final strokes with optional markers.
+
+    Args:
+        shape_groups: List of (shape_strokes, group_id) from _shapes_to_strokes
+        return_markers: Whether to generate markers
+
+    Returns:
+        Tuple of (strokes, markers) where strokes is list of point lists
+    """
+    strokes = []
+    all_markers = []
+    stroke_idx = 0
+
+    for shape_strokes, gid in shape_groups:
+        result = _join_shapes_to_stroke(shape_strokes, return_markers, stroke_idx)
+
+        if len(result['stroke']) < 2:
+            continue
+
+        strokes.append(result['stroke'])
+        all_markers.extend(result['markers'])
+
+        if return_markers:
+            final_stroke = result['stroke']
+            all_markers.append({
+                'x': final_stroke[0][0], 'y': final_stroke[0][1],
+                'type': 'start', 'label': 'S', 'stroke_id': stroke_idx
+            })
+            all_markers.append({
+                'x': final_stroke[-1][0], 'y': final_stroke[-1][1],
+                'type': 'stop', 'label': 'E', 'stroke_id': stroke_idx
+            })
+
+            # Add curve markers for arcs/loops
+            for si, stype, point_list in result['chain']:
+                if stype in ('arc_right', 'arc_left', 'loop', 'u_arc'):
+                    mid_pt = point_list[len(point_list) // 2]
+                    all_markers.append({
+                        'x': round(mid_pt[0], 1), 'y': round(mid_pt[1], 1),
+                        'type': 'curve', 'label': 'C', 'stroke_id': stroke_idx
+                    })
+
+        stroke_idx += 1
+
+    return strokes, all_markers
+
+
 def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     """Generate strokes by optimising shape parameters with a greedy per-shape
     approach followed by joint refinement.
@@ -3114,13 +3270,7 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     if affine_strokes_result[0] is not None and affine_strokes_result[1] >= 0.85:
         strokes = affine_strokes_result[0]
         if return_markers:
-            markers = []
-            for si, st in enumerate(strokes):
-                markers.append({'x': st[0][0], 'y': st[0][1],
-                                'type': 'start', 'label': 'S', 'stroke_id': si})
-                markers.append({'x': st[-1][0], 'y': st[-1][1],
-                                'type': 'stop', 'label': 'E', 'stroke_id': si})
-            return strokes, markers
+            return strokes, _simple_stroke_markers(strokes)
         return strokes
 
     # ---- Phase 1: Greedy per-shape optimization ----
@@ -3148,105 +3298,16 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
     if affine_strokes_result[0] is not None and affine_strokes_result[1] > final_score:
         strokes = affine_strokes_result[0]
         if return_markers:
-            markers = []
-            for si, st in enumerate(strokes):
-                markers.append({'x': st[0][0], 'y': st[0][1],
-                                'type': 'start', 'label': 'S', 'stroke_id': si})
-                markers.append({'x': st[-1][0], 'y': st[-1][1],
-                                'type': 'stop', 'label': 'E', 'stroke_id': si})
-            return strokes, markers
+            return strokes, _simple_stroke_markers(strokes)
         return strokes
 
     # Cache winning params
     if cached_score is None or final_score > cached_score:
         _save_cached_params(rel_path, char, best_x, final_score)
 
-    # Convert to strokes
+    # Convert to strokes using helper
     shape_groups = _shapes_to_strokes(best_x, templates, setup, setup['mask'])
-
-    strokes = []
-    all_markers = []
-    stroke_idx = 0
-    for shape_strokes, gid in shape_groups:
-        if len(shape_strokes) == 1:
-            si, stype, point_list = shape_strokes[0]
-            final_stroke = [[round(x, 1), round(y, 1)] for x, y in point_list]
-            chain = shape_strokes
-        else:
-            # Join multiple shapes by nearest endpoints
-            def _build_chain(start_shape, rest):
-                chain = [start_shape]
-                remaining = list(rest)
-                total_gap = 0.0
-                while remaining:
-                    last_end = chain[-1][2][-1]
-                    best_dist = float('inf')
-                    best_idx = 0
-                    best_flip = False
-                    for ri, (rsi, rstype, rpts) in enumerate(remaining):
-                        d_start = (last_end[0] - rpts[0][0])**2 + (last_end[1] - rpts[0][1])**2
-                        d_end = (last_end[0] - rpts[-1][0])**2 + (last_end[1] - rpts[-1][1])**2
-                        if d_start < best_dist:
-                            best_dist, best_idx, best_flip = d_start, ri, False
-                        if d_end < best_dist:
-                            best_dist, best_idx, best_flip = d_end, ri, True
-                    total_gap += best_dist ** 0.5
-                    chosen = remaining.pop(best_idx)
-                    if best_flip:
-                        chosen = (chosen[0], chosen[1], list(reversed(chosen[2])))
-                    chain.append(chosen)
-                return chain, total_gap
-
-            s0 = shape_strokes[0]
-            s0_flip = (s0[0], s0[1], list(reversed(s0[2])))
-            chain_fwd, gap_fwd = _build_chain(s0, shape_strokes[1:])
-            chain_rev, gap_rev = _build_chain(s0_flip, shape_strokes[1:])
-            chain = chain_fwd if gap_fwd <= gap_rev else chain_rev
-
-            combined = []
-            for ci, (csi, cstype, cpts) in enumerate(chain):
-                if ci > 0:
-                    jpt = cpts[0]
-                    if return_markers:
-                        all_markers.append({
-                            'x': round(jpt[0], 1), 'y': round(jpt[1], 1),
-                            'type': 'vertex', 'label': 'V', 'stroke_id': stroke_idx
-                        })
-                    skip = 0
-                    if combined:
-                        last = combined[-1]
-                        for pi, p in enumerate(cpts):
-                            if ((p[0] - last[0])**2 + (p[1] - last[1])**2) < 4.0:
-                                skip = pi + 1
-                            else:
-                                break
-                    combined.extend(cpts[skip:])
-                else:
-                    combined.extend(cpts)
-            final_stroke = [[round(x, 1), round(y, 1)] for x, y in combined]
-
-        if len(final_stroke) < 2:
-            continue
-        strokes.append(final_stroke)
-
-        if return_markers:
-            all_markers.append({
-                'x': final_stroke[0][0], 'y': final_stroke[0][1],
-                'type': 'start', 'label': 'S', 'stroke_id': stroke_idx
-            })
-            all_markers.append({
-                'x': final_stroke[-1][0], 'y': final_stroke[-1][1],
-                'type': 'stop', 'label': 'E', 'stroke_id': stroke_idx
-            })
-            for si, stype, point_list in chain:
-                if stype in ('arc_right', 'arc_left', 'loop', 'u_arc'):
-                    mid_pt = point_list[len(point_list) // 2]
-                    all_markers.append({
-                        'x': round(mid_pt[0], 1), 'y': round(mid_pt[1], 1),
-                        'type': 'curve', 'label': 'C', 'stroke_id': stroke_idx
-                    })
-
-        stroke_idx += 1
+    strokes, all_markers = _assemble_strokes_from_shapes(shape_groups, return_markers)
 
     if not strokes:
         return None
