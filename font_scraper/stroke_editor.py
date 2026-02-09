@@ -20,6 +20,34 @@ from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
 from fontTools.pens.recordingPen import RecordingPen
 from inksight_vectorizer import InkSightVectorizer
+
+# Import from refactored stroke_lib package
+from stroke_lib.domain.geometry import (
+    Point as SLPoint,
+    BBox as SLBBox,
+    Stroke as SLStroke,
+    Segment as SLSegment,
+)
+from stroke_lib.domain.skeleton import SkeletonInfo as SLSkeletonInfo, Marker as SLMarker
+from stroke_lib.analysis.skeleton import SkeletonAnalyzer as SLSkeletonAnalyzer
+from stroke_lib.analysis.segments import SegmentClassifier as SLSegmentClassifier
+from stroke_lib.templates.numpad import (
+    NumpadTemplate as SLNumpadTemplate,
+    NUMPAD_POS as SL_NUMPAD_POS,
+    extract_region as sl_extract_region,
+    is_vertical_stroke as sl_is_vertical_stroke,
+)
+from stroke_lib.utils.geometry import (
+    point_in_region as sl_point_in_region,
+    smooth_stroke as sl_smooth_stroke,
+    resample_path as sl_resample_path,
+    constrain_to_mask as sl_constrain_to_mask,
+    generate_straight_line as sl_generate_straight_line,
+)
+from stroke_lib.utils.rendering import (
+    render_glyph_mask as sl_render_glyph_mask,
+    get_glyph_bbox as sl_get_glyph_bbox,
+)
 try:
     from docker.diffvg_docker import DiffVGDocker
     _diffvg_docker = DiffVGDocker()
@@ -62,31 +90,9 @@ ALL_HINTS = DIRECTION_HINTS | STYLE_HINTS
 def point_in_region(point: Tuple[int, int], region: int, bbox: Tuple[int, int, int, int]) -> bool:
     """Check if a point falls within a numpad region.
 
-    Regions are divided into a 3x3 grid:
-      7 | 8 | 9
-      4 | 5 | 6
-      1 | 2 | 3
-
-    Args:
-        point: (x, y) coordinate
-        region: numpad region number 1-9
-        bbox: (x_min, y_min, x_max, y_max) bounding box
-
-    Returns:
-        True if point is in the specified region.
+    Delegates to stroke_lib.utils.geometry.point_in_region.
     """
-    x, y = point
-    x_min, y_min, x_max, y_max = bbox
-    w = x_max - x_min
-    h = y_max - y_min
-    if w == 0 or h == 0:
-        return False
-    nx = (x - x_min) / w
-    ny = (y - y_min) / h
-    col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
-    row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
-    point_region = (2 - row) * 3 + col + 1
-    return point_region == region
+    return sl_point_in_region(point, region, bbox)
 
 
 def parse_stroke_template(stroke_template: List) -> Tuple[List[ParsedWaypoint], List[SegmentConfig]]:
@@ -903,13 +909,11 @@ def _find_cross_section_midpoint(point, tangent, segments, mask):
 
 
 def _smooth_stroke(points, sigma=2.0):
-    """Gaussian smooth a stroke's x and y coordinates independently."""
-    if len(points) < 3:
-        return points
-    arr = np.array(points, dtype=float)
-    arr[:, 0] = gaussian_filter1d(arr[:, 0], sigma=sigma)
-    arr[:, 1] = gaussian_filter1d(arr[:, 1], sigma=sigma)
-    return [tuple(p) for p in arr]
+    """Gaussian smooth a stroke's x and y coordinates independently.
+
+    Delegates to stroke_lib.utils.geometry.smooth_stroke.
+    """
+    return sl_smooth_stroke(points, sigma)
 
 
 def _constrain_to_mask(points, mask):
@@ -2738,18 +2742,9 @@ def _find_skeleton_segments(info):
 def _generate_straight_line(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
     """Generate a straight line of pixels from start to end.
 
-    Args:
-        start: (x, y) starting point
-        end: (x, y) ending point
-
-    Returns:
-        List of (x, y) points along the straight line.
+    Delegates to stroke_lib.utils.geometry.generate_straight_line.
     """
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    dist = max(1, int((dx*dx + dy*dy)**0.5))
-    return [(int(round(start[0] + dx * t / dist)),
-             int(round(start[1] + dy * t / dist))) for t in range(dist + 1)]
+    return sl_generate_straight_line(start, end)
 
 
 def _snap_to_skeleton(point: Tuple, skel_set: Set) -> Tuple:
@@ -2969,38 +2964,11 @@ def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, a
 
 
 def _resample_path(path, num_points=20):
-    """Resample a path to have approximately num_points evenly spaced points."""
-    if len(path) <= 2:
-        return path
+    """Resample a path to have approximately num_points evenly spaced points.
 
-    # Calculate cumulative distances
-    dists = [0]
-    for i in range(1, len(path)):
-        d = ((path[i][0] - path[i-1][0])**2 + (path[i][1] - path[i-1][1])**2)**0.5
-        dists.append(dists[-1] + d)
-
-    total_len = dists[-1]
-    if total_len < 1:
-        return path
-
-    # Sample at even intervals
-    result = [path[0]]
-    target_spacing = total_len / (num_points - 1)
-
-    for i in range(1, num_points - 1):
-        target_dist = i * target_spacing
-        # Find the segment containing this distance
-        for j in range(1, len(dists)):
-            if dists[j] >= target_dist:
-                # Interpolate between path[j-1] and path[j]
-                t = (target_dist - dists[j-1]) / (dists[j] - dists[j-1]) if dists[j] != dists[j-1] else 0
-                x = path[j-1][0] + t * (path[j][0] - path[j-1][0])
-                y = path[j-1][1] + t * (path[j][1] - path[j-1][1])
-                result.append((x, y))
-                break
-
-    result.append(path[-1])
-    return result
+    Delegates to stroke_lib.utils.geometry.resample_path.
+    """
+    return sl_resample_path(path, num_points)
 
 
 def _quick_stroke_score(strokes, mask, stroke_width=8):
