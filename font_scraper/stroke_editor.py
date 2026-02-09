@@ -2946,13 +2946,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     # Classify segments by angle (vertical used for stroke detection)
     vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
 
-    # Get junction centroids
-    junction_centroids = []
-    for cluster in info['junction_clusters']:
-        cx = sum(p[0] for p in cluster) / len(cluster)
-        cy = sum(p[1] for p in cluster) / len(cluster)
-        junction_centroids.append((cx, cy))
-
     # Build tree of all skeleton pixels
     skel_list = list(info['skel_set'])
     if not skel_list:
@@ -3118,7 +3111,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
             mid_x = (bbox[0] + bbox[2]) / 2
             mid_y = (bbox[1] + bbox[3]) / 2
             h = bbox[3] - bbox[1]
-            w = bbox[2] - bbox[0]
             third_h = h / 3
             top_bound = bbox[1] + third_h
             bot_bound = bbox[1] + 2 * third_h
