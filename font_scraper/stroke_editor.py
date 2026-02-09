@@ -6866,6 +6866,228 @@ def _stream_phase0_template_matching(font_path, char, state):
     yield (affine_strokes_result, False)
 
 
+def _stream_phase1_greedy(templates, setup, state, x0, joint_args, elapsed_fn, time_budget):
+    """Phase 1: Greedy per-shape optimization.
+
+    Args:
+        templates: Shape templates for the character
+        setup: Setup dict from _setup_auto_fit
+        state: OptimizationStreamState
+        x0: Initial parameter vector
+        joint_args: Args tuple for _score_all_strokes
+        elapsed_fn: Function returning elapsed time
+        time_budget: Total time budget
+
+    Yields:
+        SSE frame strings
+
+    Returns via final yield:
+        greedy_x parameter vector
+    """
+    from scipy.optimize import differential_evolution, minimize
+
+    cloud = setup['cloud']
+    cloud_tree = setup['cloud_tree']
+    n_cloud = setup['n_cloud']
+    radius = setup['radius']
+    h, w = setup['h'], setup['w']
+    snap_yi, snap_xi = setup['snap_yi'], setup['snap_xi']
+    shape_types = setup['shape_types']
+    bounds = setup['bounds']
+    slices = setup['slices']
+    bounds_lo = setup['bounds_lo']
+    bounds_hi = setup['bounds_hi']
+    glyph_bbox = setup['glyph_bbox']
+
+    greedy_x = x0.copy()
+    uncovered_mask = np.ones(n_cloud, dtype=bool)
+    n_pts_shape = max(60, int(((glyph_bbox[2]-glyph_bbox[0])**2 +
+                                (glyph_bbox[3]-glyph_bbox[1])**2)**0.5 / 1.5))
+
+    for si in range(len(templates)):
+        if elapsed_fn() >= time_budget * 0.4:
+            break
+        start, end = slices[si]
+        stype = shape_types[si]
+        s_bounds = bounds[start:end]
+        s_x0 = greedy_x[start:end].copy()
+
+        uncov_idx = np.where(uncovered_mask)[0]
+        if len(uncov_idx) < 5:
+            break
+        uncov_pts = cloud[uncov_idx]
+        uncov_tree = cKDTree(uncov_pts)
+
+        s_args = (stype, glyph_bbox, uncov_pts, uncov_tree,
+                  len(uncov_pts), radius, snap_yi, snap_xi, w, h)
+
+        s_lo, s_hi = bounds_lo[start:end], bounds_hi[start:end]
+
+        def _greedy_nm_obj(params, _s_lo=s_lo, _s_hi=s_hi, _s_args=s_args):
+            return _score_single_shape(np.clip(params, _s_lo, _s_hi), *_s_args)
+
+        nm_r = minimize(_greedy_nm_obj, s_x0, method='Nelder-Mead',
+                       options={'maxfev': 800, 'xatol': 0.2, 'fatol': 0.002, 'adaptive': True})
+        best_s = np.clip(nm_r.x, s_lo, s_hi).copy()
+        best_sf = nm_r.fun
+
+        if elapsed_fn() < time_budget * 0.35:
+            try:
+                de_r = differential_evolution(_score_single_shape, bounds=s_bounds,
+                                              args=s_args, x0=best_s, maxiter=30,
+                                              popsize=12, tol=0.005, polish=False, disp=False)
+                if de_r.fun < best_sf:
+                    best_s = de_r.x.copy()
+            except Exception:
+                pass
+
+        greedy_x[start:end] = best_s
+
+        # Mark covered points
+        pts = SHAPE_FNS[stype](tuple(best_s), glyph_bbox, offset=(0, 0), n_pts=n_pts_shape)
+        if len(pts) > 0:
+            xi = np.clip(np.round(pts[:, 0]).astype(int), 0, w - 1)
+            yi = np.clip(np.round(pts[:, 1]).astype(int), 0, h - 1)
+            snapped = np.column_stack([snap_xi[yi, xi].astype(float),
+                                       snap_yi[yi, xi].astype(float)])
+            hits = cloud_tree.query_ball_point(snapped, radius)
+            for lst in hits:
+                for idx in lst:
+                    uncovered_mask[idx] = False
+
+        greedy_fun = _score_all_strokes(greedy_x, *joint_args)
+        state.update_best(greedy_x, greedy_fun)
+        uncov_remaining = int(uncovered_mask.sum())
+        yield f"data: {state.emit_frame(greedy_x, greedy_fun, f'greedy shape {si+1}/{len(templates)} ({stype}) uncov={uncov_remaining}')}\n\n"
+
+    yield greedy_x
+
+
+def _stream_phase2_refinement(state, joint_args, bounds, elapsed_fn, time_budget,
+                               stale_threshold=0.001, stale_cycles=2):
+    """Phase 2: Joint refinement cycles (NM -> DE -> polish).
+
+    Args:
+        state: OptimizationStreamState with best_x and best_fun set
+        joint_args: Args tuple for _score_all_strokes
+        bounds: Parameter bounds
+        elapsed_fn: Function returning elapsed time
+        time_budget: Total time budget
+        stale_threshold: Min improvement to not count as stale
+        stale_cycles: Number of stale cycles before stopping
+
+    Yields:
+        SSE frame strings
+
+    Returns via final yield:
+        Tuple of (cycle_count, stop_reason)
+    """
+    import time as _time
+    from scipy.optimize import differential_evolution, minimize
+
+    class _EarlyStop(Exception):
+        pass
+
+    stale_count = 0
+    cycle_num = 0
+
+    while not state.is_perfect() and elapsed_fn() < time_budget and stale_count < stale_cycles:
+        cycle_num += 1
+        score_at_cycle_start = state.best_fun
+
+        # NM refinement
+        if not state.is_perfect() and elapsed_fn() < time_budget:
+            nm_frames = []
+            nm_best = [state.best_x.copy()]
+            nm_best_f = [state.best_fun]
+
+            def _nm_obj_stream(params, _nb=nm_best, _nbf=nm_best_f, _nf=nm_frames, _cn=cycle_num):
+                params = state.clamp(params)
+                val = _score_all_strokes(params, *joint_args)
+                now = _time.monotonic()
+                if val < _nbf[0]:
+                    _nb[0] = params.copy()
+                    _nbf[0] = val
+                    _nf.append(state.emit_frame(params, val, f'cycle {_cn} NM improve'))
+                elif (now - state.last_emit) > 1.0:
+                    _nf.append(state.emit_frame(_nb[0], _nbf[0], f'cycle {_cn} NM'))
+                return val
+
+            remaining_fev = max(500, int(min(30.0, time_budget - elapsed_fn()) / 0.0003))
+            nm_result = minimize(_nm_obj_stream, state.best_x, method='Nelder-Mead',
+                                options={'maxfev': remaining_fev, 'xatol': 0.2,
+                                         'fatol': 0.0005, 'adaptive': True})
+            state.update_best(state.clamp(nm_result.x), nm_result.fun)
+            for f in nm_frames:
+                yield f"data: {f}\n\n"
+
+        # DE global search
+        if not state.is_perfect() and elapsed_fn() < time_budget:
+            nm_x = state.clamp(state.best_x.copy())
+            de_frames = []
+
+            def de_cb(xk, convergence=0, _df=de_frames, _cn=cycle_num):
+                val = _score_all_strokes(xk, *joint_args)
+                state.update_best(xk, val)
+                _df.append(state.emit_frame(state.best_x, state.best_fun,
+                                            f'cycle {_cn} DE conv={convergence:.3f}'))
+                if state.is_perfect() or elapsed_fn() >= time_budget:
+                    raise _EarlyStop()
+
+            try:
+                de = differential_evolution(_score_all_strokes, bounds=bounds,
+                                           args=joint_args, x0=nm_x, maxiter=200,
+                                           popsize=20, tol=0.002, mutation=(0.5, 1.0),
+                                           recombination=0.7, polish=False, disp=False,
+                                           callback=de_cb)
+                state.update_best(de.x, de.fun)
+            except _EarlyStop:
+                pass
+            for f in de_frames:
+                yield f"data: {f}\n\n"
+
+        # NM polish
+        if not state.is_perfect() and elapsed_fn() < time_budget:
+            polish_frames = []
+            polish_best = [state.best_x.copy()]
+            polish_best_f = [state.best_fun]
+
+            def _polish_obj(params, _pb=polish_best, _pbf=polish_best_f, _pf=polish_frames, _cn=cycle_num):
+                params = state.clamp(params)
+                val = _score_all_strokes(params, *joint_args)
+                if val < _pbf[0]:
+                    _pb[0] = params.copy()
+                    _pbf[0] = val
+                    _pf.append(state.emit_frame(params, val, f'cycle {_cn} polish'))
+                return val
+
+            remaining_fev = max(200, int(min(15.0, time_budget - elapsed_fn()) / 0.0003))
+            nm2 = minimize(_polish_obj, state.best_x, method='Nelder-Mead',
+                          options={'maxfev': remaining_fev, 'xatol': 0.1,
+                                   'fatol': 0.0005, 'adaptive': True})
+            state.update_best(state.clamp(nm2.x), nm2.fun)
+            for f in polish_frames:
+                yield f"data: {f}\n\n"
+
+        improvement = score_at_cycle_start - state.best_fun
+        if improvement < stale_threshold:
+            stale_count += 1
+        else:
+            stale_count = 0
+
+    # Determine stop reason
+    if state.is_perfect():
+        stop_reason = 'perfect'
+    elif stale_count >= stale_cycles:
+        stop_reason = 'converged'
+    elif elapsed_fn() >= time_budget:
+        stop_reason = 'time limit'
+    else:
+        stop_reason = 'done'
+
+    yield (cycle_num, stop_reason)
+
+
 def api_optimize_stream(font_id):
     """SSE endpoint: streams optimization frames in real time.
 
@@ -6965,66 +7187,13 @@ def api_optimize_stream(font_id):
         state.best_fun = init_fun
 
         # ---- Phase 1: Greedy per-shape ----
-        greedy_x = x0.copy()
-        uncovered_mask = np.ones(n_cloud, dtype=bool)
-        n_pts_shape = max(60, int(((glyph_bbox[2]-glyph_bbox[0])**2 +
-                                    (glyph_bbox[3]-glyph_bbox[1])**2)**0.5 / 1.5))
-
-        for si in range(len(templates)):
-            if _elapsed() >= _TIME_BUDGET * 0.4:
-                break
-            start, end = slices[si]
-            stype = shape_types[si]
-            s_bounds = bounds[start:end]
-            s_x0 = greedy_x[start:end].copy()
-
-            uncov_idx = np.where(uncovered_mask)[0]
-            if len(uncov_idx) < 5:
-                break
-            uncov_pts = cloud[uncov_idx]
-            uncov_tree = cKDTree(uncov_pts)
-
-            s_args = (stype, glyph_bbox, uncov_pts, uncov_tree,
-                      len(uncov_pts), radius, snap_yi, snap_xi, w, h)
-
-            s_lo, s_hi = bounds_lo[start:end], bounds_hi[start:end]
-
-            def _greedy_nm_obj(params, _s_lo=s_lo, _s_hi=s_hi, _s_args=s_args):
-                return _score_single_shape(np.clip(params, _s_lo, _s_hi), *_s_args)
-
-            nm_r = minimize(_greedy_nm_obj, s_x0, method='Nelder-Mead',
-                           options={'maxfev': 800, 'xatol': 0.2, 'fatol': 0.002, 'adaptive': True})
-            best_s = np.clip(nm_r.x, s_lo, s_hi).copy()
-            best_sf = nm_r.fun
-
-            if _elapsed() < _TIME_BUDGET * 0.35:
-                try:
-                    de_r = differential_evolution(_score_single_shape, bounds=s_bounds,
-                                                  args=s_args, x0=best_s, maxiter=30,
-                                                  popsize=12, tol=0.005, polish=False, disp=False)
-                    if de_r.fun < best_sf:
-                        best_s = de_r.x.copy()
-                except Exception:
-                    pass
-
-            greedy_x[start:end] = best_s
-
-            # Mark covered points
-            pts = SHAPE_FNS[stype](tuple(best_s), glyph_bbox, offset=(0, 0), n_pts=n_pts_shape)
-            if len(pts) > 0:
-                xi = np.clip(np.round(pts[:, 0]).astype(int), 0, w - 1)
-                yi = np.clip(np.round(pts[:, 1]).astype(int), 0, h - 1)
-                snapped = np.column_stack([snap_xi[yi, xi].astype(float),
-                                           snap_yi[yi, xi].astype(float)])
-                hits = cloud_tree.query_ball_point(snapped, radius)
-                for lst in hits:
-                    for idx in lst:
-                        uncovered_mask[idx] = False
-
-            greedy_fun = _score_all_strokes(greedy_x, *joint_args)
-            state.update_best(greedy_x, greedy_fun)
-            uncov_remaining = int(uncovered_mask.sum())
-            yield f"data: {state.emit_frame(greedy_x, greedy_fun, f'greedy shape {si+1}/{len(templates)} ({stype}) uncov={uncov_remaining}')}\n\n"
+        greedy_x = None
+        for item in _stream_phase1_greedy(templates, setup, state, x0, joint_args,
+                                          _elapsed, _TIME_BUDGET):
+            if isinstance(item, np.ndarray):
+                greedy_x = item
+            else:
+                yield item
 
         # Compare with x0
         x0_fun = _score_all_strokes(x0, *joint_args)
@@ -7032,109 +7201,21 @@ def api_optimize_stream(font_id):
             state.best_x = x0.copy()
             state.best_fun = x0_fun
 
-        class _EarlyStop(Exception):
-            pass
-
         # ---- Phase 2: Refinement cycles ----
-        stale_count = 0
         cycle_num = 0
-        while not state.is_perfect() and _elapsed() < _TIME_BUDGET and stale_count < _STALE_CYCLES:
-            cycle_num += 1
-            score_at_cycle_start = state.best_fun
-
-            # NM refinement
-            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
-                nm_frames = []
-                nm_best = [state.best_x.copy()]
-                nm_best_f = [state.best_fun]
-
-                def _nm_obj_stream(params, _nb=nm_best, _nbf=nm_best_f, _nf=nm_frames, _cn=cycle_num):
-                    params = state.clamp(params)
-                    val = _score_all_strokes(params, *joint_args)
-                    now = _time.monotonic()
-                    if val < _nbf[0]:
-                        _nb[0] = params.copy()
-                        _nbf[0] = val
-                        _nf.append(state.emit_frame(params, val, f'cycle {_cn} NM improve'))
-                    elif (now - state.last_emit) > 1.0:
-                        _nf.append(state.emit_frame(_nb[0], _nbf[0], f'cycle {_cn} NM'))
-                    return val
-
-                remaining_fev = max(500, int(min(30.0, _TIME_BUDGET - _elapsed()) / 0.0003))
-                nm_result = minimize(_nm_obj_stream, state.best_x, method='Nelder-Mead',
-                                    options={'maxfev': remaining_fev, 'xatol': 0.2,
-                                             'fatol': 0.0005, 'adaptive': True})
-                state.update_best(state.clamp(nm_result.x), nm_result.fun)
-                for f in nm_frames:
-                    yield f"data: {f}\n\n"
-
-            # DE global search
-            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
-                nm_x = state.clamp(state.best_x.copy())
-                de_frames = []
-
-                def de_cb(xk, convergence=0, _df=de_frames, _cn=cycle_num):
-                    val = _score_all_strokes(xk, *joint_args)
-                    state.update_best(xk, val)
-                    _df.append(state.emit_frame(state.best_x, state.best_fun,
-                                                f'cycle {_cn} DE conv={convergence:.3f}'))
-                    if state.is_perfect() or _elapsed() >= _TIME_BUDGET:
-                        raise _EarlyStop()
-
-                try:
-                    de = differential_evolution(_score_all_strokes, bounds=bounds,
-                                               args=joint_args, x0=nm_x, maxiter=200,
-                                               popsize=20, tol=0.002, mutation=(0.5, 1.0),
-                                               recombination=0.7, polish=False, disp=False,
-                                               callback=de_cb)
-                    state.update_best(de.x, de.fun)
-                except _EarlyStop:
-                    pass
-                for f in de_frames:
-                    yield f"data: {f}\n\n"
-
-            # NM polish
-            if not state.is_perfect() and _elapsed() < _TIME_BUDGET:
-                polish_frames = []
-                polish_best = [state.best_x.copy()]
-                polish_best_f = [state.best_fun]
-
-                def _polish_obj(params, _pb=polish_best, _pbf=polish_best_f, _pf=polish_frames, _cn=cycle_num):
-                    params = state.clamp(params)
-                    val = _score_all_strokes(params, *joint_args)
-                    if val < _pbf[0]:
-                        _pb[0] = params.copy()
-                        _pbf[0] = val
-                        _pf.append(state.emit_frame(params, val, f'cycle {_cn} polish'))
-                    return val
-
-                remaining_fev = max(200, int(min(15.0, _TIME_BUDGET - _elapsed()) / 0.0003))
-                nm2 = minimize(_polish_obj, state.best_x, method='Nelder-Mead',
-                              options={'maxfev': remaining_fev, 'xatol': 0.1,
-                                       'fatol': 0.0005, 'adaptive': True})
-                state.update_best(state.clamp(nm2.x), nm2.fun)
-                for f in polish_frames:
-                    yield f"data: {f}\n\n"
-
-            improvement = score_at_cycle_start - state.best_fun
-            if improvement < _STALE_THRESHOLD:
-                stale_count += 1
+        stop_reason = 'done'
+        for item in _stream_phase2_refinement(state, joint_args, bounds, _elapsed,
+                                               _TIME_BUDGET, _STALE_THRESHOLD, _STALE_CYCLES):
+            if isinstance(item, tuple):
+                cycle_num, stop_reason = item
             else:
-                stale_count = 0
+                yield item
 
+            # Save cache during refinement
             current_score = float(-state.best_fun)
             if cached_score is None or current_score > cached_score:
                 _save_cached_params(rel_path, char, state.best_x, current_score)
-
-        # Determine stop reason
-        if state.is_perfect():
-            stop_reason = 'perfect'
-        elif stale_count >= _STALE_CYCLES:
-            stop_reason = 'converged'
-        elif _elapsed() >= _TIME_BUDGET:
-            stop_reason = 'time limit'
-        else:
-            stop_reason = 'done'
+                cached_score = current_score
 
         # Final frame
         final_score = float(-state.best_fun)
