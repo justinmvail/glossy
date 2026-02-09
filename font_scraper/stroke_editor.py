@@ -2724,27 +2724,14 @@ def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, a
     if avoid_pixels is None:
         avoid_pixels = set()
 
-    start = tuple(start) if not isinstance(start, tuple) else start
-
-    # If start not on skeleton, find nearest
-    if start not in skel_set:
-        min_dist = float('inf')
-        for p in skel_set:
-            d = (p[0] - start[0])**2 + (p[1] - start[1])**2
-            if d < min_dist:
-                min_dist = d
-                start = p
+    # Snap start to skeleton
+    start = _snap_to_skeleton(start, skel_set)
 
     # Check if we're already in the target region
     if point_in_region(start, target_region, bbox):
         return [start]
 
     # Calculate target region center for direction guidance
-    NUMPAD_POS = {
-        7: (0.0, 0.0), 8: (0.5, 0.0), 9: (1.0, 0.0),
-        4: (0.0, 0.5), 5: (0.5, 0.5), 6: (1.0, 0.5),
-        1: (0.0, 1.0), 2: (0.5, 1.0), 3: (1.0, 1.0),
-    }
     x_min, y_min, x_max, y_max = bbox
     frac_x, frac_y = NUMPAD_POS[target_region]
     target_center = (x_min + frac_x * (x_max - x_min),
@@ -2840,8 +2827,6 @@ def _quick_stroke_score(strokes, mask, stroke_width=8):
     minus overshoot penalty (strokes outside the glyph).
     Higher is better.
     """
-    from PIL import Image, ImageDraw
-
     h, w = mask.shape
     stroke_img = Image.new('L', (w, h), 255)
     draw = ImageDraw.Draw(stroke_img)
@@ -2958,9 +2943,8 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     # Find skeleton segments and classify by direction
     segments = _find_skeleton_segments(info)
 
-    # Classify segments by angle
+    # Classify segments by angle (vertical used for stroke detection)
     vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
-    horizontal_segments = [s for s in segments if abs(s['angle']) <= 30 or abs(s['angle']) >= 150]
 
     # Get junction centroids
     junction_centroids = []
@@ -2981,13 +2965,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
         x = bbox[0] + frac_x * (bbox[2] - bbox[0])
         y = bbox[1] + frac_y * (bbox[3] - bbox[1])
         return (x, y)
-
-    def find_skeleton_in_region(region):
-        """Find any skeleton pixel that falls within a region."""
-        for p in skel_list:
-            if point_in_region(p, region, bbox):
-                return p
-        return None
 
     def find_nearest_skeleton(pos):
         """Find the nearest skeleton pixel to a position."""
@@ -3014,19 +2991,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
         col2 = (r2 - 1) % 3
         return col1 == col2
 
-    def is_horizontal_stroke(stroke_template):
-        """Check if a stroke template represents a horizontal line."""
-        if len(stroke_template) != 2:
-            return False
-        r1 = extract_region(stroke_template[0])
-        r2 = extract_region(stroke_template[1])
-        if r1 is None or r2 is None:
-            return False
-        # Same row in numpad: (7,8,9), (4,5,6), (1,2,3)
-        row1 = (r1 - 1) // 3
-        row2 = (r2 - 1) // 3
-        return row1 == row2
-
     def find_best_vertical_segment(template_start, template_end):
         """Find the vertical skeleton segment(s) closest to template positions.
 
@@ -3041,8 +3005,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
             truly_vertical = vertical_segments  # Fallback
 
         # Build a graph of connected vertical segments
-        from collections import defaultdict
-
         junction_to_segs = defaultdict(list)
         for i, seg in enumerate(truly_vertical):
             if seg['start_junction'] >= 0:
