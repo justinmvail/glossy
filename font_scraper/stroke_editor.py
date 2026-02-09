@@ -919,21 +919,9 @@ def _smooth_stroke(points, sigma=2.0):
 def _constrain_to_mask(points, mask):
     """Constrain points to stay inside the glyph mask.
 
-    For any point outside the mask, snap it to the nearest inside pixel.
+    Delegates to stroke_lib.utils.geometry.constrain_to_mask.
     """
-    h, w = mask.shape
-    dist_out, indices = distance_transform_edt(~mask, return_indices=True)
-    result = []
-    for x, y in points:
-        ix = int(round(min(max(x, 0), w - 1)))
-        iy = int(round(min(max(y, 0), h - 1)))
-        if mask[iy, ix]:
-            result.append((x, y))
-        else:
-            ny = float(indices[0, iy, ix])
-            nx = float(indices[1, iy, ix])
-            result.append((nx, ny))
-    return result
+    return sl_constrain_to_mask(points, mask)
 
 
 # ---------------------------------------------------------------------------
@@ -6074,344 +6062,47 @@ def api_center_borders(font_id):
     return jsonify(strokes=result)
 
 
-def _build_skeleton_adjacency(skel_set):
-    """Build 8-connected adjacency graph from skeleton pixel set.
-
-    Args:
-        skel_set: Set of (x, y) skeleton pixel coordinates
-
-    Returns:
-        defaultdict mapping each pixel to list of neighboring skeleton pixels
-    """
-    adj = defaultdict(list)
-    for (x, y) in skel_set:
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue
-                n = (x + dx, y + dy)
-                if n in skel_set:
-                    adj[(x, y)].append(n)
-    return adj
-
-
-def _merge_junction_clusters(junction_clusters, junction_pixels, adj, assigned, merge_dist=12):
-    """Merge nearby junction clusters whose centroids are within merge_dist.
-
-    Modifies junction_clusters, junction_pixels, and assigned in place.
-
-    Args:
-        junction_clusters: List of sets, each set containing junction pixel coordinates
-        junction_pixels: Set of all junction pixel coordinates
-        adj: Adjacency graph from _build_skeleton_adjacency
-        assigned: Dict mapping pixel -> cluster_index
-        merge_dist: Maximum distance between cluster centroids to trigger merge
-    """
-    merged_flag = True
-    while merged_flag:
-        merged_flag = False
-        for i in range(len(junction_clusters)):
-            ci = junction_clusters[i]
-            cx_i = sum(p[0] for p in ci) / len(ci)
-            cy_i = sum(p[1] for p in ci) / len(ci)
-            for j in range(i + 1, len(junction_clusters)):
-                cj = junction_clusters[j]
-                cx_j = sum(p[0] for p in cj) / len(cj)
-                cy_j = sum(p[1] for p in cj) / len(cj)
-                dx = cx_i - cx_j
-                dy = cy_i - cy_j
-                if (dx * dx + dy * dy) ** 0.5 < merge_dist:
-                    # Merge j into i, also absorb bridging skeleton pixels
-                    # BFS from ci to find shortest path to any pixel in cj
-                    bfs_q = deque()
-                    bfs_parent = {}
-                    for p in ci:
-                        bfs_q.append(p)
-                        bfs_parent[p] = None
-                    bridge_path = []
-                    while bfs_q:
-                        p = bfs_q.popleft()
-                        if p in cj:
-                            # Trace back path
-                            cur = p
-                            while cur is not None and cur not in ci:
-                                bridge_path.append(cur)
-                                cur = bfs_parent[cur]
-                            break
-                        for nb in adj[p]:
-                            if nb not in bfs_parent:
-                                bfs_parent[nb] = p
-                                bfs_q.append(nb)
-                    merged_cluster = ci | cj
-                    for bp in bridge_path:
-                        merged_cluster.add(bp)
-                        junction_pixels.add(bp)
-                    junction_clusters[i] = merged_cluster
-                    junction_clusters.pop(j)
-                    # Rebuild assigned for all clusters
-                    for p in junction_clusters[i]:
-                        assigned[p] = i
-                    for k in range(j, len(junction_clusters)):
-                        for p in junction_clusters[k]:
-                            assigned[p] = k
-                    merged_flag = True
-                    break
-            if merged_flag:
-                break
-
-
 def _analyze_skeleton(mask):
-    """Skeletonize a mask and return adjacency, junction clusters, and endpoints."""
-    skel = skeletonize(mask)
-    ys, xs = np.where(skel)
-    skel_set = set(zip(xs.tolist(), ys.tolist()))
-    if not skel_set:
+    """Skeletonize a mask and return adjacency, junction clusters, and endpoints.
+
+    Delegates to stroke_lib.analysis.skeleton.SkeletonAnalyzer for the core analysis.
+    """
+    analyzer = SLSkeletonAnalyzer(merge_distance=12)
+    info = analyzer.analyze(mask)
+    if info is None:
         return None
 
-    # Build adjacency (8-connected)
-    adj = _build_skeleton_adjacency(skel_set)
-
-    # Cluster adjacent junction pixels into single logical junctions
-    junction_pixels = set(p for p in skel_set if len(adj[p]) >= 3)
-    junction_clusters = []  # list of sets
-    assigned = {}  # pixel -> cluster_index
-    for jp in junction_pixels:
-        if jp in assigned:
-            continue
-        cluster = set()
-        queue = [jp]
-        while queue:
-            p = queue.pop()
-            if p in cluster:
-                continue
-            cluster.add(p)
-            assigned[p] = len(junction_clusters)
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    if dx == 0 and dy == 0:
-                        continue
-                    n = (p[0] + dx, p[1] + dy)
-                    if n in junction_pixels and n not in cluster:
-                        queue.append(n)
-        junction_clusters.append(cluster)
-
-    # Merge nearby junction clusters
-    _merge_junction_clusters(junction_clusters, junction_pixels, adj, assigned)
-
-    endpoints = set(p for p in skel_set if len(adj[p]) == 1)
+    # Convert SkeletonInfo to dict format for backwards compatibility
+    # Convert adj from set-based to list-based (downstream code uses indexing)
+    adj_as_lists = defaultdict(list)
+    for pixel, neighbors in info.adj.items():
+        adj_as_lists[pixel] = list(neighbors)
 
     return {
-        'skel_set': skel_set,
-        'adj': adj,
-        'junction_pixels': junction_pixels,
-        'junction_clusters': junction_clusters,
-        'assigned': assigned,
-        'endpoints': endpoints,
+        'skel_set': info.skel_set,
+        'adj': adj_as_lists,
+        'junction_pixels': info.junction_pixels,
+        'junction_clusters': info.junction_clusters,
+        'assigned': info.assigned,
+        'endpoints': info.endpoints,
     }
-
-
-def _merge_nearby_points(points, threshold):
-    """Merge nearby points by averaging their positions.
-
-    Args:
-        points: List of [x, y] points
-        threshold: Distance threshold for merging
-
-    Returns:
-        Modified list with nearby points merged
-    """
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(points)):
-            for j in range(i + 1, len(points)):
-                dx = points[i][0] - points[j][0]
-                dy = points[i][1] - points[j][1]
-                if (dx * dx + dy * dy) ** 0.5 < threshold:
-                    points[i] = [(points[i][0] + points[j][0]) / 2,
-                                 (points[i][1] + points[j][1]) / 2]
-                    points.pop(j)
-                    merged = True
-                    break
-            if merged:
-                break
-    return points
-
-
-def _classify_junctions_as_vertices(endpoints, junction_clusters, junction_pixels, adj, assigned, vertices):
-    """Classify junction clusters as vertex vs intersection based on convergence stubs.
-
-    A vertex has a convergence stub: a short skeleton path from the junction to a
-    nearby endpoint, meaning strokes converge to a point (e.g. apex of A).
-    An intersection has no convergence stub: strokes cross through it.
-
-    Args:
-        endpoints: Set of endpoint pixels
-        junction_clusters: List of junction cluster pixel sets
-        junction_pixels: Set of all junction pixels
-        adj: Adjacency graph
-        assigned: Dict mapping pixel -> cluster_index
-        vertices: List of [x, y] vertex positions (will be modified)
-
-    Returns:
-        Tuple of (is_vertex_flags, absorbed_endpoints) where:
-        - is_vertex_flags is list of bool for each junction cluster
-        - absorbed_endpoints is set of endpoints that were used as convergence stubs
-    """
-    stub_max_len = 18  # convergence stubs are short artifacts, not real strokes
-    absorbed_endpoints = set()
-    is_vertex = [False] * len(junction_clusters)
-
-    for (ex, ey) in endpoints:
-        if (ex, ey) in junction_pixels:
-            continue
-        # Trace from this endpoint toward a junction cluster
-        path = [(ex, ey)]
-        current = (ex, ey)
-        prev = None
-        reached_cluster = -1
-        for _ in range(stub_max_len):
-            neighbors = [n for n in adj[current] if n != prev]
-            if not neighbors:
-                break
-            nxt = neighbors[0]
-            path.append(nxt)
-            if nxt in junction_pixels:
-                reached_cluster = assigned.get(nxt, -1)
-                break
-            if len(adj[nxt]) != 2:
-                break  # branching or dead end
-            prev, current = current, nxt
-        if reached_cluster < 0:
-            continue
-
-        # Collect direction vectors of OTHER branches leaving this cluster
-        cluster = junction_clusters[reached_cluster]
-        path_set = set(path)
-        branch_dirs = []
-        for cp in cluster:
-            for nb in adj[cp]:
-                if nb in cluster or nb in path_set:
-                    continue
-                # Walk a few steps to get a stable direction
-                bx, by = nb[0] - cp[0], nb[1] - cp[1]
-                cur, prv = nb, cp
-                for _ in range(6):
-                    nbs = [n for n in adj[cur] if n != prv and n not in cluster]
-                    if not nbs:
-                        break
-                    nxt = nbs[0]
-                    prv, cur = cur, nxt
-                bx, by = cur[0] - cp[0], cur[1] - cp[1]
-                bl = (bx * bx + by * by) ** 0.5
-                if bl > 0.01:
-                    branch_dirs.append((bx / bl, by / bl))
-        if len(branch_dirs) < 2:
-            continue
-
-        # Check if any two branches form a pass-through (roughly opposite
-        # directions, dot < -0.5).  Threshold -0.5 corresponds to ~120° apart.
-        is_passthrough = False
-        for i in range(len(branch_dirs)):
-            for j in range(i + 1, len(branch_dirs)):
-                dot = (branch_dirs[i][0] * branch_dirs[j][0] +
-                       branch_dirs[i][1] * branch_dirs[j][1])
-                if dot < -0.5:
-                    is_passthrough = True
-                    break
-            if is_passthrough:
-                break
-
-        # Check convergence: the stub must be opposite ALL branches
-        ccx = sum(p[0] for p in cluster) / len(cluster)
-        ccy = sum(p[1] for p in cluster) / len(cluster)
-        sdx, sdy = ex - ccx, ey - ccy
-        sl = (sdx * sdx + sdy * sdy) ** 0.5
-        if sl > 0.01:
-            sdx /= sl
-            sdy /= sl
-        all_branches_opposite = True
-        for bd in branch_dirs:
-            if sdx * bd[0] + sdy * bd[1] >= -0.5:
-                all_branches_opposite = False
-                break
-
-        if is_passthrough or not all_branches_opposite:
-            # Not a convergence vertex
-            absorbed_endpoints.add((ex, ey))
-            continue
-
-        # Branches converge → vertex
-        is_vertex[reached_cluster] = True
-        vertices[reached_cluster] = [float(ex), float(ey)]
-        absorbed_endpoints.add((ex, ey))
-
-    return is_vertex, absorbed_endpoints
 
 
 def skeleton_detect_markers(mask, merge_dist=12):
     """Detect vertex (junction) and termination (endpoint) markers from skeleton.
+
+    Delegates to stroke_lib.analysis.skeleton.SkeletonAnalyzer for marker detection.
 
     Vertices = centroids of junction clusters (where 3+ branches meet).
     Terminations = skeleton endpoints (degree 1 pixels).
     Nearby vertices are merged. Terminations that fall inside a junction
     cluster are removed (they're part of the junction, not real endpoints).
     """
-    info = _analyze_skeleton(mask)
-    if not info:
-        return []
+    analyzer = SLSkeletonAnalyzer(merge_distance=merge_dist)
+    sl_markers = analyzer.detect_markers(mask)
 
-    adj = info['adj']
-    endpoints = info['endpoints']
-    junction_pixels = info['junction_pixels']
-    junction_clusters = info['junction_clusters']
-    assigned = info['assigned']
-
-    # Vertices: centroid of each junction cluster
-    vertices = []
-    for cluster in junction_clusters:
-        cx = sum(p[0] for p in cluster) / len(cluster)
-        cy = sum(p[1] for p in cluster) / len(cluster)
-        vertices.append([cx, cy])
-
-    # Merge nearby vertices
-    _merge_nearby_points(vertices, merge_dist)
-
-    # Classify junction clusters as vertex vs intersection
-    is_vertex, absorbed_endpoints = _classify_junctions_as_vertices(
-        endpoints, junction_clusters, junction_pixels, adj, assigned, vertices)
-
-    # Keep terminations that aren't inside a junction cluster, aren't
-    # too close to a vertex, and weren't absorbed as convergence stubs
-    near_vertex_dist = 5
-    terminations = []
-    for (x, y) in endpoints:
-        if (x, y) in junction_pixels:
-            continue
-        if (x, y) in absorbed_endpoints:
-            continue
-        # Check distance to nearest vertex
-        too_close = False
-        for v in vertices:
-            dx = v[0] - x
-            dy = v[1] - y
-            if (dx * dx + dy * dy) ** 0.5 < near_vertex_dist:
-                too_close = True
-                break
-        if not too_close:
-            terminations.append([float(x), float(y)])
-
-    # Merge terminations that are very close to each other
-    _merge_nearby_points(terminations, 5)
-
-    markers = []
-    for i, v in enumerate(vertices):
-        mtype = 'vertex' if is_vertex[i] else 'intersection'
-        markers.append({'x': round(v[0], 1), 'y': round(v[1], 1), 'type': mtype})
-    for t in terminations:
-        markers.append({'x': t[0], 'y': t[1], 'type': 'termination'})
-
-    return markers
+    # Convert Marker objects to dict format for backwards compatibility
+    return [m.to_dict() for m in sl_markers]
 
 
 # ============================================================================

@@ -97,36 +97,31 @@ def resample_path(path: List[Tuple[float, float]], num_points: int) -> List[Tupl
 
 
 def constrain_to_mask(points: List[Tuple[float, float]], mask: np.ndarray) -> List[Tuple[float, float]]:
-    """Constrain stroke points to stay within a binary mask."""
+    """Constrain stroke points to stay within a binary mask.
+
+    For any point outside the mask, snaps it to the nearest inside pixel
+    using scipy's distance transform with index mapping for efficiency.
+    """
     from scipy.ndimage import distance_transform_edt
 
     if len(points) < 2:
         return points
 
     h, w = mask.shape
-    dist = distance_transform_edt(mask)
+    # Compute distance transform on inverted mask to find nearest inside pixels
+    _, indices = distance_transform_edt(~mask, return_indices=True)
 
     result = []
     for x, y in points:
-        ix, iy = int(round(x)), int(round(y))
-        if 0 <= ix < w and 0 <= iy < h and mask[iy, ix]:
+        ix = int(round(min(max(x, 0), w - 1)))
+        iy = int(round(min(max(y, 0), h - 1)))
+        if mask[iy, ix]:
             result.append((x, y))
         else:
-            # Find nearest point inside mask
-            search_radius = 10
-            best_dist = float('inf')
-            best_pt = (x, y)
-
-            for dy in range(-search_radius, search_radius + 1):
-                for dx in range(-search_radius, search_radius + 1):
-                    nx, ny = ix + dx, iy + dy
-                    if 0 <= nx < w and 0 <= ny < h and mask[ny, nx]:
-                        d = dx*dx + dy*dy
-                        if d < best_dist:
-                            best_dist = d
-                            best_pt = (float(nx), float(ny))
-
-            result.append(best_pt)
+            # Use distance transform indices to find nearest inside pixel
+            ny = float(indices[0, iy, ix])
+            nx = float(indices[1, iy, ix])
+            result.append((nx, ny))
 
     return result
 
