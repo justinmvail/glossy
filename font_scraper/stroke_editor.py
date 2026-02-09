@@ -87,6 +87,629 @@ STYLE_HINTS = {'straight'}
 ALL_HINTS = DIRECTION_HINTS | STYLE_HINTS
 
 
+# --- Pipeline data classes for minimal_strokes_from_skeleton ---
+
+@dataclass
+class SkeletonAnalysis:
+    """Analyzed skeleton data for stroke generation."""
+    mask: np.ndarray
+    info: Dict  # skeleton info dict
+    segments: List[Dict]  # classified segments
+    vertical_segments: List[Dict]
+    bbox: Tuple[float, float, float, float]
+    skel_list: List[Tuple[int, int]]
+    skel_tree: 'cKDTree'
+    glyph_rows: np.ndarray  # row indices of glyph pixels
+    glyph_cols: np.ndarray  # column indices of glyph pixels
+
+
+@dataclass
+class ResolvedWaypoint:
+    """A waypoint with its resolved pixel position."""
+    position: Tuple[float, float]
+    region: int
+    is_curve: bool = False
+    is_vertex: bool = False
+    is_intersection: bool = False
+    apex_extension: Optional[Tuple[str, Tuple[float, float]]] = None  # ('top'/'bottom', (x, y))
+
+
+@dataclass
+class VariantResult:
+    """Result of evaluating one template variant."""
+    strokes: Optional[List[List[List[float]]]]
+    score: float
+    variant_name: str
+
+
+class MinimalStrokePipeline:
+    """Pipeline for generating minimal strokes from skeleton analysis.
+
+    Stages:
+    1. analyze() - Render mask and analyze skeleton
+    2. resolve_waypoints() - Find pixel positions for template waypoints
+    3. trace_paths() - Connect waypoints along skeleton
+    4. evaluate_variant() - Score a complete variant result
+    """
+
+    def __init__(self, font_path: str, char: str, canvas_size: int = 224):
+        self.font_path = resolve_font_path(font_path)
+        self.char = char
+        self.canvas_size = canvas_size
+        self._analysis: Optional[SkeletonAnalysis] = None
+
+    @property
+    def analysis(self) -> Optional[SkeletonAnalysis]:
+        """Lazy-load skeleton analysis."""
+        if self._analysis is None:
+            self._analysis = self._analyze()
+        return self._analysis
+
+    def _analyze(self) -> Optional[SkeletonAnalysis]:
+        """Stage 1: Render mask and analyze skeleton."""
+        mask = render_glyph_mask(self.font_path, self.char, self.canvas_size)
+        if mask is None:
+            return None
+
+        rows, cols = np.where(mask)
+        if len(rows) == 0:
+            return None
+
+        bbox = (float(cols.min()), float(rows.min()),
+                float(cols.max()), float(rows.max()))
+
+        info = _analyze_skeleton(mask)
+        if info is None:
+            return None
+
+        segments = _find_skeleton_segments(info)
+        vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
+
+        skel_list = list(info['skel_set'])
+        if not skel_list:
+            return None
+
+        skel_tree = cKDTree(skel_list)
+
+        return SkeletonAnalysis(
+            mask=mask,
+            info=info,
+            segments=segments,
+            vertical_segments=vertical_segments,
+            bbox=bbox,
+            skel_list=skel_list,
+            skel_tree=skel_tree,
+            glyph_rows=rows,
+            glyph_cols=cols,
+        )
+
+    def numpad_to_pixel(self, region: int) -> Tuple[float, float]:
+        """Map numpad region (1-9) to pixel coordinates."""
+        bbox = self.analysis.bbox
+        frac_x, frac_y = NUMPAD_POS[region]
+        x = bbox[0] + frac_x * (bbox[2] - bbox[0])
+        y = bbox[1] + frac_y * (bbox[3] - bbox[1])
+        return (x, y)
+
+    def find_nearest_skeleton(self, pos: Tuple[float, float]) -> Tuple[int, int]:
+        """Find the nearest skeleton pixel to a position."""
+        _, idx = self.analysis.skel_tree.query(pos)
+        return self.analysis.skel_list[idx]
+
+    def find_best_vertical_segment(self, template_start: Tuple[float, float],
+                                   template_end: Tuple[float, float]) -> Optional[Tuple]:
+        """Find vertical skeleton segment(s) closest to template positions."""
+        vertical_segments = self.analysis.vertical_segments
+        if not vertical_segments:
+            return None
+
+        # Filter to truly vertical segments
+        truly_vertical = [s for s in vertical_segments if 75 <= abs(s['angle']) <= 105]
+        if not truly_vertical:
+            truly_vertical = vertical_segments
+
+        # Build graph of connected vertical segments
+        junction_to_segs = defaultdict(list)
+        for i, seg in enumerate(truly_vertical):
+            if seg['start_junction'] >= 0:
+                junction_to_segs[seg['start_junction']].append(i)
+            if seg['end_junction'] >= 0:
+                junction_to_segs[seg['end_junction']].append(i)
+
+        # Find chains by grouping connected segments
+        visited = set()
+        chains = []
+
+        for i in range(len(truly_vertical)):
+            if i in visited:
+                continue
+            chain = []
+            queue = [i]
+            while queue:
+                seg_idx = queue.pop(0)
+                if seg_idx in visited:
+                    continue
+                visited.add(seg_idx)
+                chain.append(seg_idx)
+                seg = truly_vertical[seg_idx]
+                for junc in [seg['start_junction'], seg['end_junction']]:
+                    if junc >= 0:
+                        for other_idx in junction_to_segs[junc]:
+                            if other_idx not in visited:
+                                queue.append(other_idx)
+            if chain:
+                chains.append(chain)
+
+        # Find best chain matching template
+        best = None
+        best_score = float('inf')
+
+        for chain in chains:
+            points = []
+            for seg_idx in chain:
+                seg = truly_vertical[seg_idx]
+                points.append(seg['start'])
+                points.append(seg['end'])
+
+            if not points:
+                continue
+
+            points.sort(key=lambda p: p[1])
+            top, bottom = points[0], points[-1]
+
+            d1 = ((top[0] - template_start[0])**2 + (top[1] - template_start[1])**2)**0.5
+            d2 = ((bottom[0] - template_end[0])**2 + (bottom[1] - template_end[1])**2)**0.5
+            d1r = ((bottom[0] - template_start[0])**2 + (bottom[1] - template_start[1])**2)**0.5
+            d2r = ((top[0] - template_end[0])**2 + (top[1] - template_end[1])**2)**0.5
+
+            score = min(d1 + d2, d1r + d2r)
+            if score < best_score:
+                best_score = score
+                best = (top, bottom) if d1 + d2 <= d1r + d2r else (bottom, top)
+
+        return best
+
+    def resolve_waypoint(self, wp: ParsedWaypoint, next_direction: Optional[str],
+                         mid_x: float, mid_y: float, top_bound: float,
+                         bot_bound: float, waist_margin: float) -> ResolvedWaypoint:
+        """Stage 2: Resolve a single waypoint to pixel coordinates."""
+        analysis = self.analysis
+        bbox = analysis.bbox
+        skel_list = analysis.skel_list
+        info = analysis.info
+
+        template_pos = self.numpad_to_pixel(wp.region)
+        apex_extension = None
+
+        if wp.is_intersection:
+            # Find junction point in the region
+            junction_pixels_in_region = [p for p in info.get('junction_pixels', [])
+                                         if point_in_region(p, wp.region, bbox)]
+            if junction_pixels_in_region:
+                pos = min(junction_pixels_in_region, key=lambda p:
+                         (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+            else:
+                pos = self.find_nearest_skeleton(template_pos)
+            return ResolvedWaypoint(
+                position=(float(pos[0]), float(pos[1])),
+                region=wp.region, is_intersection=True
+            )
+
+        if wp.is_vertex:
+            # Find extremum skeleton pixel for apex
+            result = self._resolve_vertex(wp.region, template_pos, top_bound, bot_bound, mid_x, mid_y)
+            return result
+
+        if wp.is_curve:
+            # Find curve apex
+            if template_pos[1] < mid_y:
+                region_pixels = [p for p in skel_list if p[1] < mid_y - waist_margin]
+            else:
+                region_pixels = [p for p in skel_list if p[1] > mid_y + waist_margin]
+
+            if region_pixels:
+                if template_pos[0] > mid_x:
+                    apex = max(region_pixels, key=lambda p: p[0])
+                elif template_pos[0] < mid_x:
+                    apex = min(region_pixels, key=lambda p: p[0])
+                else:
+                    apex = self.find_nearest_skeleton(template_pos)
+            else:
+                apex = self.find_nearest_skeleton(template_pos)
+
+            return ResolvedWaypoint(
+                position=(float(apex[0]), float(apex[1])),
+                region=wp.region, is_curve=True
+            )
+
+        # Terminal waypoint (plain int)
+        return self._resolve_terminal(wp.region, template_pos, next_direction,
+                                      mid_x, top_bound, bot_bound)
+
+    def _resolve_terminal(self, region: int, template_pos: Tuple[float, float],
+                          next_direction: Optional[str], mid_x: float,
+                          top_bound: float, bot_bound: float) -> ResolvedWaypoint:
+        """Resolve a terminal waypoint position."""
+        analysis = self.analysis
+        bbox = analysis.bbox
+        skel_list = analysis.skel_list
+        info = analysis.info
+
+        region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
+
+        if not region_pixels:
+            if template_pos[1] < top_bound:
+                region_pixels = [p for p in skel_list if p[1] < top_bound]
+            elif template_pos[1] > bot_bound:
+                region_pixels = [p for p in skel_list if p[1] > bot_bound]
+            else:
+                region_pixels = [p for p in skel_list if top_bound <= p[1] <= bot_bound]
+
+        if not region_pixels:
+            pos = self.find_nearest_skeleton(template_pos)
+            return ResolvedWaypoint(position=(float(pos[0]), float(pos[1])), region=region)
+
+        extremum = None
+
+        # Direction hint determines placement
+        if next_direction == 'down':
+            extremum = min(region_pixels, key=lambda p: p[1])
+        elif next_direction == 'up':
+            extremum = max(region_pixels, key=lambda p: p[1])
+        elif next_direction == 'left':
+            extremum = max(region_pixels, key=lambda p: p[0])
+        elif next_direction == 'right':
+            extremum = min(region_pixels, key=lambda p: p[0])
+        elif info['endpoints']:
+            endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region, bbox)]
+            if endpoints_in_region:
+                extremum = min(endpoints_in_region, key=lambda p:
+                              (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
+        if extremum is None:
+            is_corner = region in [7, 9, 1, 3]
+            if is_corner:
+                extremum = min(region_pixels, key=lambda p:
+                              abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1]))
+            elif region == 8:
+                extremum = min(region_pixels, key=lambda p: p[1])
+            elif region == 2:
+                extremum = max(region_pixels, key=lambda p: p[1])
+            elif template_pos[0] < mid_x:
+                extremum = min(region_pixels, key=lambda p: p[0])
+            else:
+                extremum = max(region_pixels, key=lambda p: p[0])
+
+        return ResolvedWaypoint(position=(float(extremum[0]), float(extremum[1])), region=region)
+
+    def _resolve_vertex(self, region: int, template_pos: Tuple[float, float],
+                        top_bound: float, bot_bound: float,
+                        mid_x: float, mid_y: float) -> ResolvedWaypoint:
+        """Resolve a vertex waypoint with optional apex extension."""
+        analysis = self.analysis
+        bbox = analysis.bbox
+        skel_list = analysis.skel_list
+        mask = analysis.mask
+        rows, cols = analysis.glyph_rows, analysis.glyph_cols
+
+        apex_extension = None
+
+        if template_pos[1] < top_bound:  # Top vertex
+            if skel_list:
+                topmost = min(skel_list, key=lambda p: p[1])
+                skel_x, skel_y = topmost[0], topmost[1]
+
+                col_start = max(0, int(skel_x) - 5)
+                col_end = min(mask.shape[1], int(skel_x) + 6)
+                glyph_cols_filtered = cols[(cols >= col_start) & (cols < col_end)]
+                glyph_rows_filtered = rows[(cols >= col_start) & (cols < col_end)]
+
+                if len(glyph_rows_filtered) > 0:
+                    glyph_top_idx = glyph_rows_filtered.argmin()
+                    glyph_top_y = glyph_rows_filtered[glyph_top_idx]
+                    glyph_top_x = glyph_cols_filtered[glyph_top_idx]
+                    if glyph_top_y < skel_y:
+                        apex_extension = ('top', (float(glyph_top_x), float(glyph_top_y)))
+
+                return ResolvedWaypoint(
+                    position=(float(skel_x), float(skel_y)),
+                    region=region, is_vertex=True, apex_extension=apex_extension
+                )
+
+        elif template_pos[1] > bot_bound:  # Bottom vertex
+            if skel_list:
+                bottommost = max(skel_list, key=lambda p: p[1])
+                skel_x, skel_y = bottommost[0], bottommost[1]
+
+                col_start = max(0, int(skel_x) - 5)
+                col_end = min(mask.shape[1], int(skel_x) + 6)
+                glyph_cols_filtered = cols[(cols >= col_start) & (cols < col_end)]
+                glyph_rows_filtered = rows[(cols >= col_start) & (cols < col_end)]
+
+                if len(glyph_rows_filtered) > 0:
+                    glyph_bot_idx = glyph_rows_filtered.argmax()
+                    glyph_bot_y = glyph_rows_filtered[glyph_bot_idx]
+                    glyph_bot_x = glyph_cols_filtered[glyph_bot_idx]
+                    if glyph_bot_y > skel_y:
+                        apex_extension = ('bottom', (float(glyph_bot_x), float(glyph_bot_y)))
+
+                return ResolvedWaypoint(
+                    position=(float(skel_x), float(skel_y)),
+                    region=region, is_vertex=True, apex_extension=apex_extension
+                )
+
+        else:  # Middle row - waist level
+            waist_tolerance = (bbox[3] - bbox[1]) * 0.15
+            waist_pixels = [p for p in skel_list if abs(p[1] - mid_y) < waist_tolerance]
+
+            if waist_pixels:
+                if template_pos[0] < mid_x:
+                    vertex_pt = min(waist_pixels, key=lambda p: p[0])
+                else:
+                    vertex_pt = max(waist_pixels, key=lambda p: p[0])
+                return ResolvedWaypoint(
+                    position=(float(vertex_pt[0]), float(vertex_pt[1])),
+                    region=region, is_vertex=True
+                )
+
+        # Fallback
+        nearest = self.find_nearest_skeleton(template_pos)
+        return ResolvedWaypoint(
+            position=(float(nearest[0]), float(nearest[1])),
+            region=region, is_vertex=True
+        )
+
+    def process_stroke_template(self, stroke_template: List,
+                                global_traced: Set[Tuple[int, int]],
+                                trace_paths: bool = True) -> Optional[List[List[float]]]:
+        """Process a single stroke template into stroke points.
+
+        Returns list of [x, y] points or None if processing failed.
+        """
+        analysis = self.analysis
+        if analysis is None:
+            return None
+
+        bbox = analysis.bbox
+        info = analysis.info
+        skel_list = analysis.skel_list
+
+        # Pre-calculate bbox-derived values
+        mid_x = (bbox[0] + bbox[2]) / 2
+        mid_y = (bbox[1] + bbox[3]) / 2
+        h = bbox[3] - bbox[1]
+        third_h = h / 3
+        top_bound = bbox[1] + third_h
+        bot_bound = bbox[1] + 2 * third_h
+        waist_margin = h * 0.05
+
+        # Check for vertical stroke special case
+        if self._is_vertical_stroke(stroke_template):
+            return self._process_vertical_stroke(stroke_template)
+
+        # Parse template and resolve waypoints
+        waypoints, segment_configs = parse_stroke_template(stroke_template)
+        if len(waypoints) < 2:
+            return None
+
+        # Resolve each waypoint to pixel coordinates
+        resolved = []
+        for i, wp in enumerate(waypoints):
+            next_dir = segment_configs[i].direction if i < len(segment_configs) else None
+            resolved_wp = self.resolve_waypoint(wp, next_dir, mid_x, mid_y,
+                                                top_bound, bot_bound, waist_margin)
+            resolved.append(resolved_wp)
+
+        if not trace_paths:
+            return [[rw.position[0], rw.position[1]] for rw in resolved]
+
+        # Trace paths between waypoints
+        return self._trace_resolved_waypoints(resolved, segment_configs, global_traced)
+
+    def _is_vertical_stroke(self, stroke_template: List) -> bool:
+        """Check if template represents a vertical line."""
+        if len(stroke_template) != 2:
+            return False
+
+        def extract_region(wp):
+            if isinstance(wp, tuple):
+                return wp[0] if isinstance(wp[0], int) else None
+            return wp if isinstance(wp, int) else None
+
+        r1, r2 = extract_region(stroke_template[0]), extract_region(stroke_template[1])
+        if r1 is None or r2 is None:
+            return False
+
+        col1 = (r1 - 1) % 3
+        col2 = (r2 - 1) % 3
+        return col1 == col2
+
+    def _process_vertical_stroke(self, stroke_template: List) -> List[List[float]]:
+        """Process a vertical stroke using segment detection."""
+        def extract_region(wp):
+            if isinstance(wp, tuple):
+                return wp[0] if isinstance(wp[0], int) else None
+            return wp if isinstance(wp, int) else None
+
+        r1, r2 = extract_region(stroke_template[0]), extract_region(stroke_template[1])
+        p1, p2 = self.numpad_to_pixel(r1), self.numpad_to_pixel(r2)
+
+        seg = self.find_best_vertical_segment(p1, p2)
+        if seg:
+            return [[float(seg[0][0]), float(seg[0][1])],
+                    [float(seg[1][0]), float(seg[1][1])]]
+
+        # Fallback
+        n1 = self.find_nearest_skeleton(p1)
+        n2 = self.find_nearest_skeleton(p2)
+        return [[float(n1[0]), float(n1[1])], [float(n2[0]), float(n2[1])]]
+
+    def _trace_resolved_waypoints(self, resolved: List[ResolvedWaypoint],
+                                  segment_configs: List[SegmentConfig],
+                                  global_traced: Set[Tuple[int, int]]) -> List[List[float]]:
+        """Trace paths between resolved waypoints."""
+        analysis = self.analysis
+        info = analysis.info
+
+        full_path = []
+        already_traced = set(global_traced)
+        arrival_branch = set()
+
+        current_pt = (int(round(resolved[0].position[0])),
+                      int(round(resolved[0].position[1])))
+
+        for i in range(len(resolved) - 1):
+            start_pt = current_pt
+            end_pt = (int(round(resolved[i+1].position[0])),
+                      int(round(resolved[i+1].position[1])))
+
+            config = segment_configs[i] if i < len(segment_configs) else SegmentConfig()
+            current_is_intersection = resolved[i].is_intersection
+            target_is_curve = resolved[i+1].is_curve
+            target_is_intersection = resolved[i+1].is_intersection
+            target_region = resolved[i+1].region
+
+            if config.straight:
+                traced = _generate_straight_line(start_pt, end_pt)
+            elif target_is_intersection:
+                traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                       avoid_pixels=None)
+                if traced and len(traced) >= 2:
+                    arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
+            elif current_is_intersection and arrival_branch:
+                traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                       avoid_pixels=already_traced, fallback_avoid=arrival_branch)
+                arrival_branch = set()
+            elif target_is_curve and target_region is not None:
+                traced = _trace_to_region(start_pt, target_region, analysis.bbox,
+                                          info['adj'], info['skel_set'], avoid_pixels=already_traced)
+                if traced is None:
+                    traced = _trace_to_region(start_pt, target_region, analysis.bbox,
+                                              info['adj'], info['skel_set'], avoid_pixels=None)
+            else:
+                traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                       avoid_pixels=already_traced)
+
+            if traced:
+                if i == 0:
+                    full_path.extend(traced)
+                    already_traced.update(traced)
+                else:
+                    full_path.extend(traced[1:])
+                    already_traced.update(traced[1:])
+                current_pt = traced[-1]
+            else:
+                if i == 0:
+                    full_path.append(start_pt)
+                    already_traced.add(start_pt)
+                break
+
+        # Apply apex extensions
+        for i, rw in enumerate(resolved):
+            if rw.apex_extension:
+                direction, apex_pt = rw.apex_extension
+                skel_x, skel_y = int(round(rw.position[0])), int(round(rw.position[1]))
+
+                for j, fp in enumerate(full_path):
+                    if abs(fp[0] - skel_x) <= 2 and abs(fp[1] - skel_y) <= 2:
+                        apex_tuple = (int(round(apex_pt[0])), int(round(apex_pt[1])))
+                        if direction == 'top':
+                            full_path.insert(j, apex_tuple)
+                        else:
+                            full_path.insert(j + 1, apex_tuple)
+                        break
+
+        # Update global traced set
+        global_traced.update(already_traced)
+
+        # Resample
+        if len(full_path) > 3:
+            resampled = _resample_path(full_path, num_points=min(30, len(full_path)))
+            return [[float(p[0]), float(p[1])] for p in resampled]
+
+        return [[float(p[0]), float(p[1])] for p in full_path]
+
+    def run(self, template: List[List], trace_paths: bool = True) -> Optional[List[List[List[float]]]]:
+        """Run the full pipeline for a given template.
+
+        Args:
+            template: List of stroke templates, each a list of waypoints
+            trace_paths: Whether to trace paths between waypoints
+
+        Returns:
+            List of strokes, each a list of [x, y] points, or None on failure
+        """
+        if self.analysis is None:
+            return None
+
+        strokes = []
+        global_traced = set()
+
+        for stroke_template in template:
+            stroke_points = self.process_stroke_template(stroke_template, global_traced, trace_paths)
+            if stroke_points and len(stroke_points) >= 2:
+                strokes.append(stroke_points)
+
+        return strokes if strokes else None
+
+    def try_skeleton_method(self) -> VariantResult:
+        """Try pure skeleton method and return result with score."""
+        if self.analysis is None:
+            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
+
+        mask = self.analysis.mask
+        skel_strokes = skeleton_to_strokes(mask, min_stroke_len=5)
+
+        if not skel_strokes:
+            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
+
+        skel_strokes = apply_stroke_template(skel_strokes, self.char)
+        skel_strokes = adjust_stroke_paths(skel_strokes, self.char, mask)
+
+        if not skel_strokes:
+            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
+
+        score = _quick_stroke_score(skel_strokes, mask)
+        return VariantResult(strokes=skel_strokes, score=score, variant_name='skeleton')
+
+    def evaluate_all_variants(self) -> VariantResult:
+        """Evaluate all template variants and skeleton, return best result."""
+        variants = NUMPAD_TEMPLATE_VARIANTS.get(self.char)
+
+        if not variants:
+            # No templates - try skeleton only
+            return self.try_skeleton_method()
+
+        if self.analysis is None:
+            return VariantResult(strokes=None, score=-1, variant_name=None)
+
+        mask = self.analysis.mask
+        best = VariantResult(strokes=None, score=-1, variant_name=None)
+
+        # Try each template variant
+        for var_name, variant_template in variants.items():
+            strokes = self.run(variant_template, trace_paths=True)
+            if strokes:
+                score = _quick_stroke_score(strokes, mask)
+                if score > best.score:
+                    best = VariantResult(strokes=strokes, score=score, variant_name=var_name)
+
+        # Try skeleton method
+        skel_result = self.try_skeleton_method()
+        if skel_result.strokes:
+            # Penalize wrong stroke count
+            expected_counts = [len(t) for t in variants.values()]
+            if expected_counts:
+                expected_count = min(expected_counts)
+                if len(skel_result.strokes) != expected_count:
+                    skel_result.score -= 0.3 * abs(len(skel_result.strokes) - expected_count)
+
+            if skel_result.score > best.score:
+                best = skel_result
+
+        return best
+
+
 def point_in_region(point: Tuple[int, int], region: int, bbox: Tuple[int, int, int, int]) -> bool:
     """Check if a point falls within a numpad region.
 
@@ -3388,10 +4011,11 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                    template=None, return_variant=False):
     """Generate minimal strokes by combining template topology with skeleton keypoints.
 
-    1. Template provides stroke count and connectivity structure
-    2. Skeleton analysis finds actual positions of endpoints, junctions, vertices
-    3. Identify skeleton segments by direction (vertical, horizontal, curved)
-    4. Map template strokes to appropriate skeleton segments
+    Uses MinimalStrokePipeline to:
+    1. Analyze skeleton to find key points
+    2. Resolve template waypoints to skeleton positions
+    3. Trace paths between waypoints
+    4. Evaluate and select best variant
 
     Args:
         font_path: Path to font file
@@ -3405,647 +4029,21 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
         List of strokes as [[[x,y], ...], ...] or None on failure.
         If return_variant=True, returns (strokes, variant_name) or (None, None).
     """
-    # Track variant name for return_variant option
-    _variant_name = None
+    pipeline = MinimalStrokePipeline(font_path, char, canvas_size)
 
-    # If no template provided, try all variants (including skeleton) and pick the best
+    # If no template provided, evaluate all variants and pick best
     if template is None:
-        variants = NUMPAD_TEMPLATE_VARIANTS.get(char)
-        if not variants:
-            # No template variants - try skeleton only
-            font_path_resolved = resolve_font_path(font_path)
-            mask = render_glyph_mask(font_path_resolved, char, canvas_size)
-            if mask is None:
-                return (None, None) if return_variant else None
-            skel_strokes = skeleton_to_strokes(mask, min_stroke_len=5)
-            if skel_strokes:
-                skel_strokes = apply_stroke_template(skel_strokes, char)
-                skel_strokes = adjust_stroke_paths(skel_strokes, char, mask)
-                if skel_strokes:
-                    if return_variant:
-                        return skel_strokes, 'skeleton'
-                    return skel_strokes
-            return (None, None) if return_variant else None
-
-        # Always compare all variants + skeleton (even if only one variant)
-        best_strokes = None
-        best_variant = None
-        best_score = -1
-
-        font_path_resolved = resolve_font_path(font_path)
-        mask = render_glyph_mask(font_path_resolved, char, canvas_size)
-        if mask is None:
-            return (None, None) if return_variant else None
-
-        for var_name, variant_template in variants.items():
-            strokes = minimal_strokes_from_skeleton(
-                font_path, char, canvas_size, trace_paths,
-                template=variant_template, return_variant=False
-            )
-            if strokes:
-                # Quick score based on coverage
-                score = _quick_stroke_score(strokes, mask)
-                if score > best_score:
-                    best_score = score
-                    best_strokes = strokes
-                    best_variant = var_name
-
-        # Also try pure skeleton method and compare
-        skel_strokes = skeleton_to_strokes(mask, min_stroke_len=5)
-        if skel_strokes:
-            skel_strokes = apply_stroke_template(skel_strokes, char)
-            skel_strokes = adjust_stroke_paths(skel_strokes, char, mask)
-            if skel_strokes:
-                skel_score = _quick_stroke_score(skel_strokes, mask)
-                # Penalize if stroke count doesn't match NUMPAD template expectation
-                # Use the most common stroke count from NUMPAD variants as expected
-                expected_counts = [len(t) for t in variants.values()]
-                if expected_counts:
-                    expected_count = min(expected_counts)  # Prefer simpler
-                    if len(skel_strokes) != expected_count:
-                        # Heavy penalty for wrong stroke count
-                        skel_score -= 0.3 * abs(len(skel_strokes) - expected_count)
-                if skel_score > best_score:
-                    best_score = skel_score
-                    best_strokes = skel_strokes
-                    best_variant = 'skeleton'
-
+        result = pipeline.evaluate_all_variants()
         if return_variant:
-            return best_strokes, best_variant
-        return best_strokes
-
-    # Use provided template (or single variant selected above)
-    if template is None:
-        return (None, None) if return_variant else None
-
-    font_path = resolve_font_path(font_path)
-    mask = render_glyph_mask(font_path, char, canvas_size)
-    if mask is None:
-        return (None, None) if return_variant else None
-
-    # Get glyph bounding box
-    rows, cols = np.where(mask)
-    if len(rows) == 0:
-        return (None, None) if return_variant else None
-    bbox = (float(cols.min()), float(rows.min()),
-            float(cols.max()), float(rows.max()))
-
-    # Analyze skeleton to find key points
-    info = _analyze_skeleton(mask)
-    if info is None:
-        return (None, None) if return_variant else None
-
-    # Find skeleton segments and classify by direction
-    segments = _find_skeleton_segments(info)
-
-    # Classify segments by angle (vertical used for stroke detection)
-    vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
-
-    # Build tree of all skeleton pixels
-    skel_list = list(info['skel_set'])
-    if not skel_list:
-        return (None, None) if return_variant else None
-    skel_tree = cKDTree(skel_list)
-
-    def numpad_to_pixel(region):
-        """Map numpad region (1-9) to pixel coordinates (center of region)."""
-        frac_x, frac_y = NUMPAD_POS[region]
-        x = bbox[0] + frac_x * (bbox[2] - bbox[0])
-        y = bbox[1] + frac_y * (bbox[3] - bbox[1])
-        return (x, y)
-
-    def find_nearest_skeleton(pos):
-        """Find the nearest skeleton pixel to a position."""
-        dist, idx = skel_tree.query(pos)
-        return skel_list[idx]
-
-    def extract_region(wp):
-        """Extract the region number from a waypoint (handles tuples and plain ints)."""
-        if isinstance(wp, tuple):
-            return wp[0] if isinstance(wp[0], int) else None
-        return wp if isinstance(wp, int) else None
-
-    def is_vertical_stroke(stroke_template):
-        """Check if a stroke template represents a vertical line."""
-        if len(stroke_template) != 2:
-            return False
-        # Check if both endpoints are integers (terminals) in same column
-        r1 = extract_region(stroke_template[0])
-        r2 = extract_region(stroke_template[1])
-        if r1 is None or r2 is None:
-            return False
-        # Same column in numpad: (7,4,1), (8,5,2), (9,6,3)
-        col1 = (r1 - 1) % 3
-        col2 = (r2 - 1) % 3
-        return col1 == col2
-
-    def find_best_vertical_segment(template_start, template_end):
-        """Find the vertical skeleton segment(s) closest to template positions.
-
-        Chains connected vertical segments to get the full stroke.
-        """
-        if not vertical_segments:
-            return None
-
-        # Filter to only truly vertical segments (not diagonals)
-        truly_vertical = [s for s in vertical_segments if 75 <= abs(s['angle']) <= 105]
-        if not truly_vertical:
-            truly_vertical = vertical_segments  # Fallback
-
-        # Build a graph of connected vertical segments
-        junction_to_segs = defaultdict(list)
-        for i, seg in enumerate(truly_vertical):
-            if seg['start_junction'] >= 0:
-                junction_to_segs[seg['start_junction']].append(i)
-            if seg['end_junction'] >= 0:
-                junction_to_segs[seg['end_junction']].append(i)
-
-        # Find chains by grouping segments that share any junction
-        visited = set()
-        chains = []
-
-        for i in range(len(truly_vertical)):
-            if i in visited:
-                continue
-
-            # BFS to find all connected segments
-            chain = []
-            queue = [i]
-            while queue:
-                seg_idx = queue.pop(0)
-                if seg_idx in visited:
-                    continue
-                visited.add(seg_idx)
-                chain.append(seg_idx)
-
-                seg = truly_vertical[seg_idx]
-                # Find segments sharing start or end junction
-                for junc in [seg['start_junction'], seg['end_junction']]:
-                    if junc >= 0:
-                        for other_idx in junction_to_segs[junc]:
-                            if other_idx not in visited:
-                                queue.append(other_idx)
-
-            if chain:
-                chains.append(chain)
-
-        # For each chain, get the full path endpoints
-        best = None
-        best_score = float('inf')
-
-        for chain in chains:
-            # Get all endpoints of segments in chain
-            points = []
-            for seg_idx in chain:
-                seg = truly_vertical[seg_idx]
-                points.append(seg['start'])
-                points.append(seg['end'])
-
-            if not points:
-                continue
-
-            # Find topmost and bottommost points
-            points.sort(key=lambda p: p[1])  # Sort by y
-            top = points[0]
-            bottom = points[-1]
-
-            # Score by match to template
-            d1 = ((top[0] - template_start[0])**2 +
-                  (top[1] - template_start[1])**2)**0.5
-            d2 = ((bottom[0] - template_end[0])**2 +
-                  (bottom[1] - template_end[1])**2)**0.5
-            d1r = ((bottom[0] - template_start[0])**2 +
-                   (bottom[1] - template_start[1])**2)**0.5
-            d2r = ((top[0] - template_end[0])**2 +
-                   (top[1] - template_end[1])**2)**0.5
-
-            score = min(d1 + d2, d1r + d2r)
-            if score < best_score:
-                best_score = score
-                if d1 + d2 <= d1r + d2r:
-                    best = (top, bottom)
-                else:
-                    best = (bottom, top)
-
-        return best
-
-    strokes = []
-
-    # Track apex extensions for vertices (skeleton point -> glyph apex)
-    apex_extensions = {}  # {point_index: (skel_pt, glyph_apex_pt)}
-
-    # Track pixels traced across all strokes to avoid overlapping paths
-    global_traced = set()
-
-    for stroke_template in template:
-        stroke_points = []
-        waypoint_info = []  # Parallel list storing (is_curve, is_intersection, region) for each waypoint
-        segment_directions = {}  # segment_index -> direction ('down', 'up', 'left', 'right')
-        segment_straight = {}  # segment_index -> True if 'straight' hint applies
-
-        # Check for special cases: pure vertical or horizontal strokes
-        if is_vertical_stroke(stroke_template):
-            r1 = extract_region(stroke_template[0])
-            r2 = extract_region(stroke_template[1])
-            p1 = numpad_to_pixel(r1)
-            p2 = numpad_to_pixel(r2)
-            seg = find_best_vertical_segment(p1, p2)
-            if seg:
-                stroke_points = [[float(seg[0][0]), float(seg[0][1])],
-                                [float(seg[1][0]), float(seg[1][1])]]
-            else:
-                # Fallback to nearest skeleton pixels
-                stroke_points = [[float(find_nearest_skeleton(p1)[0]),
-                                 float(find_nearest_skeleton(p1)[1])],
-                                [float(find_nearest_skeleton(p2)[0]),
-                                 float(find_nearest_skeleton(p2)[1])]]
-            waypoint_info = [(False, False, r1), (False, False, r2)]  # (is_curve, is_intersection, region)
-        else:
-            # General case: map each waypoint to skeleton
-            # Pre-calculate bbox-derived values used throughout waypoint finding
-            mid_x = (bbox[0] + bbox[2]) / 2
-            mid_y = (bbox[1] + bbox[3]) / 2
-            h = bbox[3] - bbox[1]
-            third_h = h / 3
-            top_bound = bbox[1] + third_h
-            bot_bound = bbox[1] + 2 * third_h
-            waist_margin = h * 0.05  # For separating top/bottom bumps in curves
-
-            # Use index-based iteration to look ahead for direction hints
-            wp_idx = 0
-            while wp_idx < len(stroke_template):
-                wp = stroke_template[wp_idx]
-                is_vertex = False
-                is_curve = False
-                is_intersection = False
-
-                # Parse waypoint - can be int, string, or tuple (legacy: extract first element)
-                wp_val = wp[0] if isinstance(wp, tuple) else wp
-
-                # Check for direction/style hints - skip them here, we'll look ahead
-                if isinstance(wp_val, str) and wp_val in ALL_HINTS:
-                    wp_idx += 1
-                    continue
-
-                if isinstance(wp_val, int):
-                    region = wp_val
-                else:
-                    m = re.match(r'^v\((\d)\)$', str(wp_val))
-                    if m:
-                        region = int(m.group(1))
-                        is_vertex = True
-                    else:
-                        m = re.match(r'^c\((\d)\)$', str(wp_val))
-                        if m:
-                            region = int(m.group(1))
-                            is_curve = True
-                        else:
-                            m = re.match(r'^i\((\d)\)$', str(wp_val))
-                            if m:
-                                region = int(m.group(1))
-                                is_intersection = True
-                            else:
-                                wp_idx += 1
-                                continue
-
-                # Look ahead to check for direction/style hints on next segment
-                next_direction = None
-                next_straight = False
-                look_idx = wp_idx + 1
-                while look_idx < len(stroke_template):
-                    next_wp = stroke_template[look_idx]
-                    next_val = next_wp[0] if isinstance(next_wp, tuple) else next_wp
-                    if isinstance(next_val, str) and next_val in DIRECTION_HINTS:
-                        next_direction = next_val
-                        look_idx += 1
-                    elif isinstance(next_val, str) and next_val in STYLE_HINTS:
-                        next_straight = True
-                        look_idx += 1
-                    else:
-                        break  # Found next waypoint, stop looking
-                # Store for path tracing
-                if next_direction:
-                    segment_directions[len(stroke_points)] = next_direction
-                if next_straight:
-                    segment_straight[len(stroke_points)] = True
-
-                template_pos = numpad_to_pixel(region)
-
-                # For terminals (int or tuple with int), find based on hint or position
-                if isinstance(wp_val, int):
-                    # Filter skeleton pixels to those actually IN the target region
-                    region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
-
-                    # If no pixels in exact region, fall back to vertical third
-                    if not region_pixels:
-                        if template_pos[1] < top_bound:  # Top (positions 7,8,9)
-                            region_pixels = [p for p in skel_list if p[1] < top_bound]
-                        elif template_pos[1] > bot_bound:  # Bottom (positions 1,2,3)
-                            region_pixels = [p for p in skel_list if p[1] > bot_bound]
-                        else:  # Middle (positions 4,5,6)
-                            region_pixels = [p for p in skel_list if top_bound <= p[1] <= bot_bound]
-
-                    if region_pixels:
-                        extremum = None
-
-                        # If there's a direction hint for the next segment, place waypoint
-                        # at the extreme position to give room to move in that direction
-                        if next_direction == 'down':
-                            # Start at topmost point to trace downward
-                            extremum = min(region_pixels, key=lambda p: p[1])
-                        elif next_direction == 'up':
-                            # Start at bottommost point to trace upward
-                            extremum = max(region_pixels, key=lambda p: p[1])
-                        elif next_direction == 'left':
-                            # Start at rightmost point to trace leftward
-                            extremum = max(region_pixels, key=lambda p: p[0])
-                        elif next_direction == 'right':
-                            # Start at leftmost point to trace rightward
-                            extremum = min(region_pixels, key=lambda p: p[0])
-                        # Check if there's an endpoint in this region - prefer it for terminals
-                        elif info['endpoints']:
-                            endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region, bbox)]
-                            if endpoints_in_region:
-                                # Use the endpoint closest to template position
-                                extremum = min(endpoints_in_region, key=lambda p:
-                                              (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
-
-                        if extremum is None:
-                            # No hint - use default logic based on position
-                            is_corner_pos = region in [7, 9, 1, 3]
-
-                            if is_corner_pos:
-                                def corner_dist(p):
-                                    dx = abs(p[0] - template_pos[0])
-                                    dy = abs(p[1] - template_pos[1])
-                                    return dx + dy
-                                extremum = min(region_pixels, key=corner_dist)
-                            elif region == 8:
-                                extremum = min(region_pixels, key=lambda p: p[1])
-                            elif region == 2:
-                                extremum = max(region_pixels, key=lambda p: p[1])
-                            elif template_pos[0] < mid_x:
-                                extremum = min(region_pixels, key=lambda p: p[0])
-                            else:
-                                extremum = max(region_pixels, key=lambda p: p[0])
-
-                        stroke_points.append([float(extremum[0]), float(extremum[1])])
-                        waypoint_info.append((is_curve, is_intersection, region))
-                        wp_idx += 1
-                        continue
-
-                if is_intersection:
-                    # For intersections, find junction point in the region (where strokes cross)
-                    # Look for junction pixels first, then fall back to center of region
-                    junction_pixels_in_region = [p for p in info.get('junction_pixels', [])
-                                                  if point_in_region(p, region, bbox)]
-                    if junction_pixels_in_region:
-                        # Use the junction closest to region center
-                        junction_pt = min(junction_pixels_in_region, key=lambda p:
-                                         (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
-                        stroke_points.append([float(junction_pt[0]), float(junction_pt[1])])
-                    else:
-                        # Fall back to nearest skeleton pixel to region center
-                        nearest = find_nearest_skeleton(template_pos)
-                        stroke_points.append([float(nearest[0]), float(nearest[1])])
-                    waypoint_info.append((False, True, region))
-                    wp_idx += 1
-                    continue
-
-                if is_vertex:
-                    # For vertices, find the extremum skeleton pixel based on template position
-                    # v(8) = top apex, v(2) = bottom apex, v(4/6) = waist level sides
-                    # Determine which region to search based on template position
-                    if template_pos[1] < top_bound:  # Top row (7,8,9)
-                        # Find topmost skeleton pixel for path tracing,
-                        # and track actual glyph apex for extension
-                        if skel_list:
-                            topmost = min(skel_list, key=lambda p: p[1])
-                            skel_x, skel_y = topmost[0], topmost[1]
-                            # Search for glyph pixels in a narrow band above skeleton
-                            col_start = max(0, int(skel_x) - 5)
-                            col_end = min(mask.shape[1], int(skel_x) + 6)
-                            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
-                            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
-                            if len(glyph_rows) > 0:
-                                glyph_top_idx = glyph_rows.argmin()
-                                glyph_top_y = glyph_rows[glyph_top_idx]
-                                glyph_top_x = glyph_cols[glyph_top_idx]
-                                if glyph_top_y < skel_y:
-                                    # Store skeleton point for tracing, track glyph apex
-                                    point_idx = len(stroke_points)
-                                    stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, is_intersection, region))
-                                    apex_extensions[point_idx] = ('top', [float(glyph_top_x), float(glyph_top_y)])
-                                else:
-                                    stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, is_intersection, region))
-                            else:
-                                stroke_points.append([float(skel_x), float(skel_y)])
-                                waypoint_info.append((is_curve, is_intersection, region))
-                        else:
-                            stroke_points.append([float(template_pos[0]), float(template_pos[1])])
-                            waypoint_info.append((is_curve, is_intersection, region))
-                    elif template_pos[1] > bot_bound:  # Bottom row (1,2,3)
-                        # Find bottommost skeleton pixel for path tracing,
-                        # and track actual glyph nadir for extension
-                        if skel_list:
-                            bottommost = max(skel_list, key=lambda p: p[1])
-                            skel_x, skel_y = bottommost[0], bottommost[1]
-                            col_start = max(0, int(skel_x) - 5)
-                            col_end = min(mask.shape[1], int(skel_x) + 6)
-                            glyph_cols = cols[(cols >= col_start) & (cols < col_end)]
-                            glyph_rows = rows[(cols >= col_start) & (cols < col_end)]
-                            if len(glyph_rows) > 0:
-                                glyph_bot_idx = glyph_rows.argmax()
-                                glyph_bot_y = glyph_rows[glyph_bot_idx]
-                                glyph_bot_x = glyph_cols[glyph_bot_idx]
-                                if glyph_bot_y > skel_y:
-                                    point_idx = len(stroke_points)
-                                    stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, is_intersection, region))
-                                    apex_extensions[point_idx] = ('bottom', [float(glyph_bot_x), float(glyph_bot_y)])
-                                else:
-                                    stroke_points.append([float(skel_x), float(skel_y)])
-                                    waypoint_info.append((is_curve, is_intersection, region))
-                            else:
-                                stroke_points.append([float(skel_x), float(skel_y)])
-                                waypoint_info.append((is_curve, is_intersection, region))
-                        else:
-                            stroke_points.append([float(template_pos[0]), float(template_pos[1])])
-                            waypoint_info.append((is_curve, is_intersection, region))
-                    else:  # Middle row (4,5,6) - waist level
-                        waist_tolerance = (bbox[3] - bbox[1]) * 0.15
-                        waist_pixels = [p for p in skel_list
-                                       if abs(p[1] - mid_y) < waist_tolerance]
-
-                        if waist_pixels:
-                            # Get the extremum based on horizontal position
-                            if template_pos[0] < mid_x:  # Left side (4)
-                                vertex_pt = min(waist_pixels, key=lambda p: p[0])
-                            else:  # Right side (6)
-                                vertex_pt = max(waist_pixels, key=lambda p: p[0])
-                            stroke_points.append([float(vertex_pt[0]), float(vertex_pt[1])])
-                            waypoint_info.append((is_curve, is_intersection, region))
-                        else:
-                            nearest = find_nearest_skeleton(template_pos)
-                            stroke_points.append([float(nearest[0]), float(nearest[1])])
-                            waypoint_info.append((is_curve, is_intersection, region))
-                else:
-                    # For curves c(n), find the apex (extremum) in the direction of the template
-                    if is_curve:
-                        # Filter skeleton pixels well above or below waist (mid_y)
-                        if template_pos[1] < mid_y:  # Above waist (positions 7,8,9)
-                            region_pixels = [p for p in skel_list if p[1] < mid_y - waist_margin]
-                        else:  # Below waist (positions 1,2,3)
-                            region_pixels = [p for p in skel_list if p[1] > mid_y + waist_margin]
-
-                        if region_pixels:
-                            # Find apex based on template position direction
-                            if template_pos[0] > mid_x:  # Right side (positions 3,6,9)
-                                # Rightmost point in region (farthest from stem)
-                                apex = max(region_pixels, key=lambda p: p[0])
-                            elif template_pos[0] < mid_x:  # Left side (positions 1,4,7)
-                                # Leftmost point in region
-                                apex = min(region_pixels, key=lambda p: p[0])
-                            else:  # Center (positions 2,5,8)
-                                # Just use nearest
-                                apex = find_nearest_skeleton(template_pos)
-                            stroke_points.append([float(apex[0]), float(apex[1])])
-                            waypoint_info.append((True, False, region))  # is_curve=True
-                        else:
-                            nearest = find_nearest_skeleton(template_pos)
-                            stroke_points.append([float(nearest[0]), float(nearest[1])])
-                            waypoint_info.append((True, False, region))  # is_curve=True
-                    else:
-                        # For terminals, find skeleton pixel IN the target region
-                        # Prefer pixels actually in the region over nearest to center
-                        region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
-                        if region_pixels:
-                            # Find the one nearest to the region center
-                            nearest = min(region_pixels, key=lambda p:
-                                         (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
-                        else:
-                            # Fallback to nearest skeleton pixel if none in region
-                            nearest = find_nearest_skeleton(template_pos)
-                        stroke_points.append([float(nearest[0]), float(nearest[1])])
-                        waypoint_info.append((False, False, region))  # is_curve=False
-
-                wp_idx += 1
-
-        if len(stroke_points) >= 2:
-            if trace_paths:
-
-                # Trace skeleton paths between consecutive keypoints
-                full_path = []
-                already_traced = set(global_traced)  # Start with pixels from previous strokes
-                arrival_branch = set()  # Track arrival branch at intersections to avoid backtracking
-
-                # Start from first waypoint
-                current_pt = (int(round(stroke_points[0][0])), int(round(stroke_points[0][1])))
-
-                for i in range(len(stroke_points) - 1):
-                    # Use current_pt (where we actually are) not stroke_points[i]
-                    start_pt = current_pt
-                    end_pt = (int(round(stroke_points[i+1][0])), int(round(stroke_points[i+1][1])))
-
-                    # Check waypoint types
-                    seg_direction = segment_directions.get(i)
-                    seg_straight = segment_straight.get(i, False)
-                    current_is_intersection = waypoint_info[i][1] if i < len(waypoint_info) else False
-                    target_is_curve, target_is_intersection, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, False, None)
-
-                    # Build segment config from hints
-                    config = SegmentConfig(direction=seg_direction, straight=seg_straight)
-
-                    # Determine avoidance strategy based on context
-                    if config.straight:
-                        # Straight lines ignore skeleton entirely
-                        traced = _generate_straight_line(start_pt, end_pt)
-                    elif target_is_intersection:
-                        # Going TO an intersection - allow crossing traced pixels
-                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                               avoid_pixels=None)
-                        # Record arrival branch for when we leave
-                        if traced and len(traced) >= 2:
-                            arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
-                    elif current_is_intersection and arrival_branch:
-                        # Leaving an intersection - try to take a different path
-                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                               avoid_pixels=already_traced,
-                                               fallback_avoid=arrival_branch)
-                        arrival_branch = set()
-                    elif target_is_curve and target_region is not None:
-                        # Region-based tracing for curves
-                        traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
-                                                  avoid_pixels=already_traced)
-                        if traced is None:
-                            traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
-                                                      avoid_pixels=None)
-                    else:
-                        # Standard point-to-point tracing
-                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                               avoid_pixels=already_traced)
-
-                    if traced:
-                        # Add traced points (skip first point if not first segment to avoid duplicates)
-                        if i == 0:
-                            full_path.extend(traced)
-                            already_traced.update(traced)
-                        else:
-                            full_path.extend(traced[1:])
-                            already_traced.update(traced[1:])
-                        # Update current_pt to where we actually ended
-                        current_pt = traced[-1]
-                    else:
-                        # No path found (would require double-back) - just stop here
-                        # Don't add endpoint if it would require backtracking
-                        if i == 0:
-                            full_path.append(start_pt)
-                            already_traced.add(start_pt)
-                        # Skip remaining waypoints - stroke ends where skeleton ends
-                        break
-
-                # Apply apex extensions: insert apex points into the traced path
-                # For each extension, find where in full_path the skeleton point is
-                # and insert/replace with the glyph apex
-                for point_idx, (direction, apex_pt) in apex_extensions.items():
-                    # Find the skeleton point in stroke_points
-                    if point_idx < len(stroke_points):
-                        skel_pt = stroke_points[point_idx]
-                        skel_x, skel_y = int(round(skel_pt[0])), int(round(skel_pt[1]))
-
-                        # Find this point in full_path and extend
-                        for j, fp in enumerate(full_path):
-                            if abs(fp[0] - skel_x) <= 2 and abs(fp[1] - skel_y) <= 2:
-                                # Found the skeleton point - insert apex at correct position
-                                apex_tuple = (int(round(apex_pt[0])), int(round(apex_pt[1])))
-                                if direction == 'top':
-                                    # Insert apex before this point (at the start if it's the beginning)
-                                    full_path.insert(j, apex_tuple)
-                                else:  # 'bottom'
-                                    # Insert apex after this point
-                                    full_path.insert(j + 1, apex_tuple)
-                                break
-
-                # Clear apex_extensions for next stroke
-                apex_extensions.clear()
-
-                # Add this stroke's pixels to global_traced for multi-stroke templates
-                global_traced.update(already_traced)
-
-                # Resample to reasonable number of points
-                if len(full_path) > 3:
-                    resampled = _resample_path(full_path, num_points=min(30, len(full_path)))
-                    stroke_points = [[float(p[0]), float(p[1])] for p in resampled]
-                else:
-                    stroke_points = [[float(p[0]), float(p[1])] for p in full_path]
-
-            strokes.append(stroke_points)
-
+            return result.strokes, result.variant_name
+        return result.strokes
+
+    # Use provided template directly
+    strokes = pipeline.run(template, trace_paths=trace_paths)
     if return_variant:
-        return (strokes if strokes else None, _variant_name)
-    return strokes if strokes else None
+        return strokes, None
+    return strokes
+
 
 
 def template_to_strokes(font_path, char, canvas_size=224, return_markers=False):
