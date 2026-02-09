@@ -7,6 +7,8 @@ import io
 import base64
 import os
 import re
+import logging
+from contextlib import contextmanager
 import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter1d
 from scipy.spatial import cKDTree
@@ -57,6 +59,30 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 DB_PATH = os.path.join(BASE_DIR, 'fonts.db')
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# --- Global constants ---
+# Rendering
+DEFAULT_CANVAS_SIZE = 224
+DEFAULT_FONT_SIZE = 200
+DEFAULT_STROKE_WIDTH = 8.0
+
+# Optimization
+OPTIMIZATION_TIME_BUDGET = 3600.0
+CONVERGENCE_THRESHOLD = 0.001
+STALE_CYCLES_LIMIT = 2
+
+# Skeleton analysis
+SKELETON_MERGE_DISTANCE = 12
+MIN_STROKE_LENGTH = 5
+CONVERGENCE_STUB_THRESHOLD = 18
+
+# DiffVG
+DIFFVG_ITERATIONS = 500
+DIFFVG_TIMEOUT = 300
 
 
 # --- Segment tracing configuration ---
@@ -1974,8 +2000,8 @@ def _run_global_affine(stroke_arrays, centroid, score_args):
         if de.fun < best_score:
             best_params = de.x.copy()
             best_score = de.fun
-    except Exception:
-        pass
+    except (ValueError, RuntimeError) as e:
+        logger.debug("DE optimization failed in global affine: %s", e)
 
     # Apply best global affine
     best_strokes = _affine_transform_strokes(stroke_arrays, best_params, centroid)
@@ -2027,7 +2053,7 @@ def _run_per_stroke_refinement(best_strokes, best_score, score_args):
         return best_strokes, best_score
 
 
-def _optimize_affine(font_path, char, canvas_size=224):
+def _optimize_affine(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
     """Optimise template strokes via affine transforms.
 
     Stage 1: Global affine (6 params) on all strokes together.
@@ -2096,7 +2122,7 @@ def _optimize_diffvg(font_path, char, canvas_size=224):
     )
 
     if 'error' in result:
-        print(f'DiffVG error for {char}: {result["error"]}')
+        logger.warning('DiffVG error for %s: %s', char, result['error'])
         return None
 
     diffvg_strokes = result.get('strokes', [])
@@ -2644,8 +2670,8 @@ def _load_cached_params(font_path, char):
         if row and row['shape_params_cache']:
             data = json.loads(row['shape_params_cache'])
             return np.array(data['params'], dtype=float), data['score']
-    except Exception:
-        pass
+    except (sqlite3.Error, json.JSONDecodeError, KeyError) as e:
+        logger.debug("Failed to load cached params for %s: %s", char, e)
     return None
 
 
@@ -2673,8 +2699,8 @@ def _save_cached_params(font_path, char, params, score):
                 (font_id, char, cache_json))
         db.commit()
         db.close()
-    except Exception:
-        pass
+    except sqlite3.Error as e:
+        logger.debug("Failed to save cached params for %s: %s", char, e)
 
 
 def _score_single_shape(params, shape_type, bbox, uncovered_pts, uncovered_tree,
@@ -2852,8 +2878,8 @@ def _greedy_shape_optimization(templates, setup, x0, elapsed_fn, time_budget):
                 )
                 if de_r.fun < best_sf:
                     best_s = de_r.x.copy()
-            except Exception:
-                pass
+            except (ValueError, RuntimeError) as e:
+                logger.debug("DE optimization failed for shape: %s", e)
 
         greedy_x[start:end] = best_s
 
@@ -3218,7 +3244,7 @@ def _assemble_strokes_from_shapes(shape_groups, return_markers):
     return strokes, all_markers
 
 
-def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
+def auto_fit_strokes(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE, return_markers=False):
     """Generate strokes by optimising shape parameters with a greedy per-shape
     approach followed by joint refinement.
 
@@ -3246,7 +3272,7 @@ def auto_fit_strokes(font_path, char, canvas_size=224, return_markers=False):
         return None
 
     _t_start = _time.monotonic()
-    _TIME_BUDGET = 3600.0
+    _TIME_BUDGET = OPTIMIZATION_TIME_BUDGET
 
     def _elapsed():
         return _time.monotonic() - _t_start
@@ -3684,14 +3710,6 @@ def _quick_stroke_score(strokes, mask, stroke_width=8):
 # Helper functions for minimal_strokes_from_skeleton
 # ============================================================================
 
-def _numpad_to_pixel(region, bbox):
-    """Map numpad region (1-9) to pixel coordinates (center of region)."""
-    frac_x, frac_y = NUMPAD_POS[region]
-    x = bbox[0] + frac_x * (bbox[2] - bbox[0])
-    y = bbox[1] + frac_y * (bbox[3] - bbox[1])
-    return (x, y)
-
-
 def _extract_waypoint_region(wp):
     """Extract the region number from a waypoint (handles tuples and plain ints)."""
     if isinstance(wp, tuple):
@@ -4068,7 +4086,7 @@ def _apply_apex_extensions(full_path, stroke_points, apex_extensions):
                     break
 
 
-def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=True,
+def minimal_strokes_from_skeleton(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE, trace_paths=True,
                                    template=None, return_variant=False):
     """Generate minimal strokes by combining template topology with skeleton keypoints.
 
@@ -4445,33 +4463,54 @@ CHARS = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
 
 
 def get_db():
+    """Get a database connection. For backwards compatibility, returns connection directly.
+
+    For new code, prefer using get_db_context() as a context manager.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+@contextmanager
+def get_db_context():
+    """Context manager for database connections.
+
+    Usage:
+        with get_db_context() as db:
+            db.execute(...)
+            db.commit()
+        # Connection is automatically closed
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def ensure_test_tables():
     """Ensure test tracking tables exist."""
-    db = get_db()
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS test_runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            font_id INTEGER NOT NULL,
-            run_date TEXT NOT NULL,
-            chars_tested INTEGER NOT NULL,
-            chars_ok INTEGER NOT NULL,
-            avg_score REAL,
-            avg_coverage REAL,
-            avg_overshoot REAL,
-            avg_stroke_count REAL,
-            avg_topology REAL,
-            results_json TEXT,
-            FOREIGN KEY (font_id) REFERENCES fonts(id)
-        )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_font ON test_runs(font_id)")
-    db.commit()
-    db.close()
+    with get_db_context() as db:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS test_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                font_id INTEGER NOT NULL,
+                run_date TEXT NOT NULL,
+                chars_tested INTEGER NOT NULL,
+                chars_ok INTEGER NOT NULL,
+                avg_score REAL,
+                avg_coverage REAL,
+                avg_overshoot REAL,
+                avg_stroke_count REAL,
+                avg_topology REAL,
+                results_json TEXT,
+                FOREIGN KEY (font_id) REFERENCES fonts(id)
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_font ON test_runs(font_id)")
+        db.commit()
 
 
 def resolve_font_path(font_path):
@@ -4481,12 +4520,25 @@ def resolve_font_path(font_path):
     return os.path.join(BASE_DIR, font_path)
 
 
+def validate_char_param(char):
+    """Validate the 'c' (character) parameter from request.
+
+    Returns:
+        Tuple of (is_valid, error_response) where error_response is None if valid.
+    """
+    if not char:
+        return False, (jsonify(error="Missing ?c= parameter"), 400)
+    if len(char) != 1:
+        return False, (jsonify(error="Parameter 'c' must be a single character"), 400)
+    return True, None
+
+
 def render_char_image(font_path, char, font_size=200, canvas_size=224):
     """Render a character centered on a square canvas, return as PNG bytes."""
     font_path = resolve_font_path(font_path)
     try:
         font = ImageFont.truetype(font_path, font_size)
-    except Exception:
+    except OSError:
         return None
 
     img = Image.new('L', (canvas_size, canvas_size), 255)
@@ -4603,8 +4655,9 @@ def edit_char(font_id):
 def api_get_char(font_id):
     """Return stroke data and rendered font image as JSON."""
     char = request.args.get('c')
-    if not char:
-        return jsonify(error="Missing ?c= parameter"), 400
+    is_valid, error_response = validate_char_param(char)
+    if not is_valid:
+        return error_response
 
     db = get_db()
     font = db.execute("SELECT * FROM fonts WHERE id = ?", (font_id,)).fetchone()
@@ -4633,8 +4686,9 @@ def api_get_char(font_id):
 def api_save_char(font_id):
     """Save edited strokes back to DB."""
     char = request.args.get('c')
-    if not char:
-        return jsonify(error="Missing ?c= parameter"), 400
+    is_valid, error_response = validate_char_param(char)
+    if not is_valid:
+        return error_response
 
     data = request.get_json()
     if not data or 'strokes' not in data:
@@ -4761,7 +4815,7 @@ def check_case_mismatch(font_path, threshold=0.80):
     try:
         font_size = 100
         pil_font = ImageFont.truetype(font_path, font_size)
-    except Exception:
+    except OSError:
         return []
 
     # Normalized comparison size
@@ -4812,7 +4866,7 @@ def check_case_mismatch(font_path, threshold=0.80):
                 if iou >= threshold:
                     mismatched.append(lower)
 
-        except Exception:
+        except (ValueError, MemoryError, OSError):
             continue
 
     return mismatched
@@ -4898,7 +4952,7 @@ def _check_char_holes(pil_font, char):
         filled = ndimage.binary_fill_holes(arr)
         holes = filled & ~arr
         return bool(np.any(holes))
-    except Exception:
+    except (ValueError, MemoryError, OSError):
         return False
 
 
@@ -4930,7 +4984,7 @@ def _check_char_shape_count(pil_font, char, expected):
         arr = np.array(img) < 128
         _, num_shapes = ndimage.label(arr)
         return num_shapes == expected, num_shapes
-    except Exception:
+    except (ValueError, MemoryError, OSError):
         return False, 0
 
 
@@ -5066,7 +5120,8 @@ def api_reject_connected():
                 )
                 rejected.append({'id': font['id'], 'shapes': num_shapes, 'width_pct': round(max_width_pct*100, 1), 'l_hole': l_has_hole, 'exclaim_ok': exclaim_ok, 'case_mismatches': case_mismatches})
 
-        except Exception:
+        except (OSError, ValueError, MemoryError, sqlite3.Error) as e:
+            logger.debug("Skipping font %s due to error: %s", font['id'], e)
             continue
 
     db.commit()
@@ -5096,7 +5151,7 @@ def api_font_sample(font_id):
         font_size = int(height * 0.85)
         try:
             pil_font = ImageFont.truetype(font_path, font_size)
-        except Exception:
+        except OSError:
             return "Could not load font", 500
 
         # Get text dimensions
@@ -5302,40 +5357,13 @@ def api_process(font_id):
     return jsonify(strokes=result)
 
 
-def render_glyph_mask(font_path, char, canvas_size=224):
-    """Render a character as a binary mask (True = inside glyph)."""
+def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
+    """Render a character as a binary mask (True = inside glyph).
+
+    Wrapper that resolves font path and delegates to stroke_lib.
+    """
     font_path = resolve_font_path(font_path)
-    font_size = 200
-    try:
-        font = ImageFont.truetype(font_path, font_size)
-    except Exception:
-        return None
-
-    img = Image.new('L', (canvas_size, canvas_size), 255)
-    draw = ImageDraw.Draw(img)
-    bbox = font.getbbox(char)
-    if not bbox:
-        return None
-
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-
-    if w > canvas_size * 0.9 or h > canvas_size * 0.9:
-        scale = min(canvas_size * 0.9 / w, canvas_size * 0.9 / h)
-        font_size = int(font_size * scale)
-        font = ImageFont.truetype(font_path, font_size)
-        bbox = font.getbbox(char)
-        if not bbox:
-            return None
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-
-    x = (canvas_size - w) // 2 - bbox[0]
-    y = (canvas_size - h) // 2 - bbox[1]
-    draw.text((x, y), char, fill=0, font=font)
-
-    # Binary mask: True where glyph is (dark pixels)
-    return np.array(img) < 128
+    return sl_render_glyph_mask(font_path, char, canvas_size)
 
 
 def _flatten_bezier_quad(p0, p1, p2, steps=15):
@@ -5748,8 +5776,8 @@ def api_run_tests(font_id):
             strokes = minimal_strokes_from_skeleton(font_path, char, 224)
             if strokes:
                 result['strokes'] = strokes
-        except Exception:
-            pass
+        except (ValueError, OSError, IndexError) as e:
+            logger.debug("Stroke generation failed for %s: %s", char, e)
         results.append(result)
 
     # Calculate averages
@@ -6965,8 +6993,8 @@ def _stream_phase1_greedy(templates, setup, state, x0, joint_args, elapsed_fn, t
                                               popsize=12, tol=0.005, polish=False, disp=False)
                 if de_r.fun < best_sf:
                     best_s = de_r.x.copy()
-            except Exception:
-                pass
+            except (ValueError, RuntimeError) as e:
+                logger.debug("DE optimization failed in greedy stream: %s", e)
 
         greedy_x[start:end] = best_s
 
@@ -7189,7 +7217,7 @@ def api_optimize_stream(font_id):
                                         bounds_lo, bounds_hi)
 
         _t_start = _time.monotonic()
-        _TIME_BUDGET = 3600.0
+        _TIME_BUDGET = OPTIMIZATION_TIME_BUDGET
         _STALE_THRESHOLD = 0.001
         _STALE_CYCLES = 2
 
@@ -7323,7 +7351,7 @@ def api_minimal_strokes_batch(font_id):
     try:
         db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
         db.commit()
-    except:
+    except sqlite3.OperationalError:
         pass  # Column already exists
 
     generated = 0
@@ -7543,17 +7571,17 @@ def api_diffvg(font_id):
         source = 'generated'
         # Log how minimal the strokes are
         total_pts = sum(len(s) for s in clean_strokes)
-        print(f"DiffVG input: {len(clean_strokes)} strokes, {total_pts} total points")
+        logger.debug("DiffVG input: %d strokes, %d total points", len(clean_strokes), total_pts)
 
     result = _diffvg_docker.optimize(
         font_path=font_path,
         char=char,
         initial_strokes=clean_strokes,
-        canvas_size=224,
-        num_iterations=500,
-        stroke_width=8.0,
+        canvas_size=DEFAULT_CANVAS_SIZE,
+        num_iterations=DIFFVG_ITERATIONS,
+        stroke_width=DEFAULT_STROKE_WIDTH,
         thin_iterations=thin_iterations,
-        timeout=300,
+        timeout=DIFFVG_TIMEOUT,
     )
 
     if 'error' in result:

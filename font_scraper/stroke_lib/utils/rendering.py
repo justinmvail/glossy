@@ -19,29 +19,46 @@ def render_glyph_mask(font_path: str, char: str, canvas_size: int = 224) -> Opti
     Returns:
         Binary numpy array (H, W) where True = glyph pixels, or None on failure
     """
+    font_size = 200
     try:
-        font = ImageFont.truetype(font_path, size=int(canvas_size * 0.8))
+        font = ImageFont.truetype(font_path, font_size)
     except Exception:
         return None
 
-    # Create image and draw character
-    img = Image.new('L', (canvas_size, canvas_size), 0)
+    # Create image with white background
+    img = Image.new('L', (canvas_size, canvas_size), 255)
     draw = ImageDraw.Draw(img)
 
     # Get character bounding box for centering
-    bbox = draw.textbbox((0, 0), char, font=font)
-    char_width = bbox[2] - bbox[0]
-    char_height = bbox[3] - bbox[1]
+    bbox = font.getbbox(char)
+    if not bbox:
+        return None
+
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+
+    # Scale down if glyph is too large for canvas
+    if w > canvas_size * 0.9 or h > canvas_size * 0.9:
+        scale = min(canvas_size * 0.9 / w, canvas_size * 0.9 / h)
+        font_size = int(font_size * scale)
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+        except Exception:
+            return None
+        bbox = font.getbbox(char)
+        if not bbox:
+            return None
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
 
     # Center the character
-    x = (canvas_size - char_width) // 2 - bbox[0]
-    y = (canvas_size - char_height) // 2 - bbox[1]
+    x = (canvas_size - w) // 2 - bbox[0]
+    y = (canvas_size - h) // 2 - bbox[1]
 
-    draw.text((x, y), char, font=font, fill=255)
+    draw.text((x, y), char, fill=0, font=font)
 
-    # Convert to binary mask
-    mask = np.array(img) > 127
-    return mask
+    # Convert to binary mask: True where glyph is (dark pixels)
+    return np.array(img) < 128
 
 
 def get_glyph_bbox(mask: np.ndarray) -> Optional[BBox]:
