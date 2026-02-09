@@ -3453,19 +3453,19 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     font_path = resolve_font_path(font_path)
     mask = render_glyph_mask(font_path, char, canvas_size)
     if mask is None:
-        return None
+        return (None, None) if return_variant else None
 
     # Get glyph bounding box
     rows, cols = np.where(mask)
     if len(rows) == 0:
-        return None
+        return (None, None) if return_variant else None
     bbox = (float(cols.min()), float(rows.min()),
             float(cols.max()), float(rows.max()))
 
     # Analyze skeleton to find key points
     info = _analyze_skeleton(mask)
     if info is None:
-        return None
+        return (None, None) if return_variant else None
 
     # Find skeleton segments and classify by direction
     segments = _find_skeleton_segments(info)
@@ -3476,7 +3476,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     # Build tree of all skeleton pixels
     skel_list = list(info['skel_set'])
     if not skel_list:
-        return None
+        return (None, None) if return_variant else None
     skel_tree = cKDTree(skel_list)
 
     def numpad_to_pixel(region):
