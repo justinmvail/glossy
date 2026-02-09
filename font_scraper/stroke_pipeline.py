@@ -1,16 +1,19 @@
 """MinimalStrokePipeline: converts font glyphs to stroke representations via skeleton tracing."""
 
-import numpy as np
 from collections import defaultdict
-from scipy.spatial import cKDTree
-from typing import Optional, List, Tuple, Set, Dict
 
-from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
+import numpy as np
+from scipy.spatial import cKDTree
 from stroke_dataclasses import (
-    SegmentConfig, ParsedWaypoint, SkeletonAnalysis,
-    ResolvedWaypoint, VariantResult, parse_stroke_template,
     ARRIVAL_BRANCH_SIZE,
+    ParsedWaypoint,
+    ResolvedWaypoint,
+    SegmentConfig,
+    SkeletonAnalysis,
+    VariantResult,
+    parse_stroke_template,
 )
+from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
 
 
 class MinimalStrokePipeline:
@@ -35,7 +38,7 @@ class MinimalStrokePipeline:
         self.font_path = resolve_font_path_fn(font_path) if resolve_font_path_fn else font_path
         self.char = char
         self.canvas_size = canvas_size
-        self._analysis: Optional[SkeletonAnalysis] = None
+        self._analysis: SkeletonAnalysis | None = None
 
         # Store function references
         self._render_glyph_mask = render_glyph_mask_fn
@@ -52,13 +55,13 @@ class MinimalStrokePipeline:
         self._quick_stroke_score = quick_stroke_score_fn
 
     @property
-    def analysis(self) -> Optional[SkeletonAnalysis]:
+    def analysis(self) -> SkeletonAnalysis | None:
         """Lazy-load skeleton analysis."""
         if self._analysis is None:
             self._analysis = self._do_analyze()
         return self._analysis
 
-    def _do_analyze(self) -> Optional[SkeletonAnalysis]:
+    def _do_analyze(self) -> SkeletonAnalysis | None:
         """Stage 1: Render mask and analyze skeleton."""
         mask = self._render_glyph_mask(self.font_path, self.char, self.canvas_size)
         if mask is None:
@@ -91,7 +94,7 @@ class MinimalStrokePipeline:
             glyph_rows=rows, glyph_cols=cols,
         )
 
-    def numpad_to_pixel(self, region: int) -> Tuple[float, float]:
+    def numpad_to_pixel(self, region: int) -> tuple[float, float]:
         """Map numpad region (1-9) to pixel coordinates."""
         bbox = self.analysis.bbox
         frac_x, frac_y = NUMPAD_POS[region]
@@ -99,13 +102,13 @@ class MinimalStrokePipeline:
         y = bbox[1] + frac_y * (bbox[3] - bbox[1])
         return (x, y)
 
-    def find_nearest_skeleton(self, pos: Tuple[float, float]) -> Tuple[int, int]:
+    def find_nearest_skeleton(self, pos: tuple[float, float]) -> tuple[int, int]:
         """Find the nearest skeleton pixel to a position."""
         _, idx = self.analysis.skel_tree.query(pos)
         return self.analysis.skel_list[idx]
 
-    def find_best_vertical_segment(self, template_start: Tuple[float, float],
-                                   template_end: Tuple[float, float]) -> Optional[Tuple]:
+    def find_best_vertical_segment(self, template_start: tuple[float, float],
+                                   template_end: tuple[float, float]) -> tuple | None:
         """Find vertical skeleton segment(s) closest to template positions."""
         vertical_segments = self.analysis.vertical_segments
         if not vertical_segments:
@@ -148,7 +151,7 @@ class MinimalStrokePipeline:
                 best_score, best = score, (top, bot) if s1 <= s2 else (bot, top)
         return best
 
-    def resolve_waypoint(self, wp: ParsedWaypoint, next_direction: Optional[str],
+    def resolve_waypoint(self, wp: ParsedWaypoint, next_direction: str | None,
                          mid_x: float, mid_y: float, top_bound: float,
                          bot_bound: float, waist_margin: float) -> ResolvedWaypoint:
         """Stage 2: Resolve a single waypoint to pixel coordinates."""
@@ -192,8 +195,8 @@ class MinimalStrokePipeline:
         return self._resolve_terminal(wp.region, template_pos, next_direction,
                                       mid_x, top_bound, bot_bound)
 
-    def _resolve_terminal(self, region: int, template_pos: Tuple[float, float],
-                          next_direction: Optional[str], mid_x: float,
+    def _resolve_terminal(self, region: int, template_pos: tuple[float, float],
+                          next_direction: str | None, mid_x: float,
                           top_bound: float, bot_bound: float) -> ResolvedWaypoint:
         """Resolve a terminal waypoint position."""
         analysis = self.analysis
@@ -247,7 +250,7 @@ class MinimalStrokePipeline:
 
         return ResolvedWaypoint(position=(float(extremum[0]), float(extremum[1])), region=region)
 
-    def _resolve_vertex(self, region: int, template_pos: Tuple[float, float],
+    def _resolve_vertex(self, region: int, template_pos: tuple[float, float],
                         top_bound: float, bot_bound: float,
                         mid_x: float, mid_y: float) -> ResolvedWaypoint:
         """Resolve a vertex waypoint with optional apex extension."""
@@ -283,9 +286,9 @@ class MinimalStrokePipeline:
         nearest = self.find_nearest_skeleton(template_pos)
         return ResolvedWaypoint(position=(float(nearest[0]), float(nearest[1])), region=region, is_vertex=True)
 
-    def process_stroke_template(self, stroke_template: List,
-                                global_traced: Set[Tuple[int, int]],
-                                trace_paths: bool = True) -> Optional[List[List[float]]]:
+    def process_stroke_template(self, stroke_template: list,
+                                global_traced: set[tuple[int, int]],
+                                trace_paths: bool = True) -> list[list[float]] | None:
         """Process a single stroke template into stroke points."""
         analysis = self.analysis
         if analysis is None:
@@ -319,7 +322,7 @@ class MinimalStrokePipeline:
 
         return self._trace_resolved_waypoints(resolved, segment_configs, global_traced)
 
-    def _is_vertical_stroke(self, stroke_template: List) -> bool:
+    def _is_vertical_stroke(self, stroke_template: list) -> bool:
         """Check if template represents a vertical line."""
         if len(stroke_template) != 2:
             return False
@@ -337,7 +340,7 @@ class MinimalStrokePipeline:
         col2 = (r2 - 1) % 3
         return col1 == col2
 
-    def _process_vertical_stroke(self, stroke_template: List) -> List[List[float]]:
+    def _process_vertical_stroke(self, stroke_template: list) -> list[list[float]]:
         """Process a vertical stroke using segment detection and path tracing."""
         def extract_region(wp):
             if isinstance(wp, tuple):
@@ -357,9 +360,9 @@ class MinimalStrokePipeline:
             return [[float(p[0]), float(p[1])] for p in resampled]
         return [[float(start_pt[0]), float(start_pt[1])], [float(end_pt[0]), float(end_pt[1])]]
 
-    def _trace_resolved_waypoints(self, resolved: List[ResolvedWaypoint],
-                                  segment_configs: List[SegmentConfig],
-                                  global_traced: Set[Tuple[int, int]]) -> List[List[float]]:
+    def _trace_resolved_waypoints(self, resolved: list[ResolvedWaypoint],
+                                  segment_configs: list[SegmentConfig],
+                                  global_traced: set[tuple[int, int]]) -> list[list[float]]:
         """Trace paths between resolved waypoints."""
         analysis = self.analysis
         info = analysis.info
@@ -432,7 +435,7 @@ class MinimalStrokePipeline:
             full_path = self._resample_path(full_path, num_points=min(30, len(full_path)))
         return [[float(p[0]), float(p[1])] for p in full_path]
 
-    def run(self, template: List[List], trace_paths: bool = True) -> Optional[List[List[List[float]]]]:
+    def run(self, template: list[list], trace_paths: bool = True) -> list[list[list[float]]] | None:
         """Run the full pipeline for a given template."""
         if self.analysis is None:
             return None

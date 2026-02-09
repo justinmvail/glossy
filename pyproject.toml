@@ -1,0 +1,53 @@
+[project]
+name = "glossy"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear (common bugs)
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E731",   # lambda assignment (we use these intentionally)
+    "B008",   # function call in default arg (Flask patterns)
+    "SIM108", # ternary instead of if-else (readability)
+    "RUF046", # unnecessary int cast (defensive coding)
+    "B023",   # loop variable in closure (false positive when used immediately)
+    "B905",   # zip strict (not needed for internal iteration)
+    "SIM102", # nested if (readability preference)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # unused imports in __init__
+"test_*.py" = ["B011"]    # assert with literal
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+exclude = [
+    "venv/",
+    "__pycache__/",
+]
+
+[tool.bandit]
+exclude_dirs = ["venv", "__pycache__"]
+skips = ["B101"]  # assert used for debugging

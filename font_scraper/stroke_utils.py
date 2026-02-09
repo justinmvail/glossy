@@ -6,10 +6,9 @@ that don't fit neatly into other modules.
 
 import os
 import re
+
 import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter1d
-from typing import List, Tuple, Optional, Dict, Set
-
 
 # Base directory for relative path resolution
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +24,7 @@ def resolve_font_path(font_path: str) -> str:
     return os.path.join(BASE_DIR, font_path)
 
 
-def smooth_stroke(points: List[Tuple], sigma: float = 2.0) -> List[Tuple]:
+def smooth_stroke(points: list[tuple], sigma: float = 2.0) -> list[tuple]:
     """Gaussian smooth a stroke's x and y coordinates independently."""
     if len(points) < 3:
         return list(points)
@@ -39,7 +38,7 @@ def smooth_stroke(points: List[Tuple], sigma: float = 2.0) -> List[Tuple]:
     return [(float(x), float(y)) for x, y in zip(xs_smooth, ys_smooth)]
 
 
-def constrain_to_mask(points: List[Tuple], mask: np.ndarray) -> List[Tuple]:
+def constrain_to_mask(points: list[tuple], mask: np.ndarray) -> list[tuple]:
     """Constrain points to stay inside the glyph mask.
 
     Uses distance transform to snap outside points to nearest inside pixel.
@@ -65,7 +64,7 @@ def constrain_to_mask(points: List[Tuple], mask: np.ndarray) -> List[Tuple]:
     return result
 
 
-def snap_inside(pos: Tuple, mask: np.ndarray, snap_indices: np.ndarray) -> Tuple:
+def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to the nearest mask pixel if outside."""
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
@@ -77,8 +76,8 @@ def snap_inside(pos: Tuple, mask: np.ndarray, snap_indices: np.ndarray) -> Tuple
     return (nx, ny)
 
 
-def snap_deep_inside(pos: Tuple, centroid: Tuple, dist_in: np.ndarray,
-                     mask: np.ndarray, snap_indices: np.ndarray) -> Tuple:
+def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
+                     mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to be well inside the mask.
 
     Cast ray from pos toward centroid, find the point with maximum
@@ -113,14 +112,14 @@ def snap_deep_inside(pos: Tuple, centroid: Tuple, dist_in: np.ndarray,
     return best_pos
 
 
-def snap_to_glyph_edge(pos: Tuple, centroid: Tuple, mask: np.ndarray) -> Optional[Tuple]:
+def snap_to_glyph_edge(pos: tuple, centroid: tuple, mask: np.ndarray) -> tuple | None:
     """Snap a termination point to the nearest mask pixel."""
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
     iy = int(round(min(max(pos[1], 0), h - 1)))
     if mask[iy, ix]:
         return pos
-    dist_out, indices = distance_transform_edt(~mask, return_indices=True)
+    _dist_out, indices = distance_transform_edt(~mask, return_indices=True)
     ny = float(indices[0, iy, ix])
     nx = float(indices[1, iy, ix])
     nix, niy = int(round(nx)), int(round(ny))
@@ -129,7 +128,7 @@ def snap_to_glyph_edge(pos: Tuple, centroid: Tuple, mask: np.ndarray) -> Optiona
     return None
 
 
-def parse_waypoint(wp) -> Tuple[int, str]:
+def parse_waypoint(wp) -> tuple[int, str]:
     """Parse a waypoint into (region_int, kind).
 
     Returns:
@@ -146,7 +145,7 @@ def parse_waypoint(wp) -> Tuple[int, str]:
     raise ValueError(f"Unknown waypoint format: {wp}")
 
 
-def numpad_to_pixel(region: int, glyph_bbox: Tuple) -> Tuple[float, float]:
+def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
     """Map a numpad region (1-9) to pixel coordinates within the glyph bounding box."""
     from stroke_templates import NUMPAD_POS
     frac_x, frac_y = NUMPAD_POS[region]
@@ -155,7 +154,7 @@ def numpad_to_pixel(region: int, glyph_bbox: Tuple) -> Tuple[float, float]:
             y_min + frac_y * (y_max - y_min))
 
 
-def linear_segment(p0: Tuple, p1: Tuple, step: float = 2.0) -> List[Tuple]:
+def linear_segment(p0: tuple, p1: tuple, step: float = 2.0) -> list[tuple]:
     """Generate evenly-spaced points along a line from p0 to p1."""
     dx = p1[0] - p0[0]
     dy = p1[1] - p0[1]
@@ -164,8 +163,8 @@ def linear_segment(p0: Tuple, p1: Tuple, step: float = 2.0) -> List[Tuple]:
     return [(p0[0] + dx * i / (n - 1), p0[1] + dy * i / (n - 1)) for i in range(n)]
 
 
-def catmull_rom_point(p0: Tuple, p1: Tuple, p2: Tuple, p3: Tuple,
-                      t: float, alpha: float = 0.5) -> Tuple:
+def catmull_rom_point(p0: tuple, p1: tuple, p2: tuple, p3: tuple,
+                      t: float, alpha: float = 0.5) -> tuple:
     """Evaluate a single point on a Catmull-Rom spline segment."""
     def tj(ti, pi, pj):
         dx = pj[0] - pi[0]
@@ -193,8 +192,8 @@ def catmull_rom_point(p0: Tuple, p1: Tuple, p2: Tuple, p3: Tuple,
     return c
 
 
-def catmull_rom_segment(p_prev: Tuple, p0: Tuple, p1: Tuple, p_next: Tuple,
-                        step: float = 2.0) -> List[Tuple]:
+def catmull_rom_segment(p_prev: tuple, p0: tuple, p1: tuple, p_next: tuple,
+                        step: float = 2.0) -> list[tuple]:
     """Generate evenly-spaced points along a Catmull-Rom segment from p0 to p1."""
     dx = p1[0] - p0[0]
     dy = p1[1] - p0[1]
@@ -203,8 +202,8 @@ def catmull_rom_segment(p_prev: Tuple, p0: Tuple, p1: Tuple, p_next: Tuple,
     return [catmull_rom_point(p_prev, p0, p1, p_next, i / (n - 1)) for i in range(n)]
 
 
-def point_in_region(point: Tuple[int, int], region: int,
-                    bbox: Tuple[int, int, int, int]) -> bool:
+def point_in_region(point: tuple[int, int], region: int,
+                    bbox: tuple[int, int, int, int]) -> bool:
     """Check if a point falls within a numpad region.
 
     Region 1-9 maps to a 3x3 grid:
@@ -230,8 +229,8 @@ def point_in_region(point: Tuple[int, int], region: int,
     return x_min <= x <= x_max and y_min <= y <= y_max
 
 
-def build_guide_path(waypoints_raw: List, glyph_bbox: Tuple, mask: np.ndarray,
-                     skel_features: Dict = None) -> List[Tuple]:
+def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
+                     skel_features: dict | None = None) -> list[tuple]:
     """Build a guide path from parsed waypoints.
 
     waypoints_raw: list of raw waypoint values (int, 'v(n)', 'c(n)')
@@ -253,7 +252,7 @@ def build_guide_path(waypoints_raw: List, glyph_bbox: Tuple, mask: np.ndarray,
 
     # Pre-compute distance fields for snapping
     h, w = mask.shape
-    dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
+    _dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
     dist_in = distance_transform_edt(mask)
 
     def snap_to_skeleton_region(region):
@@ -309,14 +308,15 @@ def build_guide_path(waypoints_raw: List, glyph_bbox: Tuple, mask: np.ndarray,
     return constrained
 
 
-def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: Tuple) -> Optional[Dict]:
+def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
     """Find skeleton endpoints and junctions as candidate waypoint positions.
 
     Returns dict mapping numpad region (1-9) to list of (x, y) skeleton
     feature positions in that region.
     """
-    from skimage.morphology import skeletonize
     from collections import defaultdict
+
+    from skimage.morphology import skeletonize
 
     skel = skeletonize(mask)
     ys, xs = np.where(skel)

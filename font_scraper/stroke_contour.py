@@ -4,14 +4,14 @@ This module contains functions for extracting glyph contours from fonts
 and converting them to strokes.
 """
 
+
 import numpy as np
-from typing import List, Tuple, Optional
-from PIL import ImageFont
-from fontTools.ttLib import TTFont
 from fontTools.pens.recordingPen import RecordingPen
+from fontTools.ttLib import TTFont
+from PIL import ImageFont
 
 
-def flatten_bezier_quad(p0: Tuple, p1: Tuple, p2: Tuple, steps: int = 15) -> List[Tuple]:
+def flatten_bezier_quad(p0: tuple, p1: tuple, p2: tuple, steps: int = 15) -> list[tuple]:
     """Flatten a quadratic Bezier curve to a point sequence."""
     pts = []
     for i in range(1, steps + 1):
@@ -22,7 +22,7 @@ def flatten_bezier_quad(p0: Tuple, p1: Tuple, p2: Tuple, steps: int = 15) -> Lis
     return pts
 
 
-def flatten_bezier_cubic(p0: Tuple, p1: Tuple, p2: Tuple, p3: Tuple, steps: int = 20) -> List[Tuple]:
+def flatten_bezier_cubic(p0: tuple, p1: tuple, p2: tuple, p3: tuple, steps: int = 20) -> list[tuple]:
     """Flatten a cubic Bezier curve to a point sequence."""
     pts = []
     for i in range(1, steps + 1):
@@ -33,7 +33,7 @@ def flatten_bezier_cubic(p0: Tuple, p1: Tuple, p2: Tuple, p3: Tuple, steps: int 
     return pts
 
 
-def extract_contours(font_path: str, char: str) -> Tuple[Optional[List], 'TTFont']:
+def extract_contours(font_path: str, char: str) -> tuple[list | None, 'TTFont']:
     """Extract glyph contours from a font using fontTools RecordingPen.
 
     Returns:
@@ -125,7 +125,7 @@ def font_to_pixel_transform(tt: 'TTFont', font_path: str, char: str,
 
 
 def get_pixel_contours(font_path: str, char: str, canvas_size: int = 224,
-                       resolve_font_path_fn=None) -> List[List[Tuple]]:
+                       resolve_font_path_fn=None) -> list[list[tuple]]:
     """Extract glyph contours as pixel-space polylines.
 
     Returns list of polylines, each a list of (x, y) tuples.
@@ -150,7 +150,7 @@ def get_pixel_contours(font_path: str, char: str, canvas_size: int = 224,
     return pixel_contours
 
 
-def contour_segments(pixel_contours: List[List[Tuple]]) -> List[Tuple]:
+def contour_segments(pixel_contours: list[list[tuple]]) -> list[tuple]:
     """Build flat list of line segments from pixel contours.
 
     Returns list of ((x0,y0), (x1,y1)) tuples.
@@ -163,7 +163,7 @@ def contour_segments(pixel_contours: List[List[Tuple]]) -> List[Tuple]:
 
 
 def contour_to_strokes(font_path: str, char: str, canvas_size: int = 224,
-                       resolve_font_path_fn=None) -> Optional[List[List[List[float]]]]:
+                       resolve_font_path_fn=None) -> list[list[list[float]]] | None:
     """Extract strokes by splitting the outer font contour at top/bottom extremal points.
 
     Returns two strokes as [[[x,y], ...], [[x,y], ...]] tracing the left and right
@@ -215,7 +215,7 @@ def contour_to_strokes(font_path: str, char: str, canvas_size: int = 224,
 
 
 def contour_detect_markers(font_path: str, char: str, canvas_size: int = 224,
-                           resolve_font_path_fn=None) -> List[dict]:
+                           resolve_font_path_fn=None) -> list[dict]:
     """Detect termination markers from contour split points (top/bottom of letter)."""
     if resolve_font_path_fn:
         font_path = resolve_font_path_fn(font_path)
@@ -250,8 +250,8 @@ def contour_detect_markers(font_path: str, char: str, canvas_size: int = 224,
     return markers
 
 
-def ray_segment_intersection(origin: Tuple, direction: Tuple,
-                             seg_a: Tuple, seg_b: Tuple) -> Optional[float]:
+def ray_segment_intersection(origin: tuple, direction: tuple,
+                             seg_a: tuple, seg_b: tuple) -> float | None:
     """Find intersection parameter t of ray with line segment.
 
     Ray: origin + t * direction (t >= 0)
@@ -278,8 +278,8 @@ def ray_segment_intersection(origin: Tuple, direction: Tuple,
     return None
 
 
-def find_cross_section_midpoint(point: Tuple, tangent: Tuple,
-                                segments: List[Tuple], mask: np.ndarray) -> Optional[Tuple]:
+def find_cross_section_midpoint(point: tuple, tangent: tuple,
+                                segments: list[tuple], mask: np.ndarray) -> tuple | None:
     """Find the stroke center at a guide path point via cross-section ray casting.
 
     Cast perpendicular rays in both directions, find nearest contour intersection

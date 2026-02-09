@@ -14,11 +14,12 @@ Shape types:
 - u_arc: U-shaped arc (bottom half of ellipse)
 """
 
+from collections.abc import Callable
+
 import numpy as np
-from typing import Tuple, List, Dict, Callable
 
 
-def shape_vline(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_vline(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Vertical line. params: (x_frac, y_start_frac, y_end_frac)."""
     xf, ysf, yef = params
     x0, y0, x1, y1 = bbox
@@ -30,7 +31,7 @@ def shape_vline(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int =
     return np.column_stack([np.full(n_pts, x), ys + t * (ye - ys)])
 
 
-def shape_hline(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_hline(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Horizontal line. params: (y_frac, x_start_frac, x_end_frac)."""
     yf, xsf, xef = params
     x0, y0, x1, y1 = bbox
@@ -42,7 +43,7 @@ def shape_hline(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int =
     return np.column_stack([xs + t * (xe - xs), np.full(n_pts, y)])
 
 
-def shape_diag(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_diag(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Diagonal line. params: (x0f, y0f, x1f, y1f)."""
     x0f, y0f, x1f, y1f = params
     bx0, by0, bx1, by1 = bbox
@@ -55,7 +56,7 @@ def shape_diag(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 
     return np.column_stack([sx + t * (ex - sx), sy + t * (ey - sy)])
 
 
-def shape_arc_right(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_arc_right(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Right-opening arc. params: (cx_f, cy_f, rx_f, ry_f, ang_start, ang_end)."""
     cxf, cyf, rxf, ryf, a0, a1 = params
     bx0, by0, bx1, by1 = bbox
@@ -68,7 +69,7 @@ def shape_arc_right(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: i
     return np.column_stack([cx + rx * np.cos(angles), cy + ry * np.sin(angles)])
 
 
-def shape_arc_left(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_arc_left(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Left-opening arc. params: (cx_f, cy_f, rx_f, ry_f, ang_start, ang_end)."""
     cxf, cyf, rxf, ryf, a0, a1 = params
     bx0, by0, bx1, by1 = bbox
@@ -81,7 +82,7 @@ def shape_arc_left(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: in
     return np.column_stack([cx - rx * np.cos(angles), cy + ry * np.sin(angles)])
 
 
-def shape_loop(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 80) -> np.ndarray:
+def shape_loop(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 80) -> np.ndarray:
     """Full ellipse loop. params: (cx_f, cy_f, rx_f, ry_f)."""
     cxf, cyf, rxf, ryf = params
     bx0, by0, bx1, by1 = bbox
@@ -94,7 +95,7 @@ def shape_loop(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 
     return np.column_stack([cx + rx * np.cos(angles), cy + ry * np.sin(angles)])
 
 
-def shape_u_arc(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
+def shape_u_arc(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """U-shaped arc (bottom half of ellipse). params: (cx_f, cy_f, rx_f, ry_f)."""
     cxf, cyf, rxf, ryf = params
     bx0, by0, bx1, by1 = bbox
@@ -108,7 +109,7 @@ def shape_u_arc(params: Tuple, bbox: Tuple, offset: Tuple = (0, 0), n_pts: int =
 
 
 # Shape function registry
-SHAPE_FNS: Dict[str, Callable] = {
+SHAPE_FNS: dict[str, Callable] = {
     'vline': shape_vline,
     'hline': shape_hline,
     'diag': shape_diag,
@@ -120,7 +121,7 @@ SHAPE_FNS: Dict[str, Callable] = {
 
 # Bounds per shape type for differential_evolution optimization.
 # All in bbox-fraction space except arc angles which are in degrees.
-SHAPE_PARAM_BOUNDS: Dict[str, List[Tuple[float, float]]] = {
+SHAPE_PARAM_BOUNDS: dict[str, list[tuple[float, float]]] = {
     'vline': [(0.0, 1.0), (0.0, 0.5), (0.5, 1.0)],
     'hline': [(0.0, 1.0), (0.0, 0.5), (0.5, 1.0)],
     'diag': [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)],
@@ -133,7 +134,7 @@ SHAPE_PARAM_BOUNDS: Dict[str, List[Tuple[float, float]]] = {
 }
 
 
-def get_param_bounds(templates: List[dict]) -> Tuple[List[Tuple], List[Tuple[int, int]]]:
+def get_param_bounds(templates: list[dict]) -> tuple[list[tuple], list[tuple[int, int]]]:
     """Build flat bounds list + per-shape slice indices.
 
     Each template entry may include an optional 'bounds' key that overrides
@@ -162,9 +163,9 @@ def get_param_bounds(templates: List[dict]) -> Tuple[List[Tuple], List[Tuple[int
     return bounds, slices
 
 
-def param_vector_to_shapes(param_vector: np.ndarray, shape_types: List[str],
-                           slices: List[Tuple[int, int]], bbox: Tuple,
-                           n_pts: int = None) -> List[np.ndarray]:
+def param_vector_to_shapes(param_vector: np.ndarray, shape_types: list[str],
+                           slices: list[tuple[int, int]], bbox: tuple,
+                           n_pts: int | None = None) -> list[np.ndarray]:
     """Convert flat parameter vector into list of Nx2 point arrays.
 
     When n_pts is None it is computed from the bbox diagonal so the shape
@@ -240,7 +241,7 @@ def adaptive_radius(mask: np.ndarray, spacing: int = 2) -> float:
     return max(float(np.percentile(vals, 95)), floor)
 
 
-def score_shape(shape_pts: np.ndarray, tree, radius: float, claimed: set = None) -> float:
+def score_shape(shape_pts: np.ndarray, tree, radius: float, claimed: set | None = None) -> float:
     """Count cloud points within radius of shape path.
 
     Gives a bonus weight for unclaimed points.

@@ -10,7 +10,6 @@ generating strokes from font glyphs. Templates are organized by type:
 - SHAPE_TEMPLATES: Parametric shape primitives (imported from stroke_shape_templates)
 """
 
-from stroke_shape_templates import SHAPE_TEMPLATES
 
 # --- Letter stroke templates ---
 # Each letter maps to a list of strokes. Each stroke is a tuple of regions
@@ -312,7 +311,7 @@ NUMPAD_TEMPLATE_VARIANTS = {
 
 # Legacy compatibility: NUMPAD_TEMPLATES returns first variant for each char
 NUMPAD_TEMPLATES = {
-    char: list(variants.values())[0]
+    char: next(iter(variants.values()))
     for char, variants in NUMPAD_TEMPLATE_VARIANTS.items()
 }
 

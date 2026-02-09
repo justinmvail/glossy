@@ -4,10 +4,10 @@ This module contains functions for rendering font glyphs to images and masks.
 """
 
 import io
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-
-from stroke_flask import resolve_font_path, DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE
+from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
 
 
 def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=DEFAULT_CANVAS_SIZE):
@@ -191,7 +191,7 @@ def analyze_shape_metrics(arr, width):
     from scipy.ndimage import label
 
     binary = arr < 128
-    labeled, num_shapes = label(binary)
+    _labeled, num_shapes = label(binary)
 
     # Find max contiguous width percentage
     max_width = 0
@@ -229,7 +229,7 @@ def check_char_holes(pil_font, char):
     binary = arr < 128
 
     # Label background components
-    bg_labeled, bg_count = label(~binary)
+    _bg_labeled, bg_count = label(~binary)
 
     # If more than 1 background region, there are holes
     return bg_count > 1

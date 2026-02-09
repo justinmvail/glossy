@@ -4,18 +4,17 @@ This module contains functions for analyzing glyph skeletons and
 tracing stroke paths through them.
 """
 
-import numpy as np
 from collections import defaultdict, deque
-from typing import List, Tuple, Set, Dict, Optional
-from skimage.morphology import skeletonize
 
+import numpy as np
+from skimage.morphology import skeletonize
 
 # Constants
 SKELETON_MERGE_DISTANCE = 12
 MIN_STROKE_LENGTH = 5
 
 
-def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE) -> Optional[Dict]:
+def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE) -> dict | None:
     """Analyze skeleton to find endpoints and junction clusters.
 
     Args:
@@ -66,8 +65,8 @@ def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE
     }
 
 
-def _merge_junction_clusters(junction_pixels: List[Tuple], skel_set: Set,
-                              adj: Dict, merge_dist: int) -> List[Set]:
+def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
+                              adj: dict, merge_dist: int) -> list[set]:
     """Merge nearby junction pixels into clusters."""
     if not junction_pixels:
         return []
@@ -95,9 +94,8 @@ def _merge_junction_clusters(junction_pixels: List[Tuple], skel_set: Set,
                     if sp in visited:
                         continue
                     d = ((sp[0] - p[0])**2 + (sp[1] - p[1])**2)**0.5
-                    if d <= merge_dist:
-                        if sp in junction_pixels or len(adj[sp]) >= 3:
-                            queue.append(sp)
+                    if d <= merge_dist and (sp in junction_pixels or len(adj[sp]) >= 3):
+                        queue.append(sp)
 
         if cluster:
             clusters.append(cluster)
@@ -105,7 +103,7 @@ def _merge_junction_clusters(junction_pixels: List[Tuple], skel_set: Set,
     return clusters
 
 
-def find_skeleton_segments(info: Dict) -> List[Dict]:
+def find_skeleton_segments(info: dict) -> list[dict]:
     """Find and classify skeleton path segments between junctions.
 
     Returns list of segments, each with:
@@ -197,7 +195,7 @@ def find_skeleton_segments(info: Dict) -> List[Dict]:
     return segments
 
 
-def snap_to_skeleton(point: Tuple, skel_set: Set) -> Tuple:
+def snap_to_skeleton(point: tuple, skel_set: set) -> tuple:
     """Find the nearest skeleton pixel to a point."""
     point = tuple(point) if not isinstance(point, tuple) else point
     if point in skel_set or not skel_set:
@@ -213,9 +211,9 @@ def snap_to_skeleton(point: Tuple, skel_set: Set) -> Tuple:
     return nearest
 
 
-def trace_skeleton_path(start: Tuple, end: Tuple, adj: Dict, skel_set: Set,
-                        max_steps: int = 500, avoid_pixels: Set = None,
-                        direction: str = None) -> Optional[List[Tuple]]:
+def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
+                        max_steps: int = 500, avoid_pixels: set | None = None,
+                        direction: str | None = None) -> list[tuple] | None:
     """Trace a path along skeleton pixels from start to end using BFS.
 
     Args:
@@ -287,7 +285,7 @@ def trace_skeleton_path(start: Tuple, end: Tuple, adj: Dict, skel_set: Set,
             if nb in visited:
                 continue
             visited.add(nb)
-            queue.append((nb, path + [nb], steps + 1))
+            queue.append((nb, [*path, nb], steps + 1))
 
     # No path found - try without avoidance
     if avoid_pixels:
@@ -296,8 +294,8 @@ def trace_skeleton_path(start: Tuple, end: Tuple, adj: Dict, skel_set: Set,
     return None
 
 
-def trace_segment(start: Tuple, end: Tuple, config, adj: Dict, skel_set: Set,
-                  avoid_pixels: Set = None, fallback_avoid: Set = None) -> Optional[List[Tuple]]:
+def trace_segment(start: tuple, end: tuple, config, adj: dict, skel_set: set,
+                  avoid_pixels: set | None = None, fallback_avoid: set | None = None) -> list[tuple] | None:
     """Trace a segment between two points along the skeleton.
 
     Args:
@@ -321,9 +319,9 @@ def trace_segment(start: Tuple, end: Tuple, config, adj: Dict, skel_set: Set,
     return result
 
 
-def trace_to_region(start: Tuple, region: int, bbox: Tuple, adj: Dict,
-                    skel_set: Set, avoid_pixels: Set = None,
-                    point_in_region_fn=None) -> Optional[List[Tuple]]:
+def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
+                    skel_set: set, avoid_pixels: set | None = None,
+                    point_in_region_fn=None) -> list[tuple] | None:
     """Trace a path from start until it reaches a target numpad region.
 
     Args:
@@ -363,12 +361,12 @@ def trace_to_region(start: Tuple, region: int, bbox: Tuple, adj: Dict,
             if nb in avoid_pixels and len(path) > 5:  # Allow initial escape
                 continue
             visited.add(nb)
-            queue.append((nb, path + [nb]))
+            queue.append((nb, [*path, nb]))
 
     return None
 
 
-def generate_straight_line(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
     """Generate a straight line of pixels from start to end using Bresenham's algorithm."""
     x0, y0 = int(round(start[0])), int(round(start[1]))
     x1, y1 = int(round(end[0])), int(round(end[1]))
@@ -395,7 +393,7 @@ def generate_straight_line(start: Tuple[int, int], end: Tuple[int, int]) -> List
     return points
 
 
-def resample_path(path: List[Tuple], num_points: int = 30) -> List[Tuple]:
+def resample_path(path: list[tuple], num_points: int = 30) -> list[tuple]:
     """Resample a path to have a fixed number of evenly-spaced points."""
     if len(path) < 2:
         return list(path)

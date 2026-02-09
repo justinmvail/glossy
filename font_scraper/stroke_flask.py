@@ -4,11 +4,12 @@ This module contains the Flask app instance, database connection helpers,
 and common Flask-related utilities used across the stroke editor.
 """
 
+import logging
 import os
 import sqlite3
-import logging
 from contextlib import contextmanager
 from urllib.parse import quote as urlquote
+
 from flask import Flask
 
 # Base directory for file paths

@@ -3,22 +3,31 @@
 This module contains core Flask route handlers for the stroke editor web app.
 """
 
+import base64
 import io
 import json
-import base64
+
 import numpy as np
-from flask import render_template, request, jsonify, send_file
+from flask import jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from scipy.ndimage import distance_transform_edt
 from skimage.morphology import thin
-
 from stroke_flask import (
-    app, get_db, CHARS, STROKE_COLORS, resolve_font_path, validate_char_param,
+    CHARS,
+    STROKE_COLORS,
+    app,
+    get_db,
+    resolve_font_path,
+    validate_char_param,
 )
 from stroke_rendering import (
-    render_char_image, render_glyph_mask, check_case_mismatch,
-    render_text_for_analysis, analyze_shape_metrics, check_char_holes,
+    analyze_shape_metrics,
+    check_case_mismatch,
+    check_char_holes,
     check_char_shape_count,
+    render_char_image,
+    render_glyph_mask,
+    render_text_for_analysis,
 )
 
 

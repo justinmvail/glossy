@@ -5,14 +5,27 @@ used by the Flask routes and other modules.
 """
 
 from stroke_flask import resolve_font_path
-from stroke_rendering import render_glyph_mask
-from stroke_skeleton import find_skeleton_segments, trace_segment, trace_to_region, generate_straight_line, resample_path
-from stroke_merge import run_merge_pass, merge_t_junctions, absorb_convergence_stubs, absorb_junction_stubs, absorb_proximity_stubs, remove_orphan_stubs
-from stroke_utils import point_in_region
-from stroke_pipeline import MinimalStrokePipeline
-from stroke_scoring import quick_stroke_score
-from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_lib.analysis.skeleton import SkeletonAnalyzer
+from stroke_merge import (
+    absorb_convergence_stubs,
+    absorb_junction_stubs,
+    absorb_proximity_stubs,
+    merge_t_junctions,
+    remove_orphan_stubs,
+    run_merge_pass,
+)
+from stroke_pipeline import MinimalStrokePipeline
+from stroke_rendering import render_glyph_mask
+from stroke_scoring import quick_stroke_score
+from stroke_skeleton import (
+    find_skeleton_segments,
+    generate_straight_line,
+    resample_path,
+    trace_segment,
+    trace_to_region,
+)
+from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
+from stroke_utils import point_in_region
 
 
 def _skel(mask):
@@ -159,7 +172,7 @@ def auto_fit(fp, c, cs=224, ret_mark=False):
     if result is None:
         return (None, []) if ret_mark else None
 
-    strokes, score, _, _ = result
+    strokes, _score, _, _ = result
     if not strokes:
         return (None, []) if ret_mark else None
 

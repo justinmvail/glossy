@@ -4,16 +4,16 @@ This module contains shared dataclasses used across the stroke processing module
 """
 
 import re
-import numpy as np
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Set, Dict
+
+import numpy as np
 
 
 # --- Segment tracing configuration ---
 @dataclass
 class SegmentConfig:
     """Configuration for how to trace a segment between waypoints."""
-    direction: Optional[str] = None  # 'down', 'up', 'left', 'right' - initial direction bias
+    direction: str | None = None  # 'down', 'up', 'left', 'right' - initial direction bias
     straight: bool = False           # True = draw direct line, False = follow skeleton
 
 
@@ -43,11 +43,11 @@ ALL_HINTS = DIRECTION_HINTS | STYLE_HINTS
 class SkeletonAnalysis:
     """Analyzed skeleton data for stroke generation."""
     mask: np.ndarray
-    info: Dict  # skeleton info dict
-    segments: List[Dict]  # classified segments
-    vertical_segments: List[Dict]
-    bbox: Tuple[float, float, float, float]
-    skel_list: List[Tuple[int, int]]
+    info: dict  # skeleton info dict
+    segments: list[dict]  # classified segments
+    vertical_segments: list[dict]
+    bbox: tuple[float, float, float, float]
+    skel_list: list[tuple[int, int]]
     skel_tree: object  # cKDTree
     glyph_rows: np.ndarray  # row indices of glyph pixels
     glyph_cols: np.ndarray  # column indices of glyph pixels
@@ -56,23 +56,23 @@ class SkeletonAnalysis:
 @dataclass
 class ResolvedWaypoint:
     """A waypoint with its resolved pixel position."""
-    position: Tuple[float, float]
+    position: tuple[float, float]
     region: int
     is_curve: bool = False
     is_vertex: bool = False
     is_intersection: bool = False
-    apex_extension: Optional[Tuple[str, Tuple[float, float]]] = None  # ('top'/'bottom', (x, y))
+    apex_extension: tuple[str, tuple[float, float]] | None = None  # ('top'/'bottom', (x, y))
 
 
 @dataclass
 class VariantResult:
     """Result of evaluating one template variant."""
-    strokes: Optional[List[List[List[float]]]]
+    strokes: list[list[list[float]]] | None
     score: float
     variant_name: str
 
 
-def parse_stroke_template(stroke_template: List) -> Tuple[List[ParsedWaypoint], List[SegmentConfig]]:
+def parse_stroke_template(stroke_template: list) -> tuple[list[ParsedWaypoint], list[SegmentConfig]]:
     """Parse a stroke template into waypoints and segment configurations.
 
     Args:

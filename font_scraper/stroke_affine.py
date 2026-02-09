@@ -5,19 +5,18 @@ affine transformations (translation, rotation, scaling, shear).
 """
 
 import logging
-import numpy as np
-from typing import List, Tuple, Optional
-from scipy.spatial import cKDTree
-from scipy.ndimage import distance_transform_edt
 
-from stroke_shapes import make_point_cloud, adaptive_radius
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+from scipy.spatial import cKDTree
 from stroke_scoring import score_raw_strokes
+from stroke_shapes import adaptive_radius, make_point_cloud
 
 logger = logging.getLogger(__name__)
 
 
-def affine_transform_strokes(strokes: List[np.ndarray], params: Tuple,
-                             centroid: Tuple[float, float]) -> List[np.ndarray]:
+def affine_transform_strokes(strokes: list[np.ndarray], params: tuple,
+                             centroid: tuple[float, float]) -> list[np.ndarray]:
     """Apply affine transform to strokes around a centroid.
 
     Args:
@@ -46,8 +45,8 @@ def affine_transform_strokes(strokes: List[np.ndarray], params: Tuple,
 
 
 def prepare_affine_optimization(font_path: str, char: str, canvas_size: int,
-                                strokes_raw: List, mask: np.ndarray,
-                                smooth_stroke_fn, constrain_to_mask_fn) -> Optional[Tuple]:
+                                strokes_raw: list, mask: np.ndarray,
+                                smooth_stroke_fn, constrain_to_mask_fn) -> tuple | None:
     """Setup optimization data structures for affine stroke optimization.
 
     Args:
@@ -96,8 +95,8 @@ def prepare_affine_optimization(font_path: str, char: str, canvas_size: int,
     return stroke_arrays, centroid, glyph_bbox, score_args
 
 
-def run_global_affine(stroke_arrays: List[np.ndarray], centroid: Tuple[float, float],
-                      score_args: Tuple) -> Tuple[List[np.ndarray], np.ndarray, float]:
+def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, float],
+                      score_args: tuple) -> tuple[list[np.ndarray], np.ndarray, float]:
     """Run Stage 1 global affine optimization on all strokes together.
 
     Args:
@@ -108,7 +107,7 @@ def run_global_affine(stroke_arrays: List[np.ndarray], centroid: Tuple[float, fl
     Returns:
         Tuple of (best_strokes, best_params, best_score)
     """
-    from scipy.optimize import minimize, differential_evolution
+    from scipy.optimize import differential_evolution, minimize
 
     affine_bounds = [(-20, 20), (-20, 20),  # translate
                      (0.7, 1.3), (0.7, 1.3),  # scale
@@ -143,8 +142,8 @@ def run_global_affine(stroke_arrays: List[np.ndarray], centroid: Tuple[float, fl
     return best_strokes, best_params, best_score
 
 
-def run_per_stroke_refinement(best_strokes: List[np.ndarray], best_score: float,
-                              score_args: Tuple) -> Tuple[List[np.ndarray], float]:
+def run_per_stroke_refinement(best_strokes: list[np.ndarray], best_score: float,
+                              score_args: tuple) -> tuple[list[np.ndarray], float]:
     """Run Stage 2 per-stroke translate+scale refinement.
 
     Args:
@@ -192,7 +191,7 @@ def run_per_stroke_refinement(best_strokes: List[np.ndarray], best_score: float,
 def optimize_affine(font_path: str, char: str, canvas_size: int,
                     template_to_strokes_fn, render_glyph_mask_fn,
                     resolve_font_path_fn, smooth_stroke_fn,
-                    constrain_to_mask_fn) -> Optional[Tuple]:
+                    constrain_to_mask_fn) -> tuple | None:
     """Optimise template strokes via affine transforms.
 
     Stage 1: Global affine (6 params) on all strokes together.
@@ -217,7 +216,7 @@ def optimize_affine(font_path: str, char: str, canvas_size: int,
     stroke_arrays, centroid, glyph_bbox, score_args = setup
 
     # Stage 1: Global affine
-    best_strokes, best_params, best_score = run_global_affine(stroke_arrays, centroid, score_args)
+    best_strokes, _best_params, best_score = run_global_affine(stroke_arrays, centroid, score_args)
 
     # Stage 2: Per-stroke refinement
     final_strokes, final_score = run_per_stroke_refinement(best_strokes, best_score, score_args)
@@ -233,7 +232,7 @@ def optimize_diffvg(font_path: str, char: str, canvas_size: int,
                     diffvg_docker, template_to_strokes_fn,
                     render_glyph_mask_fn, logger_ref,
                     num_iterations: int = 500, stroke_width: float = 8.0,
-                    timeout: int = 300) -> Optional[Tuple]:
+                    timeout: int = 300) -> tuple | None:
     """Optimise strokes using DiffVG differentiable rendering in Docker.
 
     Returns same format as optimize_affine: (strokes, score, mask, bbox)

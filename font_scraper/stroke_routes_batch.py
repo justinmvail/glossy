@@ -6,17 +6,24 @@ This module contains batch processing and test-related Flask route handlers.
 import io
 import json
 import sqlite3
-import numpy as np
 from datetime import datetime
-from flask import render_template, request, jsonify, send_file
-from PIL import Image, ImageDraw
 
+import numpy as np
+from flask import jsonify, render_template, request, send_file
+from PIL import Image, ImageDraw
 from stroke_flask import (
-    app, get_db, ensure_test_tables, CHARS, resolve_font_path,
-    DEFAULT_CANVAS_SIZE, DEFAULT_STROKE_WIDTH, DIFFVG_ITERATIONS, DIFFVG_TIMEOUT,
+    CHARS,
+    DEFAULT_CANVAS_SIZE,
+    DEFAULT_STROKE_WIDTH,
+    DIFFVG_ITERATIONS,
+    DIFFVG_TIMEOUT,
+    app,
+    ensure_test_tables,
+    get_db,
+    resolve_font_path,
 )
-from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_rendering import render_glyph_mask
+from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 
 try:
     from docker.diffvg_docker import DiffVGDocker
@@ -35,7 +42,7 @@ def _font(fid):
 
 def _get_stroke_funcs():
     """Import stroke processing functions lazily to avoid circular imports."""
-    from stroke_core import skel_strokes, skel_markers, min_strokes, auto_fit
+    from stroke_core import auto_fit, min_strokes, skel_markers, skel_strokes
     return skel_strokes, skel_markers, min_strokes, auto_fit
 
 

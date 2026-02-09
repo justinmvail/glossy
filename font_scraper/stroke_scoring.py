@@ -4,18 +4,19 @@ This module contains functions for scoring strokes against point clouds
 and glyph masks during shape fitting optimization.
 """
 
-import numpy as np
-from typing import List, Tuple, Set, Optional, Dict
-from scipy.spatial import cKDTree
 
+import numpy as np
+from scipy.spatial import cKDTree
 from stroke_shapes import (
     SHAPE_FNS,
+)
+from stroke_shapes import (
     param_vector_to_shapes as _param_vector_to_shapes,
 )
 
 
-def score_all_strokes(param_vector: np.ndarray, shape_types: List[str],
-                      slices: List[Tuple[int, int]], bbox: Tuple,
+def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
+                      slices: list[tuple[int, int]], bbox: tuple,
                       cloud_tree: cKDTree, n_cloud: int, radius: float,
                       snap_yi: np.ndarray, snap_xi: np.ndarray,
                       w: int, h: int, dist_map: np.ndarray = None) -> float:
@@ -95,7 +96,7 @@ def score_all_strokes(param_vector: np.ndarray, shape_types: List[str],
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
 
 
-def score_raw_strokes(stroke_arrays: List[np.ndarray], cloud_tree: cKDTree,
+def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
                       n_cloud: int, radius: float, snap_yi: np.ndarray,
                       snap_xi: np.ndarray, w: int, h: int,
                       dist_map: np.ndarray = None, mask: np.ndarray = None) -> float:
@@ -165,11 +166,11 @@ def score_raw_strokes(stroke_arrays: List[np.ndarray], cloud_tree: cKDTree,
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
 
 
-def score_single_shape(params: np.ndarray, shape_type: str, bbox: Tuple,
+def score_single_shape(params: np.ndarray, shape_type: str, bbox: tuple,
                        uncovered_pts: np.ndarray, uncovered_tree: cKDTree,
                        n_uncovered: int, radius: float,
                        snap_yi: np.ndarray, snap_xi: np.ndarray,
-                       w: int, h: int, n_pts: int = None) -> float:
+                       w: int, h: int, n_pts: int | None = None) -> float:
     """Score a single shape against uncovered points only (for greedy fitting).
 
     Returns negative coverage of uncovered points minus snap penalty.
@@ -198,7 +199,7 @@ def score_single_shape(params: np.ndarray, shape_type: str, bbox: Tuple,
     return -(coverage - snap_penalty)
 
 
-def quick_stroke_score(strokes: List[List[List[float]]], mask: np.ndarray) -> float:
+def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> float:
     """Quick scoring for stroke quality - coverage of glyph mask.
 
     Returns fraction of mask pixels covered by strokes (0 to 1).
@@ -240,7 +241,7 @@ def quick_stroke_score(strokes: List[List[List[float]]], mask: np.ndarray) -> fl
 
 
 def score_shape_coverage(shape_pts: np.ndarray, tree: cKDTree, radius: float,
-                         claimed: Set = None) -> float:
+                         claimed: set | None = None) -> float:
     """Count cloud points within radius of shape path.
 
     Gives a bonus weight for unclaimed points.

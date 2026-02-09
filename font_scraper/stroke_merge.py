@@ -4,12 +4,12 @@ This module contains functions for merging strokes at junctions,
 absorbing short stubs, and cleaning up stroke paths.
 """
 
-import numpy as np
 from collections import defaultdict
-from typing import List, Tuple, Set, Dict, Optional
+
+import numpy as np
 
 
-def seg_dir(stroke: List[Tuple], from_end: bool = False, n_samples: int = 5) -> Tuple[float, float]:
+def seg_dir(stroke: list[tuple], from_end: bool = False, n_samples: int = 5) -> tuple[float, float]:
     """Get direction vector for end of stroke (averaged over last n_samples)."""
     if len(stroke) < 2:
         return (1.0, 0.0)
@@ -31,14 +31,14 @@ def seg_dir(stroke: List[Tuple], from_end: bool = False, n_samples: int = 5) -> 
     return (dx/length, dy/length)
 
 
-def angle_between(v1: Tuple[float, float], v2: Tuple[float, float]) -> float:
+def angle_between(v1: tuple[float, float], v2: tuple[float, float]) -> float:
     """Compute angle between two direction vectors (in radians)."""
     dot = v1[0]*v2[0] + v1[1]*v2[1]
     dot = max(-1.0, min(1.0, dot))
     return np.arccos(dot)
 
 
-def endpoint_cluster(stroke: List[Tuple], from_end: bool, assigned: List[Set]) -> int:
+def endpoint_cluster(stroke: list[tuple], from_end: bool, assigned: list[set]) -> int:
     """Find which junction cluster (if any) contains the stroke endpoint.
 
     Args:
@@ -69,9 +69,9 @@ def endpoint_cluster(stroke: List[Tuple], from_end: bool, assigned: List[Set]) -
     return -1
 
 
-def run_merge_pass(strokes: List[List[Tuple]], assigned: List[Set],
+def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
                    min_len: int = 0, max_angle: float = np.pi/4,
-                   max_ratio: float = 0) -> List[List[Tuple]]:
+                   max_ratio: float = 0) -> list[list[tuple]]:
     """Merge strokes through junction clusters by direction alignment.
 
     Args:
@@ -95,7 +95,7 @@ def run_merge_pass(strokes: List[List[Tuple]], assigned: List[Set],
 
         best_score = float('inf')
         best_merge = None
-        for cid, entries in cluster_map.items():
+        for _cid, entries in cluster_map.items():
             if len(entries) < 2:
                 continue
             for ai in range(len(entries)):
@@ -138,8 +138,8 @@ def run_merge_pass(strokes: List[List[Tuple]], assigned: List[Set],
     return strokes
 
 
-def merge_t_junctions(strokes: List[List[Tuple]], junction_clusters: List[Set],
-                      assigned: List[Set]) -> List[List[Tuple]]:
+def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
+                      assigned: list[set]) -> list[list[tuple]]:
     """Merge strokes at T-junctions.
 
     At junctions with 3+ strokes, if the shortest stroke is a cross-branch
@@ -162,7 +162,7 @@ def merge_t_junctions(strokes: List[List[Tuple]], junction_clusters: List[Set],
             if len(entries) < 3:
                 continue
             entries_sorted = sorted(entries, key=lambda e: len(strokes[e[0]]), reverse=True)
-            shortest_idx, shortest_side = entries_sorted[-1]
+            shortest_idx, _shortest_side = entries_sorted[-1]
             shortest_stroke = strokes[shortest_idx]
             second_longest_len = len(strokes[entries_sorted[1][0]])
 
@@ -209,7 +209,7 @@ def merge_t_junctions(strokes: List[List[Tuple]], junction_clusters: List[Set],
     return strokes
 
 
-def get_stroke_tail(stroke: List[Tuple], at_end: bool, cluster: Set) -> Tuple[List[Tuple], Tuple]:
+def get_stroke_tail(stroke: list[tuple], at_end: bool, cluster: set) -> tuple[list[tuple], tuple]:
     """Get the tail points of a stroke before a junction cluster.
 
     Returns:
@@ -235,8 +235,8 @@ def get_stroke_tail(stroke: List[Tuple], at_end: bool, cluster: Set) -> Tuple[Li
         return list(reversed(tail)), stroke[0]
 
 
-def extend_stroke_to_tip(stroke: List[Tuple], at_end: bool, tail: List[Tuple],
-                         leg_end: Tuple, stub_tip: Tuple) -> None:
+def extend_stroke_to_tip(stroke: list[tuple], at_end: bool, tail: list[tuple],
+                         leg_end: tuple, stub_tip: tuple) -> None:
     """Extend a stroke from its junction end toward a stub tip (modifies in place)."""
     if len(tail) >= 2:
         dx = tail[-1][0] - tail[0][0]
@@ -274,8 +274,8 @@ def extend_stroke_to_tip(stroke: List[Tuple], at_end: bool, tail: List[Tuple],
             stroke.insert(0, p)
 
 
-def absorb_convergence_stubs(strokes: List[List[Tuple]], junction_clusters: List[Set],
-                             assigned: List[Set], conv_threshold: int = 18) -> List[List[Tuple]]:
+def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list[set],
+                             assigned: list[set], conv_threshold: int = 18) -> list[list[tuple]]:
     """Absorb short convergence stubs into longer strokes at junction clusters.
 
     A convergence stub is a short stroke with one endpoint in a junction cluster
@@ -339,8 +339,8 @@ def absorb_convergence_stubs(strokes: List[List[Tuple]], junction_clusters: List
     return strokes
 
 
-def absorb_junction_stubs(strokes: List[List[Tuple]], assigned: List[Set],
-                          stub_threshold: int = 20) -> List[List[Tuple]]:
+def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
+                          stub_threshold: int = 20) -> list[list[tuple]]:
     """Absorb short stubs into neighboring strokes at junction clusters."""
     changed = True
     while changed:
@@ -394,8 +394,8 @@ def absorb_junction_stubs(strokes: List[List[Tuple]], assigned: List[Set],
     return strokes
 
 
-def absorb_proximity_stubs(strokes: List[List[Tuple]], stub_threshold: int = 20,
-                           prox_threshold: int = 20) -> List[List[Tuple]]:
+def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
+                           prox_threshold: int = 20) -> list[list[tuple]]:
     """Absorb short stubs by proximity to longer stroke endpoints."""
     changed = True
     while changed:
@@ -434,8 +434,8 @@ def absorb_proximity_stubs(strokes: List[List[Tuple]], stub_threshold: int = 20,
     return strokes
 
 
-def remove_orphan_stubs(strokes: List[List[Tuple]], assigned: List[Set],
-                        stub_threshold: int = 20) -> List[List[Tuple]]:
+def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
+                        stub_threshold: int = 20) -> list[list[tuple]]:
     """Remove orphaned short stubs that have no neighbors at their junction clusters."""
     changed = True
     while changed:
