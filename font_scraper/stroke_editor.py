@@ -11,7 +11,9 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter1d
 from scipy.spatial import cKDTree
 from skimage.morphology import skeletonize
-from collections import defaultdict
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import Optional, List, Tuple, Set, Dict
 from urllib.parse import quote as urlquote
 from flask import Flask, render_template, request, jsonify, send_file, Response
 from PIL import Image, ImageDraw, ImageFont
@@ -27,6 +29,98 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 DB_PATH = os.path.join(BASE_DIR, 'fonts.db')
+
+
+# --- Segment tracing configuration ---
+@dataclass
+class SegmentConfig:
+    """Configuration for how to trace a segment between waypoints."""
+    direction: Optional[str] = None  # 'down', 'up', 'left', 'right' - initial direction bias
+    straight: bool = False           # True = draw direct line, False = follow skeleton
+
+
+@dataclass
+class ParsedWaypoint:
+    """A parsed waypoint with its position and type info."""
+    region: int                      # Numpad region 1-9
+    is_curve: bool = False           # c(n) - smooth curve
+    is_vertex: bool = False          # v(n) - sharp vertex
+    is_intersection: bool = False    # i(n) - self-crossing point
+    pixel_pos: Tuple[float, float] = None  # Resolved skeleton position
+
+
+# Constants for path tracing
+DIRECTION_BIAS_PIXELS = 15    # Only apply direction bias for first N pixels
+NEAR_ENDPOINT_DIST = 5        # Distance to consider "near" start/end for avoid_pixels
+ARRIVAL_BRANCH_SIZE = 3       # Pixels to track as arrival branch at intersections
+
+# Valid hint strings
+DIRECTION_HINTS = {'down', 'up', 'left', 'right'}
+STYLE_HINTS = {'straight'}
+ALL_HINTS = DIRECTION_HINTS | STYLE_HINTS
+
+
+def parse_stroke_template(stroke_template: List) -> Tuple[List[ParsedWaypoint], List[SegmentConfig]]:
+    """Parse a stroke template into waypoints and segment configurations.
+
+    Args:
+        stroke_template: Raw template like [9, 8, 7, 'straight', 4, 'i(5)', 6]
+
+    Returns:
+        Tuple of:
+        - List of ParsedWaypoint (one per actual waypoint, hints excluded)
+        - List of SegmentConfig (one per segment, len = len(waypoints) - 1)
+    """
+    waypoints = []
+    segment_configs = []
+    pending_config = SegmentConfig()
+
+    for item in stroke_template:
+        # Handle tuples (legacy format)
+        if isinstance(item, tuple):
+            item = item[0]
+
+        # Check if it's a hint
+        if isinstance(item, str) and item in ALL_HINTS:
+            if item in DIRECTION_HINTS:
+                pending_config.direction = item
+            elif item == 'straight':
+                pending_config.straight = True
+            continue
+
+        # Parse waypoint type
+        wp = ParsedWaypoint(region=0)
+
+        if isinstance(item, int):
+            wp.region = item
+        else:
+            # Try v(n), c(n), i(n) patterns
+            m = re.match(r'^v\((\d)\)$', str(item))
+            if m:
+                wp.region = int(m.group(1))
+                wp.is_vertex = True
+            else:
+                m = re.match(r'^c\((\d)\)$', str(item))
+                if m:
+                    wp.region = int(m.group(1))
+                    wp.is_curve = True
+                else:
+                    m = re.match(r'^i\((\d)\)$', str(item))
+                    if m:
+                        wp.region = int(m.group(1))
+                        wp.is_intersection = True
+                    else:
+                        continue  # Unknown format, skip
+
+        waypoints.append(wp)
+
+        # Store the pending config for the segment ENDING at this waypoint
+        # (First waypoint has no preceding segment)
+        if len(waypoints) > 1:
+            segment_configs.append(pending_config)
+            pending_config = SegmentConfig()
+
+    return waypoints, segment_configs
 
 
 @app.template_filter('urlencode')
@@ -2429,7 +2523,49 @@ def _find_skeleton_segments(info):
     return segments
 
 
-def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=None, prefer_direction=None, prefer_straight=False):
+def _generate_straight_line(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+    """Generate a straight line of pixels from start to end.
+
+    Args:
+        start: (x, y) starting point
+        end: (x, y) ending point
+
+    Returns:
+        List of (x, y) points along the straight line.
+    """
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    dist = max(1, int((dx*dx + dy*dy)**0.5))
+    return [(int(round(start[0] + dx * t / dist)),
+             int(round(start[1] + dy * t / dist))) for t in range(dist + 1)]
+
+
+def _snap_to_skeleton(point: Tuple, skel_set: Set) -> Tuple:
+    """Find the nearest skeleton pixel to a point.
+
+    Args:
+        point: (x, y) point to snap
+        skel_set: set of skeleton pixels
+
+    Returns:
+        Nearest skeleton pixel, or original point if skel_set is empty.
+    """
+    point = tuple(point) if not isinstance(point, tuple) else point
+    if point in skel_set or not skel_set:
+        return point
+
+    min_dist = float('inf')
+    nearest = point
+    for p in skel_set:
+        d = (p[0] - point[0])**2 + (p[1] - point[1])**2
+        if d < min_dist:
+            min_dist = d
+            nearest = p
+    return nearest
+
+
+def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=None,
+                         direction: str = None):
     """Trace a path along skeleton pixels from start to end using BFS.
 
     Args:
@@ -2439,113 +2575,22 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
         skel_set: set of skeleton pixels
         max_steps: maximum path length to prevent infinite loops
         avoid_pixels: set of pixels to avoid (already traced in this stroke)
-        prefer_direction: 'down', 'up', 'left', 'right' - prefer paths that go this direction first
-        prefer_straight: if True, penalize sharp direction changes
+        direction: 'down', 'up', 'left', 'right' - bias for initial direction
 
     Returns:
         List of (x, y) points along the path, or None if no path found.
     """
-    from collections import deque
-
     if avoid_pixels is None:
         avoid_pixels = set()
 
-    # Find nearest skeleton pixels to start and end
-    start = tuple(start) if not isinstance(start, tuple) else start
-    end = tuple(end) if not isinstance(end, tuple) else end
-
-    # If start/end not exactly on skeleton, find nearest
-    if start not in skel_set:
-        min_dist = float('inf')
-        for p in skel_set:
-            d = (p[0] - start[0])**2 + (p[1] - start[1])**2
-            if d < min_dist:
-                min_dist = d
-                start = p
-
-    if end not in skel_set:
-        min_dist = float('inf')
-        for p in skel_set:
-            d = (p[0] - end[0])**2 + (p[1] - end[1])**2
-            if d < min_dist:
-                min_dist = d
-                end = p
+    # Snap start/end to skeleton
+    start = _snap_to_skeleton(start, skel_set)
+    end = _snap_to_skeleton(end, skel_set)
 
     if start == end:
         return [start]
 
-    # Use priority queue when prefer_straight to penalize direction changes
-    if prefer_straight:
-        import heapq
-        # Priority queue: (turn_penalty, path_length, counter, current, path, prev_direction)
-        counter = 0  # Tie-breaker for equal priorities
-        # Initial direction based on prefer_direction or toward end
-        if prefer_direction == 'down':
-            init_dir = (0, 1)
-        elif prefer_direction == 'up':
-            init_dir = (0, -1)
-        elif prefer_direction == 'left':
-            init_dir = (-1, 0)
-        elif prefer_direction == 'right':
-            init_dir = (1, 0)
-        else:
-            # Default: direction toward end
-            dx, dy = end[0] - start[0], end[1] - start[1]
-            mag = max(1, (dx*dx + dy*dy)**0.5)
-            init_dir = (dx/mag, dy/mag)
-
-        heap = [(0, 0, counter, start, [start], init_dir)]
-        visited = {}  # pixel -> best turn_penalty to reach it
-
-        while heap:
-            turn_penalty, path_len, _, current, path, prev_dir = heapq.heappop(heap)
-
-            if len(path) > max_steps:
-                continue
-
-            # Check if we reached the end
-            dist_to_end = ((current[0] - end[0])**2 + (current[1] - end[1])**2)**0.5
-            if dist_to_end < 3 or current == end:
-                return path + [end] if current != end else path
-
-            # Skip if we've visited this pixel with a better penalty
-            if current in visited and visited[current] < turn_penalty:
-                continue
-            visited[current] = turn_penalty
-
-            for neighbor in adj.get(current, []):
-                # Skip pixels we've already traced (except near start/end)
-                if neighbor in avoid_pixels:
-                    dist_to_start = ((neighbor[0] - start[0])**2 + (neighbor[1] - start[1])**2)**0.5
-                    dist_to_end_n = ((neighbor[0] - end[0])**2 + (neighbor[1] - end[1])**2)**0.5
-                    if dist_to_start > 5 and dist_to_end_n > 5:
-                        continue
-
-                # Calculate direction to neighbor
-                dx, dy = neighbor[0] - current[0], neighbor[1] - current[1]
-                mag = max(1, (dx*dx + dy*dy)**0.5)
-                new_dir = (dx/mag, dy/mag)
-
-                # Calculate turn penalty (1 - dot product, so 0 = straight, 2 = reverse)
-                dot = prev_dir[0] * new_dir[0] + prev_dir[1] * new_dir[1]
-
-                # Hard threshold: reject turns greater than 30 degrees (cos(30°) ≈ 0.866)
-                # Only apply after first few pixels to allow initial direction finding
-                if len(path) > 3 and dot < 0.866:
-                    continue  # Skip this neighbor - turn too sharp
-
-                # Heavy penalty for sharp turns - squared to strongly discourage
-                turn_cost = (1 - dot) ** 2  # 0 for straight, 1 for 90°, 4 for 180°
-                new_penalty = turn_penalty + turn_cost
-
-                # Only explore if this is a better path to neighbor
-                if neighbor not in visited or visited[neighbor] > new_penalty:
-                    counter += 1
-                    heapq.heappush(heap, (new_penalty, path_len + 1, counter, neighbor, path + [neighbor], new_dir))
-
-        return None  # No path found
-
-    # Standard BFS for non-straight paths
+    # BFS to find path
     queue = deque([(start, [start])])
     visited = {start}
 
@@ -2560,18 +2605,17 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
         if dist_to_end < 3 or current == end:
             return path + [end] if current != end else path
 
-        # Explore neighbors, avoiding already-traced pixels
+        # Get neighbors, optionally sorted by direction preference
         neighbors = adj.get(current, [])
-
-        if prefer_direction and len(path) < 15:  # Only bias first ~15 pixels
-            if prefer_direction == 'down':
-                neighbors = sorted(neighbors, key=lambda p: -p[1])  # Larger y first
-            elif prefer_direction == 'up':
-                neighbors = sorted(neighbors, key=lambda p: p[1])  # Smaller y first
-            elif prefer_direction == 'right':
-                neighbors = sorted(neighbors, key=lambda p: -p[0])  # Larger x first
-            elif prefer_direction == 'left':
-                neighbors = sorted(neighbors, key=lambda p: p[0])  # Smaller x first
+        if direction and len(path) < DIRECTION_BIAS_PIXELS:
+            if direction == 'down':
+                neighbors = sorted(neighbors, key=lambda p: -p[1])
+            elif direction == 'up':
+                neighbors = sorted(neighbors, key=lambda p: p[1])
+            elif direction == 'right':
+                neighbors = sorted(neighbors, key=lambda p: -p[0])
+            elif direction == 'left':
+                neighbors = sorted(neighbors, key=lambda p: p[0])
 
         for neighbor in neighbors:
             if neighbor not in visited:
@@ -2579,14 +2623,50 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
                 if neighbor in avoid_pixels:
                     dist_to_start = ((neighbor[0] - start[0])**2 + (neighbor[1] - start[1])**2)**0.5
                     dist_to_end_n = ((neighbor[0] - end[0])**2 + (neighbor[1] - end[1])**2)**0.5
-                    # Only allow if very close to start or end (within 5 pixels)
-                    if dist_to_start > 5 and dist_to_end_n > 5:
+                    if dist_to_start > NEAR_ENDPOINT_DIST and dist_to_end_n > NEAR_ENDPOINT_DIST:
                         continue
                 visited.add(neighbor)
                 queue.append((neighbor, path + [neighbor]))
 
     # No path found - return None (don't fallback to allowing double-back)
     return None
+
+
+def trace_segment(start: Tuple[int, int], end: Tuple[int, int],
+                  config: SegmentConfig, adj: Dict, skel_set: Set,
+                  avoid_pixels: Set = None) -> List[Tuple[int, int]]:
+    """Unified segment tracing - handles both straight lines and skeleton paths.
+
+    Args:
+        start: (x, y) starting point
+        end: (x, y) ending point
+        config: SegmentConfig with direction and straight settings
+        adj: adjacency dict from _analyze_skeleton
+        skel_set: set of skeleton pixels
+        avoid_pixels: set of pixels to avoid
+
+    Returns:
+        List of (x, y) points along the segment.
+    """
+    if avoid_pixels is None:
+        avoid_pixels = set()
+
+    if config.straight:
+        # Draw a direct line, ignoring skeleton
+        return _generate_straight_line(start, end)
+
+    # Trace along skeleton
+    traced = _trace_skeleton_path(start, end, adj, skel_set,
+                                   avoid_pixels=avoid_pixels,
+                                   direction=config.direction)
+
+    # Fallback: retry without avoid_pixels
+    if traced is None:
+        traced = _trace_skeleton_path(start, end, adj, skel_set,
+                                       avoid_pixels=None,
+                                       direction=config.direction)
+
+    return traced
 
 
 def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, avoid_pixels=None):
@@ -3393,53 +3473,41 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     current_is_intersection = waypoint_info[i][1] if i < len(waypoint_info) else False
                     target_is_curve, target_is_intersection, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, False, None)
 
-                    if target_is_intersection:
+                    # Build segment config from hints
+                    config = SegmentConfig(direction=seg_direction, straight=seg_straight)
+
+                    # Handle straight segments first - they override everything
+                    if config.straight:
+                        traced = _generate_straight_line(start_pt, end_pt)
+                    elif target_is_intersection:
                         # Tracing TO an intersection - allow crossing already-traced pixels
                         traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                       avoid_pixels=None)
+                                                       avoid_pixels=None, direction=config.direction)
                         # Record the arrival branch (last few pixels before intersection)
                         if traced and len(traced) >= 2:
-                            arrival_branch = set(traced[-3:])  # Last 3 pixels as arrival branch
+                            arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
                     elif current_is_intersection and arrival_branch:
-                        # Leaving an intersection - avoid ALL already-traced pixels to force a new path
+                        # Leaving an intersection - avoid already-traced pixels to force a new path
                         traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                       avoid_pixels=already_traced)
+                                                       avoid_pixels=already_traced, direction=config.direction)
                         if traced is None:
-                            # Fallback: just avoid arrival branch
                             traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                           avoid_pixels=arrival_branch)
+                                                           avoid_pixels=arrival_branch, direction=config.direction)
                         if traced is None:
-                            # Final fallback without restriction
                             traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                           avoid_pixels=None)
-                        arrival_branch = set()  # Clear after use
+                                                           avoid_pixels=None, direction=config.direction)
+                        arrival_branch = set()
                     elif target_is_curve and target_region is not None:
-                        # Use region-based tracing: trace until we enter the target region
+                        # Use region-based tracing for curves
                         traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
                                                   avoid_pixels=already_traced)
-                        # If failed, retry without avoidance (allows "there and back" templates)
                         if traced is None:
                             traced = _trace_to_region(start_pt, target_region, bbox, info['adj'], info['skel_set'],
                                                       avoid_pixels=None)
                     else:
-                        # Use point-to-point tracing for terminals and vertices
-                        if seg_straight:
-                            # 'straight' means draw a direct line, not follow skeleton
-                            dx = end_pt[0] - start_pt[0]
-                            dy = end_pt[1] - start_pt[1]
-                            dist = max(1, int((dx*dx + dy*dy)**0.5))
-                            traced = []
-                            for t in range(dist + 1):
-                                x = int(round(start_pt[0] + dx * t / dist))
-                                y = int(round(start_pt[1] + dy * t / dist))
-                                traced.append((x, y))
-                        else:
-                            traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                           avoid_pixels=already_traced, prefer_direction=seg_direction)
-                            # If failed, retry without avoidance (allows retracing same pixels)
-                            if traced is None:
-                                traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                              avoid_pixels=None, prefer_direction=seg_direction)
+                        # Standard point-to-point tracing
+                        traced = trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
+                                               avoid_pixels=already_traced)
 
                     if traced:
                         # Add traced points (skip first point if not first segment to avoid duplicates)
