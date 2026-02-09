@@ -3408,43 +3408,71 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     # Track variant name for return_variant option
     _variant_name = None
 
-    # If no template provided, try all variants and pick the best
+    # If no template provided, try all variants (including skeleton) and pick the best
     if template is None:
         variants = NUMPAD_TEMPLATE_VARIANTS.get(char)
         if not variants:
-            return (None, None) if return_variant else None
-
-        if len(variants) == 1:
-            # Only one variant, use it directly
-            _variant_name = list(variants.keys())[0]
-            template = list(variants.values())[0]
-        else:
-            # Try all variants and pick the best
-            best_strokes = None
-            best_variant = None
-            best_score = -1
-
+            # No template variants - try skeleton only
             font_path_resolved = resolve_font_path(font_path)
             mask = render_glyph_mask(font_path_resolved, char, canvas_size)
             if mask is None:
                 return (None, None) if return_variant else None
+            skel_strokes = skeleton_to_strokes(mask, min_stroke_len=5)
+            if skel_strokes:
+                skel_strokes = apply_stroke_template(skel_strokes, char)
+                skel_strokes = adjust_stroke_paths(skel_strokes, char, mask)
+                if skel_strokes:
+                    if return_variant:
+                        return skel_strokes, 'skeleton'
+                    return skel_strokes
+            return (None, None) if return_variant else None
 
-            for var_name, variant_template in variants.items():
-                strokes = minimal_strokes_from_skeleton(
-                    font_path, char, canvas_size, trace_paths,
-                    template=variant_template, return_variant=False
-                )
-                if strokes:
-                    # Quick score based on coverage
-                    score = _quick_stroke_score(strokes, mask)
-                    if score > best_score:
-                        best_score = score
-                        best_strokes = strokes
-                        best_variant = var_name
+        # Always compare all variants + skeleton (even if only one variant)
+        best_strokes = None
+        best_variant = None
+        best_score = -1
 
-            if return_variant:
-                return best_strokes, best_variant
-            return best_strokes
+        font_path_resolved = resolve_font_path(font_path)
+        mask = render_glyph_mask(font_path_resolved, char, canvas_size)
+        if mask is None:
+            return (None, None) if return_variant else None
+
+        for var_name, variant_template in variants.items():
+            strokes = minimal_strokes_from_skeleton(
+                font_path, char, canvas_size, trace_paths,
+                template=variant_template, return_variant=False
+            )
+            if strokes:
+                # Quick score based on coverage
+                score = _quick_stroke_score(strokes, mask)
+                if score > best_score:
+                    best_score = score
+                    best_strokes = strokes
+                    best_variant = var_name
+
+        # Also try pure skeleton method and compare
+        skel_strokes = skeleton_to_strokes(mask, min_stroke_len=5)
+        if skel_strokes:
+            skel_strokes = apply_stroke_template(skel_strokes, char)
+            skel_strokes = adjust_stroke_paths(skel_strokes, char, mask)
+            if skel_strokes:
+                skel_score = _quick_stroke_score(skel_strokes, mask)
+                # Penalize if stroke count doesn't match NUMPAD template expectation
+                # Use the most common stroke count from NUMPAD variants as expected
+                expected_counts = [len(t) for t in variants.values()]
+                if expected_counts:
+                    expected_count = min(expected_counts)  # Prefer simpler
+                    if len(skel_strokes) != expected_count:
+                        # Heavy penalty for wrong stroke count
+                        skel_score -= 0.3 * abs(len(skel_strokes) - expected_count)
+                if skel_score > best_score:
+                    best_score = skel_score
+                    best_strokes = skel_strokes
+                    best_variant = 'skeleton'
+
+        if return_variant:
+            return best_strokes, best_variant
+        return best_strokes
 
     # Use provided template (or single variant selected above)
     if template is None:
