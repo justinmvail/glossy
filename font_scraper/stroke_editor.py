@@ -121,6 +121,8 @@ LETTER_TEMPLATES = {
 #   'v(n)'     → sharp vertex (abrupt direction change)
 #   'c(n)'     → smooth curve vertex (smooth direction change)
 #   'i(n)'     → intersection (go straight through, for self-crossing strokes)
+#   'down'/'up'/'left'/'right' → direction hint for next segment path tracing
+#   'straight' → prefer paths with no sharp direction changes
 # Format: position alone (7) or tuple (deprecated, hints removed)
 #
 # NUMPAD_TEMPLATE_VARIANTS: Maps character -> dict of variant_name -> template
@@ -312,7 +314,7 @@ NUMPAD_TEMPLATE_VARIANTS = {
     },
     '5': {
         'default': [[9, 7, 4, 'c(6)', 'c(3)', 1]],
-        'two_stroke': [[9, 8, 7], [4, 5, 6, 3, 2, 1]],
+        'two_stroke': [[9, 8, 7], [7, 4, 5, 6, 3, 2, 1]],
     },
     '6': {
         'default': [[9, 'c(7)', 'c(1)', 'c(3)', 'c(6)', 4]],
@@ -323,7 +325,7 @@ NUMPAD_TEMPLATE_VARIANTS = {
     },
     '8': {
         'default': [[8, 'c(7)', 'c(4)', 'c(1)', 'c(2)', 'c(3)', 'c(6)', 'c(9)', 8]],
-        'from_9': [[9, 8, 7, 4, 5, 6, 3, 2, 1, 'i(5)', 9]],
+        'from_9': [[9, 8, 7, 4, 'straight', 'i(5)', 'straight', 6, 3, 2, 1, 'i(5)', 9]],
     },
     '9': {
         'default': [[6, 'c(9)', 'c(8)', 'c(7)', 'c(4)', 6], [6, 'c(3)', 1]],
@@ -2427,7 +2429,7 @@ def _find_skeleton_segments(info):
     return segments
 
 
-def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=None):
+def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=None, prefer_direction=None, prefer_straight=False):
     """Trace a path along skeleton pixels from start to end using BFS.
 
     Args:
@@ -2437,6 +2439,8 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
         skel_set: set of skeleton pixels
         max_steps: maximum path length to prevent infinite loops
         avoid_pixels: set of pixels to avoid (already traced in this stroke)
+        prefer_direction: 'down', 'up', 'left', 'right' - prefer paths that go this direction first
+        prefer_straight: if True, penalize sharp direction changes
 
     Returns:
         List of (x, y) points along the path, or None if no path found.
@@ -2470,7 +2474,78 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
     if start == end:
         return [start]
 
-    # BFS to find shortest path, avoiding previously traced pixels
+    # Use priority queue when prefer_straight to penalize direction changes
+    if prefer_straight:
+        import heapq
+        # Priority queue: (turn_penalty, path_length, counter, current, path, prev_direction)
+        counter = 0  # Tie-breaker for equal priorities
+        # Initial direction based on prefer_direction or toward end
+        if prefer_direction == 'down':
+            init_dir = (0, 1)
+        elif prefer_direction == 'up':
+            init_dir = (0, -1)
+        elif prefer_direction == 'left':
+            init_dir = (-1, 0)
+        elif prefer_direction == 'right':
+            init_dir = (1, 0)
+        else:
+            # Default: direction toward end
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            mag = max(1, (dx*dx + dy*dy)**0.5)
+            init_dir = (dx/mag, dy/mag)
+
+        heap = [(0, 0, counter, start, [start], init_dir)]
+        visited = {}  # pixel -> best turn_penalty to reach it
+
+        while heap:
+            turn_penalty, path_len, _, current, path, prev_dir = heapq.heappop(heap)
+
+            if len(path) > max_steps:
+                continue
+
+            # Check if we reached the end
+            dist_to_end = ((current[0] - end[0])**2 + (current[1] - end[1])**2)**0.5
+            if dist_to_end < 3 or current == end:
+                return path + [end] if current != end else path
+
+            # Skip if we've visited this pixel with a better penalty
+            if current in visited and visited[current] < turn_penalty:
+                continue
+            visited[current] = turn_penalty
+
+            for neighbor in adj.get(current, []):
+                # Skip pixels we've already traced (except near start/end)
+                if neighbor in avoid_pixels:
+                    dist_to_start = ((neighbor[0] - start[0])**2 + (neighbor[1] - start[1])**2)**0.5
+                    dist_to_end_n = ((neighbor[0] - end[0])**2 + (neighbor[1] - end[1])**2)**0.5
+                    if dist_to_start > 5 and dist_to_end_n > 5:
+                        continue
+
+                # Calculate direction to neighbor
+                dx, dy = neighbor[0] - current[0], neighbor[1] - current[1]
+                mag = max(1, (dx*dx + dy*dy)**0.5)
+                new_dir = (dx/mag, dy/mag)
+
+                # Calculate turn penalty (1 - dot product, so 0 = straight, 2 = reverse)
+                dot = prev_dir[0] * new_dir[0] + prev_dir[1] * new_dir[1]
+
+                # Hard threshold: reject turns greater than 30 degrees (cos(30°) ≈ 0.866)
+                # Only apply after first few pixels to allow initial direction finding
+                if len(path) > 3 and dot < 0.866:
+                    continue  # Skip this neighbor - turn too sharp
+
+                # Heavy penalty for sharp turns - squared to strongly discourage
+                turn_cost = (1 - dot) ** 2  # 0 for straight, 1 for 90°, 4 for 180°
+                new_penalty = turn_penalty + turn_cost
+
+                # Only explore if this is a better path to neighbor
+                if neighbor not in visited or visited[neighbor] > new_penalty:
+                    counter += 1
+                    heapq.heappush(heap, (new_penalty, path_len + 1, counter, neighbor, path + [neighbor], new_dir))
+
+        return None  # No path found
+
+    # Standard BFS for non-straight paths
     queue = deque([(start, [start])])
     visited = {start}
 
@@ -2486,7 +2561,19 @@ def _trace_skeleton_path(start, end, adj, skel_set, max_steps=500, avoid_pixels=
             return path + [end] if current != end else path
 
         # Explore neighbors, avoiding already-traced pixels
-        for neighbor in adj.get(current, []):
+        neighbors = adj.get(current, [])
+
+        if prefer_direction and len(path) < 15:  # Only bias first ~15 pixels
+            if prefer_direction == 'down':
+                neighbors = sorted(neighbors, key=lambda p: -p[1])  # Larger y first
+            elif prefer_direction == 'up':
+                neighbors = sorted(neighbors, key=lambda p: p[1])  # Smaller y first
+            elif prefer_direction == 'right':
+                neighbors = sorted(neighbors, key=lambda p: -p[0])  # Larger x first
+            elif prefer_direction == 'left':
+                neighbors = sorted(neighbors, key=lambda p: p[0])  # Smaller x first
+
+        for neighbor in neighbors:
             if neighbor not in visited:
                 # Skip pixels we've already traced (except near start/end)
                 if neighbor in avoid_pixels:
@@ -2974,6 +3061,8 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
     for stroke_template in template:
         stroke_points = []
         waypoint_info = []  # Parallel list storing (is_curve, is_intersection, region) for each waypoint
+        segment_directions = {}  # segment_index -> direction ('down', 'up', 'left', 'right')
+        segment_straight = {}  # segment_index -> True if 'straight' hint applies
 
         # Check for special cases: pure vertical or horizontal strokes
         if is_vertical_stroke(stroke_template):
@@ -2994,7 +3083,10 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
             waypoint_info = [(False, False, r1), (False, False, r2)]  # (is_curve, is_intersection, region)
         else:
             # General case: map each waypoint to skeleton
-            for wp in stroke_template:
+            # Use index-based iteration to look ahead for direction hints
+            wp_idx = 0
+            while wp_idx < len(stroke_template):
+                wp = stroke_template[wp_idx]
                 is_vertex = False
                 is_curve = False
                 is_intersection = False
@@ -3005,6 +3097,11 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     wp_val, hint = wp
                 else:
                     wp_val = wp
+
+                # Check for direction/style hints - skip them here, we'll look ahead
+                if isinstance(wp_val, str) and wp_val in ('down', 'up', 'left', 'right', 'straight'):
+                    wp_idx += 1
+                    continue
 
                 if isinstance(wp_val, int):
                     region = wp_val
@@ -3024,7 +3121,29 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                 region = int(m.group(1))
                                 is_intersection = True
                             else:
+                                wp_idx += 1
                                 continue
+
+                # Look ahead to check for direction/style hints on next segment
+                next_direction = None
+                next_straight = False
+                look_idx = wp_idx + 1
+                while look_idx < len(stroke_template):
+                    next_wp = stroke_template[look_idx]
+                    next_val = next_wp[0] if isinstance(next_wp, tuple) else next_wp
+                    if isinstance(next_val, str) and next_val in ('down', 'up', 'left', 'right'):
+                        next_direction = next_val
+                        look_idx += 1
+                    elif isinstance(next_val, str) and next_val == 'straight':
+                        next_straight = True
+                        look_idx += 1
+                    else:
+                        break  # Found next waypoint, stop looking
+                # Store for path tracing
+                if next_direction:
+                    segment_directions[len(stroke_points)] = next_direction
+                if next_straight:
+                    segment_straight[len(stroke_points)] = True
 
                 template_pos = numpad_to_pixel(region)
 
@@ -3054,14 +3173,29 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     if region_pixels:
                         extremum = None
 
+                        # If there's a direction hint for the next segment, place waypoint
+                        # at the extreme position to give room to move in that direction
+                        if next_direction == 'down':
+                            # Start at topmost point to trace downward
+                            extremum = min(region_pixels, key=lambda p: p[1])
+                        elif next_direction == 'up':
+                            # Start at bottommost point to trace upward
+                            extremum = max(region_pixels, key=lambda p: p[1])
+                        elif next_direction == 'left':
+                            # Start at rightmost point to trace leftward
+                            extremum = max(region_pixels, key=lambda p: p[0])
+                        elif next_direction == 'right':
+                            # Start at leftmost point to trace rightward
+                            extremum = min(region_pixels, key=lambda p: p[0])
                         # Check if there's an endpoint in this region - prefer it for terminals
-                        endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region)]
-                        if endpoints_in_region:
-                            # Use the endpoint closest to template position
-                            extremum = min(endpoints_in_region, key=lambda p:
-                                          (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+                        elif info['endpoints']:
+                            endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region)]
+                            if endpoints_in_region:
+                                # Use the endpoint closest to template position
+                                extremum = min(endpoints_in_region, key=lambda p:
+                                              (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
 
-                        else:
+                        if extremum is None:
                             # No hint - use default logic based on position
                             is_corner_pos = region in [7, 9, 1, 3]
 
@@ -3082,6 +3216,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
 
                         stroke_points.append([float(extremum[0]), float(extremum[1])])
                         waypoint_info.append((is_curve, is_intersection, region))
+                        wp_idx += 1
                         continue
 
                 if is_intersection:
@@ -3099,6 +3234,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                         nearest = find_nearest_skeleton(template_pos)
                         stroke_points.append([float(nearest[0]), float(nearest[1])])
                     waypoint_info.append((False, True, region))
+                    wp_idx += 1
                     continue
 
                 if is_vertex:
@@ -3233,6 +3369,8 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                         stroke_points.append([float(nearest[0]), float(nearest[1])])
                         waypoint_info.append((False, False, region))  # is_curve=False
 
+                wp_idx += 1
+
         if len(stroke_points) >= 2:
             if trace_paths:
 
@@ -3249,10 +3387,10 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     start_pt = current_pt
                     end_pt = (int(round(stroke_points[i+1][0])), int(round(stroke_points[i+1][1])))
 
-                    # Check if current waypoint was an intersection (we're leaving it)
+                    # Check waypoint types
+                    seg_direction = segment_directions.get(i)
+                    seg_straight = segment_straight.get(i, False)
                     current_is_intersection = waypoint_info[i][1] if i < len(waypoint_info) else False
-
-                    # Check if target waypoint is a curve or intersection
                     target_is_curve, target_is_intersection, target_region = waypoint_info[i + 1] if i + 1 < len(waypoint_info) else (False, False, None)
 
                     if target_is_intersection:
@@ -3285,12 +3423,23 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                                                       avoid_pixels=None)
                     else:
                         # Use point-to-point tracing for terminals and vertices
-                        traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                       avoid_pixels=already_traced)
-                        # If failed, retry without avoidance (allows retracing same pixels)
-                        if traced is None:
+                        if seg_straight:
+                            # 'straight' means draw a direct line, not follow skeleton
+                            dx = end_pt[0] - start_pt[0]
+                            dy = end_pt[1] - start_pt[1]
+                            dist = max(1, int((dx*dx + dy*dy)**0.5))
+                            traced = []
+                            for t in range(dist + 1):
+                                x = int(round(start_pt[0] + dx * t / dist))
+                                y = int(round(start_pt[1] + dy * t / dist))
+                                traced.append((x, y))
+                        else:
                             traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
-                                                          avoid_pixels=None)
+                                                           avoid_pixels=already_traced, prefer_direction=seg_direction)
+                            # If failed, retry without avoidance (allows retracing same pixels)
+                            if traced is None:
+                                traced = _trace_skeleton_path(start_pt, end_pt, info['adj'], info['skel_set'],
+                                                              avoid_pixels=None, prefer_direction=seg_direction)
 
                     if traced:
                         # Add traced points (skip first point if not first segment to avoid duplicates)
