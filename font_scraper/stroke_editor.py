@@ -59,6 +59,36 @@ STYLE_HINTS = {'straight'}
 ALL_HINTS = DIRECTION_HINTS | STYLE_HINTS
 
 
+def point_in_region(point: Tuple[int, int], region: int, bbox: Tuple[int, int, int, int]) -> bool:
+    """Check if a point falls within a numpad region.
+
+    Regions are divided into a 3x3 grid:
+      7 | 8 | 9
+      4 | 5 | 6
+      1 | 2 | 3
+
+    Args:
+        point: (x, y) coordinate
+        region: numpad region number 1-9
+        bbox: (x_min, y_min, x_max, y_max) bounding box
+
+    Returns:
+        True if point is in the specified region.
+    """
+    x, y = point
+    x_min, y_min, x_max, y_max = bbox
+    w = x_max - x_min
+    h = y_max - y_min
+    if w == 0 or h == 0:
+        return False
+    nx = (x - x_min) / w
+    ny = (y - y_min) / h
+    col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
+    row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
+    point_region = (2 - row) * 3 + col + 1
+    return point_region == region
+
+
 def parse_stroke_template(stroke_template: List) -> Tuple[List[ParsedWaypoint], List[SegmentConfig]]:
     """Parse a stroke template into waypoints and segment configurations.
 
@@ -2705,23 +2735,8 @@ def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, a
                 min_dist = d
                 start = p
 
-    def point_in_region(point, region):
-        """Check if point falls within a numpad region."""
-        x, y = point
-        x_min, y_min, x_max, y_max = bbox
-        w = x_max - x_min
-        h = y_max - y_min
-        if w == 0 or h == 0:
-            return False
-        nx = (x - x_min) / w
-        ny = (y - y_min) / h
-        col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
-        row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
-        point_region = (2 - row) * 3 + col + 1
-        return point_region == region
-
     # Check if we're already in the target region
-    if point_in_region(start, target_region):
+    if point_in_region(start, target_region, bbox):
         return [start]
 
     # Calculate target region center for direction guidance
@@ -2775,7 +2790,7 @@ def _trace_to_region(start, target_region, bbox, adj, skel_set, max_steps=500, a
         current = best
 
         # Check if we've entered the target region
-        if point_in_region(current, target_region):
+        if point_in_region(current, target_region, bbox):
             return path
 
     # Didn't reach target region - return path so far (partial success)
@@ -2967,40 +2982,10 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
         y = bbox[1] + frac_y * (bbox[3] - bbox[1])
         return (x, y)
 
-    def point_in_region(point, region):
-        """Check if a point falls within a numpad region.
-
-        Regions are divided into 3x3 grid:
-          7 | 8 | 9
-          4 | 5 | 6
-          1 | 2 | 3
-        """
-        x, y = point
-        x_min, y_min, x_max, y_max = bbox
-        w = x_max - x_min
-        h = y_max - y_min
-
-        if w == 0 or h == 0:
-            return False
-
-        # Normalize point to 0-1 range
-        nx = (x - x_min) / w
-        ny = (y - y_min) / h
-
-        # Determine which column (0, 1, 2) and row (0, 1, 2)
-        col = 0 if nx < 0.333 else (1 if nx < 0.667 else 2)
-        row = 0 if ny < 0.333 else (1 if ny < 0.667 else 2)
-
-        # Convert to numpad region (1-9)
-        # Row 0 = top (7,8,9), Row 1 = middle (4,5,6), Row 2 = bottom (1,2,3)
-        point_region = (2 - row) * 3 + col + 1
-
-        return point_region == region
-
     def find_skeleton_in_region(region):
         """Find any skeleton pixel that falls within a region."""
         for p in skel_list:
-            if point_in_region(p, region):
+            if point_in_region(p, region, bbox):
                 return p
         return None
 
@@ -3167,6 +3152,16 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
             waypoint_info = [(False, False, r1), (False, False, r2)]  # (is_curve, is_intersection, region)
         else:
             # General case: map each waypoint to skeleton
+            # Pre-calculate bbox-derived values used throughout waypoint finding
+            mid_x = (bbox[0] + bbox[2]) / 2
+            mid_y = (bbox[1] + bbox[3]) / 2
+            h = bbox[3] - bbox[1]
+            w = bbox[2] - bbox[0]
+            third_h = h / 3
+            top_bound = bbox[1] + third_h
+            bot_bound = bbox[1] + 2 * third_h
+            waist_margin = h * 0.05  # For separating top/bottom bumps in curves
+
             # Use index-based iteration to look ahead for direction hints
             wp_idx = 0
             while wp_idx < len(stroke_template):
@@ -3227,19 +3222,10 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
 
                 template_pos = numpad_to_pixel(region)
 
-                # Pre-calculate common values
-                mid_x = (bbox[0] + bbox[2]) / 2
-                mid_y = (bbox[1] + bbox[3]) / 2
-                h = bbox[3] - bbox[1]
-                w = bbox[2] - bbox[0]
-                third_h = h / 3
-                top_bound = bbox[1] + third_h
-                bot_bound = bbox[1] + 2 * third_h
-
                 # For terminals (int or tuple with int), find based on hint or position
                 if isinstance(wp_val, int):
                     # Filter skeleton pixels to those actually IN the target region
-                    region_pixels = [p for p in skel_list if point_in_region(p, region)]
+                    region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
 
                     # If no pixels in exact region, fall back to vertical third
                     if not region_pixels:
@@ -3269,7 +3255,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             extremum = min(region_pixels, key=lambda p: p[0])
                         # Check if there's an endpoint in this region - prefer it for terminals
                         elif info['endpoints']:
-                            endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region)]
+                            endpoints_in_region = [ep for ep in info['endpoints'] if point_in_region(ep, region, bbox)]
                             if endpoints_in_region:
                                 # Use the endpoint closest to template position
                                 extremum = min(endpoints_in_region, key=lambda p:
@@ -3303,7 +3289,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     # For intersections, find junction point in the region (where strokes cross)
                     # Look for junction pixels first, then fall back to center of region
                     junction_pixels_in_region = [p for p in info.get('junction_pixels', [])
-                                                  if point_in_region(p, region)]
+                                                  if point_in_region(p, region, bbox)]
                     if junction_pixels_in_region:
                         # Use the junction closest to region center
                         junction_pt = min(junction_pixels_in_region, key=lambda p:
@@ -3320,12 +3306,6 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                 if is_vertex:
                     # For vertices, find the extremum skeleton pixel based on template position
                     # v(8) = top apex, v(2) = bottom apex, v(4/6) = waist level sides
-                    mid_x = (bbox[0] + bbox[2]) / 2
-                    mid_y = (bbox[1] + bbox[3]) / 2
-                    third_h = (bbox[3] - bbox[1]) / 3
-                    top_bound = bbox[1] + third_h
-                    bot_bound = bbox[1] + 2 * third_h
-
                     # Determine which region to search based on template position
                     if template_pos[1] < top_bound:  # Top row (7,8,9)
                         # Find topmost skeleton pixel for path tracing,
@@ -3404,19 +3384,12 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                             waypoint_info.append((is_curve, is_intersection, region))
                 else:
                     # For curves c(n), find the apex (extremum) in the direction of the template
-                    is_curve = not isinstance(wp, int) and str(wp).startswith('c(')
                     if is_curve:
-                        # Determine which region to search based on template position
-                        mid_x = (bbox[0] + bbox[2]) / 2
-                        waist_y = (bbox[1] + bbox[3]) / 2
-                        # Add small margin around waist to separate top/bottom bumps
-                        waist_margin = (bbox[3] - bbox[1]) * 0.05
-
-                        # Filter skeleton pixels well above or below waist
-                        if template_pos[1] < waist_y:  # Above waist (positions 7,8,9)
-                            region_pixels = [p for p in skel_list if p[1] < waist_y - waist_margin]
+                        # Filter skeleton pixels well above or below waist (mid_y)
+                        if template_pos[1] < mid_y:  # Above waist (positions 7,8,9)
+                            region_pixels = [p for p in skel_list if p[1] < mid_y - waist_margin]
                         else:  # Below waist (positions 1,2,3)
-                            region_pixels = [p for p in skel_list if p[1] > waist_y + waist_margin]
+                            region_pixels = [p for p in skel_list if p[1] > mid_y + waist_margin]
 
                         if region_pixels:
                             # Find apex based on template position direction
@@ -3438,7 +3411,7 @@ def minimal_strokes_from_skeleton(font_path, char, canvas_size=224, trace_paths=
                     else:
                         # For terminals, find skeleton pixel IN the target region
                         # Prefer pixels actually in the region over nearest to center
-                        region_pixels = [p for p in skel_list if point_in_region(p, region)]
+                        region_pixels = [p for p in skel_list if point_in_region(p, region, bbox)]
                         if region_pixels:
                             # Find the one nearest to the region center
                             nearest = min(region_pixels, key=lambda p:
