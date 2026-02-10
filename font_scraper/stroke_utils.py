@@ -23,7 +23,6 @@ Typical usage:
     path = build_guide_path([7, 'v(5)', 3], bbox, mask)
 """
 
-import os
 import re
 
 import numpy as np
@@ -36,27 +35,7 @@ from stroke_lib.utils.geometry import (
     point_in_region,
 )
 
-# Base directory for relative path resolution
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def resolve_font_path(font_path: str) -> str:
-    """Resolve a font path to an absolute path.
-
-    If the provided path is relative, it is resolved relative to the
-    module's base directory (BASE_DIR).
-
-    Args:
-        font_path: The font file path, either absolute or relative.
-
-    Returns:
-        The absolute path to the font file.
-    """
-    if os.path.isabs(font_path):
-        return font_path
-    return os.path.join(BASE_DIR, font_path)
-
-
+# Note: resolve_font_path is in stroke_flask.py (canonical location for Flask utilities)
 # Note: smooth_stroke and constrain_to_mask are imported from
 # stroke_lib.utils.geometry (canonical implementations) at the top of this file.
 

@@ -70,6 +70,7 @@ from stroke_flask import (
     STROKE_COLORS,
     app,
     get_db,
+    get_font,
     resolve_font_path,
     validate_char_param,
 )
@@ -84,28 +85,8 @@ from stroke_rendering import (
 )
 
 
-def _font(fid):
-    """Retrieve a font record from the database by its ID.
-
-    Args:
-        fid: The integer ID of the font to retrieve.
-
-    Returns:
-        sqlite3.Row: A row object with font data (id, name, source, file_path,
-            etc.) if found, or None if no font exists with the given ID.
-
-    Example:
-        Fetching a font::
-
-            font = _font(42)
-            if font:
-                print(f"Font name: {font['name']}")
-                print(f"File path: {font['file_path']}")
-    """
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
-    db.close()
-    return f
+# Alias for backward compatibility
+_font = get_font
 
 
 @app.route('/')

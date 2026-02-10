@@ -57,26 +57,14 @@ from scipy.ndimage import distance_transform_edt
 from scipy.optimize import differential_evolution, minimize
 from scipy.spatial import cKDTree
 from stroke_core import min_strokes, skel_strokes
-from stroke_flask import app, get_db, resolve_font_path
+from stroke_flask import app, get_db, get_font, resolve_font_path
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
 
 
-def _font(fid):
-    """Retrieve a font record from the database by ID.
-
-    Args:
-        fid: The integer ID of the font to retrieve.
-
-    Returns:
-        sqlite3.Row | None: A dictionary-like row containing font data with
-        keys 'id', 'file_path', 'name', etc., or None if not found.
-    """
-    db = get_db()
-    f = db.execute('SELECT * FROM fonts WHERE id = ?', (fid,)).fetchone()
-    db.close()
-    return f
+# Alias for backward compatibility
+_font = get_font
 
 
 def _sse_event(data: dict) -> str:

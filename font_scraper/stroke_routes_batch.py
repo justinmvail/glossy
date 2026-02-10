@@ -46,6 +46,7 @@ from stroke_flask import (
     app,
     ensure_test_tables,
     get_db,
+    get_font,
     resolve_font_path,
 )
 from stroke_rendering import render_glyph_mask
@@ -58,20 +59,8 @@ except ImportError:
     _diffvg = None
 
 
-def _font(fid):
-    """Retrieve a font record from the database by ID.
-
-    Args:
-        fid: The integer ID of the font to retrieve.
-
-    Returns:
-        sqlite3.Row | None: A dictionary-like row containing font data with
-        keys 'id', 'file_path', 'name', etc., or None if not found.
-    """
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
-    db.close()
-    return f
+# Alias for backward compatibility
+_font = get_font
 
 
 def _get_stroke_funcs():
