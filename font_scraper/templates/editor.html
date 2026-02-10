@@ -126,8 +126,12 @@
   <div class="canvas-wrap">
     <canvas id="canvas" width="768" height="768"></canvas>
     <div id="playerPanel" style="display:none; margin-top:6px; width:768px;">
+      <!-- Session tabs (template variants) -->
+      <div id="sessionTabs" style="display:flex; gap:2px; margin-bottom:4px; flex-wrap:wrap;"></div>
+      <!-- Hidden select for compatibility -->
+      <select id="sessionSelect" onchange="selectSession()" style="display:none;"></select>
+      <!-- Playback controls -->
       <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
-        <select id="sessionSelect" onchange="selectSession()" style="background:#222; color:#eee; border:1px solid #444; border-radius:3px; font-size:12px; padding:2px 4px; min-width:140px;"></select>
         <button onclick="playFirst()" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">|&lt;</button>
         <button onclick="playStep(-1)" style="padding:3px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:11px;">&lt;</button>
         <button id="btnPlayPause" onclick="togglePlay()" style="padding:3px 10px; background:#254; color:#eee; border:1px solid #4a8; border-radius:3px; cursor:pointer; font-size:11px;">Play</button>
@@ -139,9 +143,10 @@
           <option value="100">2x</option>
           <option value="50">4x</option>
         </select>
-        <span id="frameInfo" style="font-size:11px; color:#888; white-space:nowrap; margin-left:auto;"></span>
+        <span id="frameNum" style="font-size:11px; color:#6c6; font-weight:bold; white-space:nowrap;">F1/1</span>
       </div>
       <input id="timeline" type="range" min="0" max="0" value="0" oninput="seekFrame(+this.value)" style="width:100%;">
+      <div id="frameInfo" style="font-size:11px; color:#aaa; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
     </div>
   </div>
   <div class="sidebar">
@@ -259,6 +264,7 @@
   </div>
 </div>
 
+<script src="/static/js/playback.js"></script>
 <script>
 const FONT_ID = {{ font.id }};
 const CHAR = {{ char|tojson }};
@@ -287,67 +293,41 @@ let state = {
   glyphBbox: null   // {x_min, y_min, x_max, y_max} in data coords
 };
 
-const recorder = {
-  sessions: [],
-  currentSession: -1,
-  playing: false,
-  playTimer: null,
+// Initialize playback system with observer pattern
+const playback = new PlaybackState({
   playSpeed: 200,
-  playIndex: 0,
-  viewSession: -1,
+  maxSessions: 50,
+  maxFramesPerSession: 2000
+});
+
+// Legacy compatibility: recorder object delegates to playback
+const recorder = {
+  get sessions() { return playback.sessions; },
+  get currentSession() { return playback.currentSession; },
+  get playing() { return playback.playing; },
+  get playTimer() { return playback.playTimer; },
+  get playSpeed() { return playback.playSpeed; },
+  get playIndex() { return playback.playIndex; },
+  get viewSession() { return playback.viewSession; },
   maxSessions: 50,
   maxFramesPerSession: 2000,
   lastDragFrame: 0
 };
 
 function startRecording(label) {
-  if (recorder.sessions.length >= recorder.maxSessions) recorder.sessions.shift();
-  recorder.sessions.push({label, frames: [], time: Date.now()});
-  recorder.currentSession = recorder.sessions.length - 1;
+  playback.startSession(label);
 }
 
 function recordFrame(statusMsg) {
-  // Auto-create an "Edits" session if no operation session is active
-  if (recorder.currentSession < 0) {
-    // Reuse last session if it's an "Edits" session with room
-    const last = recorder.sessions[recorder.sessions.length - 1];
-    if (last && last.label === 'Edits' && last.frames.length < recorder.maxFramesPerSession) {
-      recorder.currentSession = recorder.sessions.length - 1;
-    } else {
-      startRecording('Edits');
-    }
-  }
-  const session = recorder.sessions[recorder.currentSession];
-  if (session.frames.length >= recorder.maxFramesPerSession) return;
-  session.frames.push({
-    strokes: JSON.parse(JSON.stringify(state.strokes)),
-    markers: JSON.parse(JSON.stringify(state.markers)),
-    status: statusMsg || ''
+  playback.recordFrame({
+    strokes: state.strokes,
+    markers: state.markers,
+    status: statusMsg
   });
-  // Keep view tracking the latest frame if not in playback
-  if (!recorder.playing) {
-    // If viewing "All", stay in All mode and track total frame count
-    if (recorder.viewSession === -1) {
-      recorder.playIndex = _getAllFrames().length - 1;
-    } else {
-      recorder.viewSession = recorder.currentSession;
-      recorder.playIndex = session.frames.length - 1;
-    }
-  }
-  updatePlayerPanel();
 }
 
 function stopRecording() {
-  if (recorder.currentSession >= 0) {
-    if (recorder.viewSession === -1) {
-      recorder.playIndex = _getAllFrames().length - 1;
-    } else {
-      recorder.viewSession = recorder.currentSession;
-      recorder.playIndex = recorder.sessions[recorder.currentSession].frames.length - 1;
-    }
-  }
-  recorder.currentSession = -1;
-  updatePlayerPanel();
+  playback.stopSession();
 }
 
 let bgImage = null;
@@ -384,7 +364,7 @@ function load() {
       setStatus('Loaded');
       startRecording('Edits');
       recordFrame('loaded');
-      recorder.viewSession = -1;  // default to "All" view
+      playback.selectSession(-1, false);  // default to "All" view, keep current frame
     });
 
   // Load template variants
@@ -778,10 +758,180 @@ function hideThinPreview() {
   draw();
 }
 
+let _minimalES = null;  // EventSource for minimal strokes streaming
+let _currentStreamSession = null;  // Track current session during streaming
+let _sessionScores = {};  // Track scores for each session {sessionLabel: score}
+let _winningSession = null;  // Track which session won
+
 function loadMinimalStrokes(variant = null) {
+  console.log('[Editor] loadMinimalStrokes called, variant:', variant);
   if (state.strokes.length > 0 && !confirm('Replace existing strokes with minimal template+skeleton strokes?')) return;
   pushUndo();
-  setStatus('Loading minimal strokes...');
+
+  // Clear previous sessions and start fresh
+  playback.clear();
+  _sessionScores = {};
+  _winningSession = null;
+  _currentStreamSession = null;
+
+  // Start with a "Setup" session for initial frames
+  startRecording('Setup');
+  setStatus('Streaming minimal strokes...');
+  showStreamBanner('Minimal Strokes');
+
+  // Use SSE stream for frame-by-frame visualization
+  if (_minimalES) { _minimalES.close(); _minimalES = null; }
+  const url = `/api/minimal-strokes-stream/${FONT_ID}?c=${encodeURIComponent(CHAR)}`;
+  _minimalES = new EventSource(url);
+
+  _minimalES.onmessage = function(ev) {
+    const d = JSON.parse(ev.data);
+
+    if (d.error) {
+      setStatus('Error: ' + d.error);
+      hideStreamBanner();
+      _minimalES.close(); _minimalES = null;
+      stopRecording();
+      updateSessionTabs();
+      return;
+    }
+
+    const phase = d.phase || '';
+    const step = d.step || '';
+
+    // Detect template/session changes and create new sessions
+    let newSession = null;
+    if (phase === 'Template' && step.startsWith('Trying variant:')) {
+      // Extract variant name from "Trying variant: two_stroke"
+      newSession = step.replace('Trying variant:', '').trim();
+    } else if (phase === 'Skeleton Method' && step.includes('Trying pure skeleton')) {
+      newSession = 'skeleton';
+    }
+
+    // Start new session if needed
+    if (newSession && newSession !== _currentStreamSession) {
+      stopRecording();
+      startRecording(newSession);
+      _currentStreamSession = newSession;
+    }
+
+    // Track scores for sessions
+    if (phase === 'Score' && d.score !== undefined) {
+      // Extract variant name from step like "default: Score = 0.402"
+      const match = step.match(/^(\w+):/);
+      if (match) {
+        _sessionScores[match[1]] = d.score;
+      }
+    } else if ((phase === 'Skeleton Method' || phase === 'Skeleton Penalty') && d.score !== undefined) {
+      // Update skeleton score (penalty phase may adjust it)
+      _sessionScores['skeleton'] = d.score;
+    }
+
+    // Update state with current strokes
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.markers = d.markers || [];
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+    }
+
+    // Update streaming banner
+    updateStreamBanner(d.frame, d.score, `${phase}: ${step}`);
+    setStatus(`[${phase}] ${step}`);
+
+    // Record frame for playback
+    recordFrame(`${phase}: ${step}`);
+
+    if (d.done) {
+      hideStreamBanner(d);
+      _minimalES.close(); _minimalES = null;
+      if (d.variant) {
+        highlightVariantButton(d.variant);
+        _winningSession = d.variant;
+      }
+      stopRecording();
+      updateSessionTabs();
+
+      // Select the winning session's tab
+      if (_winningSession) {
+        const sessions = playback.getSessionList();
+        const winIdx = sessions.findIndex(s => s.label === _winningSession);
+        if (winIdx >= 0) {
+          playback.selectSession(winIdx);
+        }
+      }
+    }
+  };
+
+  _minimalES.onerror = function() {
+    hideStreamBanner();
+    _minimalES.close(); _minimalES = null;
+    setStatus('Streaming failed, falling back to one-shot...');
+    stopRecording();
+    updateSessionTabs();
+    // Fallback to non-streaming endpoint
+    _loadMinimalStrokesFallback(variant);
+  };
+}
+
+// Render session tabs above the player
+function updateSessionTabs() {
+  const container = document.getElementById('sessionTabs');
+  if (!container) return;
+
+  const sessions = playback.getSessionList();
+  const currentView = playback.viewSession;
+
+  if (sessions.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  let html = '';
+
+  // "All" tab
+  const allActive = currentView === -1;
+  const totalFrames = playback.getAllFrames().length;
+  html += `<button onclick="selectSessionTab(-1)" style="
+    padding:4px 10px; font-size:11px; border-radius:3px 3px 0 0; cursor:pointer;
+    background:${allActive ? '#3a5' : '#333'}; color:#eee;
+    border:1px solid ${allActive ? '#4c7' : '#555'}; border-bottom:none;
+    font-weight:${allActive ? 'bold' : 'normal'};
+  ">All (${totalFrames})</button>`;
+
+  // Individual session tabs
+  sessions.forEach((s, i) => {
+    const active = currentView === i;
+    const isWinner = s.label === _winningSession;
+    const score = _sessionScores[s.label];
+    const scoreStr = score !== undefined ? ` ${(score * 100).toFixed(0)}%` : '';
+    const winnerMark = isWinner ? ' *' : '';
+
+    // Color coding: winner gets green, others get default
+    const bgColor = active ? (isWinner ? '#3a5' : '#446') : (isWinner ? '#253' : '#333');
+    const borderColor = active ? (isWinner ? '#4c7' : '#68a') : (isWinner ? '#385' : '#555');
+
+    html += `<button onclick="selectSessionTab(${i})" style="
+      padding:4px 10px; font-size:11px; border-radius:3px 3px 0 0; cursor:pointer;
+      background:${bgColor}; color:#eee;
+      border:1px solid ${borderColor}; border-bottom:none;
+      font-weight:${active || isWinner ? 'bold' : 'normal'};
+    ">${s.label}${scoreStr}${winnerMark} (${s.frameCount})</button>`;
+  });
+
+  container.innerHTML = html;
+}
+
+function selectSessionTab(idx) {
+  playback.selectSession(idx);
+  updateSessionTabs();
+}
+
+function _loadMinimalStrokesFallback(variant) {
   let url = `/api/minimal-strokes/${FONT_ID}?c=${encodeURIComponent(CHAR)}`;
   if (variant) url += `&variant=${encodeURIComponent(variant)}`;
   fetch(url)
@@ -789,21 +939,17 @@ function loadMinimalStrokes(variant = null) {
     .then(d => {
       if (d.strokes && d.strokes.length > 0) {
         state.strokes = d.strokes;
-        state.selectedStroke = -1;
-        state.selectedPoint = -1;
-        state.selectedMulti = [];
         state.dirty = true;
         draw();
         updateStrokeList();
-        const pts = d.strokes.reduce((a, s) => a + s.length, 0);
-        const variantInfo = d.variant ? ` [${d.variant}]` : '';
-        setStatus(`Minimal strokes: ${d.strokes.length} strokes, ${pts} points${variantInfo}`);
+        recordFrame(`minimal ${d.strokes.length} strokes (fallback)`);
         if (d.variant) highlightVariantButton(d.variant);
       } else {
         setStatus('Error: ' + (d.error || 'no strokes'));
       }
+      stopRecording();
     })
-    .catch(err => setStatus('Failed: ' + err));
+    .catch(err => { setStatus('Failed: ' + err); stopRecording(); });
 }
 
 function runDiffVG(thin = 0) {
@@ -2625,71 +2771,20 @@ function navigateChar(dir) {
   window.location.href = `/edit/${FONT_ID}?c=${encodeURIComponent(CHAR_LIST[next])}`;
 }
 
-// --- Playback ---
+// --- Playback (Observer Pattern) ---
 
-// Build a flat list of all frames across all sessions, with session labels
-function _getAllFrames() {
-  const all = [];
-  for (let si = 0; si < recorder.sessions.length; si++) {
-    const s = recorder.sessions[si];
-    for (let fi = 0; fi < s.frames.length; fi++) {
-      all.push({frame: s.frames[fi], sessionIdx: si, label: s.label, localIdx: fi});
-    }
-  }
-  return all;
-}
-
-function _getActiveFrames() {
-  const si = recorder.viewSession;
-  if (si === -1) return _getAllFrames();
-  if (si >= 0 && si < recorder.sessions.length) {
-    const s = recorder.sessions[si];
-    return s.frames.map((f, fi) => ({frame: f, sessionIdx: si, label: s.label, localIdx: fi}));
-  }
-  return [];
-}
-
-function updatePlayerPanel() {
-  const panel = document.getElementById('playerPanel');
-  if (recorder.sessions.length === 0) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  const sel = document.getElementById('sessionSelect');
-  const curVal = sel.value;
-  const totalFrames = recorder.sessions.reduce((a, s) => a + s.frames.length, 0);
-  let html = `<option value="-1">All (${totalFrames}f)</option>`;
-  html += recorder.sessions.map((s, i) =>
-    `<option value="${i}">${s.label} (${s.frames.length}f)</option>`
-  ).join('');
-  sel.innerHTML = html;
-  sel.value = recorder.viewSession;
-  const frames = _getActiveFrames();
-  const tl = document.getElementById('timeline');
-  tl.max = Math.max(0, frames.length - 1);
-  tl.value = Math.min(recorder.playIndex, frames.length - 1);
-  const idx = +tl.value;
-  if (frames.length > 0 && idx < frames.length) {
-    const f = frames[idx];
-    document.getElementById('frameInfo').textContent =
-      `F${idx + 1}/${frames.length}` + (f.frame.status ? ' - ' + f.frame.status : '');
-  } else {
-    document.getElementById('frameInfo').textContent = `0/${frames.length}`;
-  }
-}
-
-function selectSession() {
-  const si = +document.getElementById('sessionSelect').value;
-  recorder.viewSession = si;
-  recorder.playIndex = 0;
-  seekFrame(0);
-}
-
-function seekFrame(idx) {
-  const frames = _getActiveFrames();
-  if (frames.length === 0) return;
-  idx = Math.max(0, Math.min(idx, frames.length - 1));
-  recorder.playIndex = idx;
-  const entry = frames[idx];
-  const frame = entry.frame;
+// Initialize playback UI binding
+const playbackUI = createPlaybackUI(playback, {
+  panel: document.getElementById('playerPanel'),
+  sessionSelect: document.getElementById('sessionSelect'),
+  timeline: document.getElementById('timeline'),
+  frameInfo: document.getElementById('frameInfo'),
+  frameNum: document.getElementById('frameNum'),
+  playPauseBtn: document.getElementById('btnPlayPause'),
+  speedSelect: document.getElementById('speedSelect')
+}, function onSeek(detail) {
+  // Apply frame to editor state
+  const frame = detail.frame;
   state.strokes = JSON.parse(JSON.stringify(frame.strokes));
   state.markers = JSON.parse(JSON.stringify(frame.markers));
   state.selectedStroke = -1;
@@ -2697,63 +2792,24 @@ function seekFrame(idx) {
   state.selectedMulti = [];
   draw();
   updateStrokeList();
-  document.getElementById('timeline').value = idx;
-  document.getElementById('frameInfo').textContent =
-    `F${idx + 1}/${frames.length}` + (frame.status ? ' - ' + frame.status : '');
-  setStatus(`[${entry.label}] Frame ${idx + 1}/${frames.length}${frame.status ? ': ' + frame.status : ''}`);
-}
+  setStatus(`[${detail.session}] Frame ${detail.index + 1}/${detail.totalFrames}${frame.status ? ': ' + frame.status : ''}`);
+});
 
-function togglePlay() {
-  if (recorder.sessions.length === 0) return;
-  if (recorder.playing) {
-    clearInterval(recorder.playTimer);
-    recorder.playing = false;
-    document.getElementById('btnPlayPause').textContent = 'Play';
-  } else {
-    const frames = _getActiveFrames();
-    if (frames.length === 0) return;
-    // If at the end, restart from frame 0
-    if (recorder.playIndex >= frames.length - 1) {
-      recorder.playIndex = 0;
-      seekFrame(0);
-    }
-    recorder.playing = true;
-    document.getElementById('btnPlayPause').textContent = 'Pause';
-    recorder.playTimer = setInterval(() => {
-      const frames = _getActiveFrames();
-      if (recorder.playIndex >= frames.length - 1) { togglePlay(); return; }
-      seekFrame(recorder.playIndex + 1);
-    }, recorder.playSpeed);
-  }
-}
+// Update tabs when session changes
+playback.addEventListener('session-change', updateSessionTabs);
+playback.addEventListener('frame-added', updateSessionTabs);
 
-function playStep(dir) {
-  if (recorder.playing) togglePlay();
-  seekFrame(recorder.playIndex + dir);
-}
-
-function playFirst() {
-  if (recorder.playing) togglePlay();
-  seekFrame(0);
-}
-
-function playLast() {
-  if (recorder.playing) togglePlay();
-  const frames = _getActiveFrames();
-  seekFrame(frames.length - 1);
-}
-
-function setPlaySpeed(ms) {
-  recorder.playSpeed = ms;
-  if (recorder.playing) {
-    clearInterval(recorder.playTimer);
-    recorder.playTimer = setInterval(() => {
-      const frames = _getActiveFrames();
-      if (recorder.playIndex >= frames.length - 1) { togglePlay(); return; }
-      seekFrame(recorder.playIndex + 1);
-    }, recorder.playSpeed);
-  }
-}
+// Legacy compatibility functions (delegate to playback)
+function _getAllFrames() { return playback.getAllFrames(); }
+function _getActiveFrames() { return playback.getActiveFrames(); }
+function updatePlayerPanel() { playbackUI.update(); }
+function selectSession() { playback.selectSession(parseInt(document.getElementById('sessionSelect').value, 10)); }
+function seekFrame(idx) { playback.seek(idx); }
+function togglePlay() { playback.toggle(); }
+function playStep(dir) { playback.step(dir); }
+function playFirst() { playback.first(); }
+function playLast() { playback.last(); }
+function setPlaySpeed(ms) { playback.setSpeed(ms); }
 
 // --- Init ---
 load();
