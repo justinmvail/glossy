@@ -196,214 +196,79 @@ def _strokes_to_list(strokes: list[np.ndarray]) -> list:
     return [[[round(float(p[0]), 1), round(float(p[1]), 1)] for p in s] for s in strokes]
 
 
-def optimize_stream_generator(font_path: str, char: str,
-                              canvas_size: int = 224) -> Generator[str, None, None]:
-    """Generator that yields SSE events during multi-phase stroke optimization.
-
-    Performs progressive optimization of strokes to match a target glyph,
-    yielding intermediate results as SSE events for real-time display.
-
-    Optimization Phases:
-        1. **Initialization**: Generate initial strokes from template or skeleton
-        2. **Global Affine (NM)**: Nelder-Mead optimization of affine transform
-        3. **Global Affine (DE)**: Differential Evolution refinement
-        4. **Per-stroke Refine**: Individual stroke position/scale adjustment
-        5. **Complete**: Final result with completion metadata
+def _run_nm_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
+                         score_args: tuple) -> tuple[np.ndarray, float, list[np.ndarray]]:
+    """Run Nelder-Mead optimization for global affine transform.
 
     Args:
-        font_path: Path to the font file (TTF/OTF).
-        char: Single character to optimize strokes for.
-        canvas_size: Size of the square canvas in pixels. Defaults to 224.
+        stroke_arrays: List of stroke arrays to optimize.
+        centroid: Center point for affine transformations.
+        score_args: Arguments for the scoring function.
 
-    Yields:
-        str: SSE-formatted event strings. Each event contains a JSON object
-        with varying fields depending on the phase.
-
-    SSE Event Types:
-        Phase start events::
-
-            {"phase": "Initializing", "frame": 0, "score": 0}
-            {"phase": "Global affine (NM)", "frame": N, "score": X.XXX}
-
-        Progress events (include current strokes)::
-
-            {
-                "phase": "NM iter 50",
-                "frame": N,
-                "score": X.XXX,
-                "strokes": [[[x, y], ...], ...]
-            }
-
-        Completion event::
-
-            {
-                "phase": "Complete",
-                "frame": N,
-                "score": X.XXX,
-                "strokes": [...],
-                "done": true,
-                "reason": "converged",  // or "perfect", "time limit", "simple"
-                "elapsed": X.XX,
-                "cycles": N
-            }
-
-        Error events::
-
-            {"error": "Failed to get initial strokes: <details>"}
-            {"error": "No strokes generated"}
-            {"error": "Could not render glyph mask"}
-
-    Note:
-        - The generator may terminate early if initial stroke generation fails
-        - Score values are negated internally (minimization) but reported as
-          positive values (higher = better)
-        - Progress events are throttled to avoid overwhelming the client
+    Returns:
+        Tuple of (best_params, best_score, best_strokes).
     """
-    start_time = time.time()
-    frame = 0
-
-    # Phase 0: Get initial strokes
-    yield _sse_event({'phase': 'Initializing', 'frame': frame, 'score': 0})
-
-    try:
-        strokes_raw = min_strokes(font_path, char, canvas_size)
-    except Exception as e:
-        yield _sse_event({'error': f'Failed to get initial strokes: {e}'})
-        return
-
-    if not strokes_raw:
-        # Try skeleton fallback
-        try:
-            mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
-            if mask is not None:
-                strokes_raw = skel_strokes(mask, min_len=5)
-        except Exception:
-            pass
-
-    if not strokes_raw:
-        yield _sse_event({'error': 'No strokes generated'})
-        return
-
-    # Render mask and prepare optimization
-    mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
-    if mask is None:
-        yield _sse_event({'error': 'Could not render glyph mask'})
-        return
-
-    setup = _prepare_optimization(mask, strokes_raw)
-    if setup is None:
-        # Return initial strokes without optimization
-        yield _sse_event({
-            'strokes': strokes_raw,
-            'frame': 1,
-            'score': 0.5,
-            'phase': 'No optimization needed',
-            'done': True,
-            'reason': 'simple',
-            'elapsed': round(time.time() - start_time, 2),
-            'cycles': 0
-        })
-        return
-
-    stroke_arrays, centroid, score_args, _w, _h = setup
-
-    # Emit initial strokes
-    frame += 1
-    initial_score = -score_raw_strokes(stroke_arrays, *score_args)
-    yield _sse_event({
-        'strokes': _strokes_to_list(stroke_arrays),
-        'frame': frame,
-        'score': round(initial_score, 3),
-        'phase': 'Initial'
-    })
-
-    best_strokes = stroke_arrays
-    best_score = -initial_score  # negative for minimization
-
-    # Phase 1: Global affine optimization with Nelder-Mead
-    yield _sse_event({'phase': 'Global affine (NM)', 'frame': frame, 'score': round(-best_score, 3)})
-
     def affine_obj(params):
         transformed = _affine_transform(stroke_arrays, params, centroid)
         return score_raw_strokes(transformed, *score_args)
 
     x0 = np.array([0, 0, 1, 1, 0, 0], dtype=float)
-    nm_evals = [0]
-    last_emit = [time.time()]
 
-    def nm_callback(xk):
-        nm_evals[0] += 1
-        # Emit every 50 evaluations or 0.1 seconds
-        if nm_evals[0] % 50 == 0 or time.time() - last_emit[0] > 0.1:
-            transformed = _affine_transform(stroke_arrays, tuple(xk), centroid)
-            score = -score_raw_strokes(transformed, *score_args)
-            nonlocal frame
-            frame += 1
-            last_emit[0] = time.time()
-            return _sse_event({
-                'strokes': _strokes_to_list(transformed),
-                'frame': frame,
-                'score': round(score, 3),
-                'phase': f'NM iter {nm_evals[0]}'
-            })
-        return None
-
-    # Run NM with periodic yields
     try:
         nm = minimize(affine_obj, x0, method='Nelder-Mead',
                       options={'maxfev': 400, 'xatol': 0.2, 'fatol': 0.005, 'adaptive': True})
-        if nm.fun < best_score:
-            best_score = nm.fun
-            best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
-            frame += 1
-            yield _sse_event({
-                'strokes': _strokes_to_list(best_strokes),
-                'frame': frame,
-                'score': round(-best_score, 3),
-                'phase': 'NM complete'
-            })
+        best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
+        return nm.x, nm.fun, best_strokes
     except Exception:
-        pass
+        return x0, float('inf'), stroke_arrays
 
-    # Phase 2: Differential Evolution refinement
-    yield _sse_event({'phase': 'Global affine (DE)', 'frame': frame, 'score': round(-best_score, 3)})
+
+def _run_de_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
+                         score_args: tuple, initial_x: np.ndarray,
+                         best_score: float) -> tuple[float, list[np.ndarray]]:
+    """Run Differential Evolution optimization for global affine refinement.
+
+    Args:
+        stroke_arrays: List of stroke arrays to optimize.
+        centroid: Center point for affine transformations.
+        score_args: Arguments for the scoring function.
+        initial_x: Initial parameters from NM optimization.
+        best_score: Current best score to beat.
+
+    Returns:
+        Tuple of (best_score, best_strokes).
+    """
+    def affine_obj(params):
+        transformed = _affine_transform(stroke_arrays, params, centroid)
+        return score_raw_strokes(transformed, *score_args)
 
     affine_bounds = [(-15, 15), (-15, 15), (0.75, 1.25), (0.75, 1.25), (-10, 10), (-0.2, 0.2)]
-    de_gens = [0]
-
-    def de_callback(xk, convergence=None):
-        de_gens[0] += 1
-        transformed = _affine_transform(stroke_arrays, tuple(xk), centroid)
-        score = -score_raw_strokes(transformed, *score_args)
-        nonlocal frame, best_score, best_strokes
-        if score > -best_score:
-            best_score = -score
-            best_strokes = transformed
-        frame += 1
-        return False  # Don't stop
 
     try:
         de = differential_evolution(affine_obj, bounds=affine_bounds,
-                                    x0=nm.x if 'nm' in dir() else x0,
-                                    maxiter=15, popsize=8, tol=0.01, polish=False,
-                                    callback=de_callback)
+                                    x0=initial_x, maxiter=15, popsize=8,
+                                    tol=0.01, polish=False)
         if de.fun < best_score:
-            best_score = de.fun
-            best_strokes = _affine_transform(stroke_arrays, tuple(de.x), centroid)
-
-        frame += 1
-        yield _sse_event({
-            'strokes': _strokes_to_list(best_strokes),
-            'frame': frame,
-            'score': round(-best_score, 3),
-            'phase': f'DE gen {de_gens[0]}'
-        })
+            return de.fun, _affine_transform(stroke_arrays, tuple(de.x), centroid)
     except Exception:
         pass
 
-    # Phase 3: Per-stroke refinement
-    yield _sse_event({'phase': 'Per-stroke refine', 'frame': frame, 'score': round(-best_score, 3)})
+    return best_score, _affine_transform(stroke_arrays, tuple(initial_x), centroid)
 
+
+def _run_per_stroke_refinement(best_strokes: list[np.ndarray],
+                                score_args: tuple,
+                                best_score: float) -> tuple[float, list[np.ndarray]]:
+    """Run per-stroke refinement optimization.
+
+    Args:
+        best_strokes: Current best stroke arrays.
+        score_args: Arguments for the scoring function.
+        best_score: Current best score to beat.
+
+    Returns:
+        Tuple of (final_score, final_strokes).
+    """
     n_strokes = len(best_strokes)
 
     def per_stroke_obj(params):
@@ -432,25 +297,137 @@ def optimize_stream_generator(font_path: str, char: str,
                 pts[:, 0] = c[0] + sx * (pts[:, 0] - c[0]) + dx
                 pts[:, 1] = c[1] + sy * (pts[:, 1] - c[1]) + dy
                 final_strokes.append(pts)
-            best_strokes = final_strokes
-            best_score = nm2.fun
-
-        frame += 1
-        yield _sse_event({
-            'strokes': _strokes_to_list(best_strokes),
-            'frame': frame,
-            'score': round(-best_score, 3),
-            'phase': 'Per-stroke complete'
-        })
+            return nm2.fun, final_strokes
     except Exception:
         pass
 
+    return best_score, best_strokes
+
+
+def optimize_stream_generator(font_path: str, char: str,
+                              canvas_size: int = 224) -> Generator[str, None, None]:
+    """Generator that yields SSE events during multi-phase stroke optimization.
+
+    Performs progressive optimization of strokes to match a target glyph,
+    yielding intermediate results as SSE events for real-time display.
+
+    Optimization Phases:
+        1. **Initialization**: Generate initial strokes from template or skeleton
+        2. **Global Affine (NM)**: Nelder-Mead optimization of affine transform
+        3. **Global Affine (DE)**: Differential Evolution refinement
+        4. **Per-stroke Refine**: Individual stroke position/scale adjustment
+        5. **Complete**: Final result with completion metadata
+
+    Args:
+        font_path: Path to the font file (TTF/OTF).
+        char: Single character to optimize strokes for.
+        canvas_size: Size of the square canvas in pixels. Defaults to 224.
+
+    Yields:
+        str: SSE-formatted event strings. Each event contains a JSON object
+        with varying fields depending on the phase.
+
+    Note:
+        - The generator may terminate early if initial stroke generation fails
+        - Score values are negated internally (minimization) but reported as
+          positive values (higher = better)
+    """
+    start_time = time.time()
+    frame = 0
+
+    # Phase 0: Get initial strokes
+    yield _sse_event({'phase': 'Initializing', 'frame': frame, 'score': 0})
+
+    try:
+        strokes_raw = min_strokes(font_path, char, canvas_size)
+    except Exception as e:
+        yield _sse_event({'error': f'Failed to get initial strokes: {e}'})
+        return
+
+    if not strokes_raw:
+        try:
+            mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
+            if mask is not None:
+                strokes_raw = skel_strokes(mask, min_len=5)
+        except Exception:
+            pass
+
+    if not strokes_raw:
+        yield _sse_event({'error': 'No strokes generated'})
+        return
+
+    # Prepare optimization
+    mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
+    if mask is None:
+        yield _sse_event({'error': 'Could not render glyph mask'})
+        return
+
+    setup = _prepare_optimization(mask, strokes_raw)
+    if setup is None:
+        yield _sse_event({
+            'strokes': strokes_raw, 'frame': 1, 'score': 0.5,
+            'phase': 'No optimization needed', 'done': True,
+            'reason': 'simple', 'elapsed': round(time.time() - start_time, 2), 'cycles': 0
+        })
+        return
+
+    stroke_arrays, centroid, score_args, _w, _h = setup
+
+    # Emit initial strokes
+    frame += 1
+    initial_score = -score_raw_strokes(stroke_arrays, *score_args)
+    yield _sse_event({
+        'strokes': _strokes_to_list(stroke_arrays),
+        'frame': frame, 'score': round(initial_score, 3), 'phase': 'Initial'
+    })
+
+    best_score = -initial_score
+
+    # Phase 1: Nelder-Mead optimization
+    yield _sse_event({'phase': 'Global affine (NM)', 'frame': frame, 'score': round(-best_score, 3)})
+    nm_x, nm_score, best_strokes = _run_nm_optimization(stroke_arrays, centroid, score_args)
+
+    if nm_score < best_score:
+        best_score = nm_score
+        frame += 1
+        yield _sse_event({
+            'strokes': _strokes_to_list(best_strokes),
+            'frame': frame, 'score': round(-best_score, 3), 'phase': 'NM complete'
+        })
+
+    # Phase 2: Differential Evolution refinement
+    yield _sse_event({'phase': 'Global affine (DE)', 'frame': frame, 'score': round(-best_score, 3)})
+    de_score, de_strokes = _run_de_optimization(stroke_arrays, centroid, score_args, nm_x, best_score)
+
+    if de_score < best_score:
+        best_score = de_score
+        best_strokes = de_strokes
+
+    frame += 1
+    yield _sse_event({
+        'strokes': _strokes_to_list(best_strokes),
+        'frame': frame, 'score': round(-best_score, 3), 'phase': 'DE complete'
+    })
+
+    # Phase 3: Per-stroke refinement
+    yield _sse_event({'phase': 'Per-stroke refine', 'frame': frame, 'score': round(-best_score, 3)})
+    final_score, final_strokes = _run_per_stroke_refinement(best_strokes, score_args, best_score)
+
+    if final_score < best_score:
+        best_score = final_score
+        best_strokes = final_strokes
+
+    frame += 1
+    yield _sse_event({
+        'strokes': _strokes_to_list(best_strokes),
+        'frame': frame, 'score': round(-best_score, 3), 'phase': 'Per-stroke complete'
+    })
+
     # Final result
     elapsed = round(time.time() - start_time, 2)
-    final_score = round(-best_score, 3)
+    final_score_display = round(-best_score, 3)
 
-    # Determine completion reason
-    if final_score >= 0.95:
+    if final_score_display >= 0.95:
         reason = 'perfect'
     elif elapsed > 30:
         reason = 'time limit'
@@ -459,13 +436,9 @@ def optimize_stream_generator(font_path: str, char: str,
 
     yield _sse_event({
         'strokes': _strokes_to_list(best_strokes),
-        'frame': frame,
-        'score': final_score,
-        'phase': 'Complete',
-        'done': True,
-        'reason': reason,
-        'elapsed': elapsed,
-        'cycles': frame
+        'frame': frame, 'score': final_score_display,
+        'phase': 'Complete', 'done': True, 'reason': reason,
+        'elapsed': elapsed, 'cycles': frame
     })
 
 

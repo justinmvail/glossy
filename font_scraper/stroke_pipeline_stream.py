@@ -28,6 +28,7 @@ Note:
 """
 
 from collections.abc import Generator
+from typing import Any
 
 from stroke_core import _merge_to_expected_count, _skel as analyze_skeleton, skel_strokes
 from stroke_dataclasses import parse_stroke_template
@@ -44,6 +45,268 @@ from stroke_skeleton import (
 )
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_utils import point_in_region
+
+
+def _create_skeleton_markers(info: dict) -> tuple[list[dict], list[dict], list[dict]]:
+    """Create visualization markers for skeleton features.
+
+    Args:
+        info: Skeleton analysis dict with 'skel_set', 'endpoints', 'junction_pixels'.
+
+    Returns:
+        Tuple of (skeleton_markers, endpoint_markers, junction_markers).
+    """
+    skel_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'skeleton'}
+                    for p in list(info['skel_set'])[:500]]  # Limit for performance
+    ep_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'endpoint'}
+                  for p in info['endpoints']]
+    jp_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'junction'}
+                  for p in info['junction_pixels']]
+    return skel_markers, ep_markers, jp_markers
+
+
+def _resolve_waypoint_marker(pipe: MinimalStrokePipeline, wp: Any, wp_idx: int,
+                              segment_configs: list, waypoints: list,
+                              mid_x: float, mid_y: float,
+                              top_bound: float, bot_bound: float,
+                              waist_margin: float) -> dict:
+    """Resolve a waypoint and create a visualization marker.
+
+    Args:
+        pipe: The MinimalStrokePipeline instance.
+        wp: Waypoint object to resolve.
+        wp_idx: Index of this waypoint in the list.
+        segment_configs: List of segment configurations.
+        waypoints: Full list of waypoints.
+        mid_x, mid_y: Center coordinates of bounding box.
+        top_bound, bot_bound: Y-coordinate bounds for middle third.
+        waist_margin: Margin for waist calculations.
+
+    Returns:
+        Dict with marker data including position, type, and label.
+    """
+    next_dir = segment_configs[wp_idx].direction if wp_idx < len(segment_configs) else None
+    if next_dir is None and wp_idx + 1 < len(waypoints):
+        next_dir = pipe._infer_direction(wp.region, waypoints[wp_idx + 1].region)
+
+    resolved_wp = pipe.resolve_waypoint(wp, next_dir, mid_x, mid_y,
+                                        top_bound, bot_bound, waist_margin)
+
+    wp_type = 'terminal'
+    if wp.is_intersection:
+        wp_type = 'intersection'
+    elif wp.is_vertex:
+        wp_type = 'vertex'
+    elif wp.is_curve:
+        wp_type = 'curve'
+
+    return {
+        'x': float(resolved_wp.position[0]),
+        'y': float(resolved_wp.position[1]),
+        'type': 'waypoint',
+        'label': f'WP{wp_idx + 1}',
+        'wp_type': wp_type,
+        '_resolved': resolved_wp,
+        '_template_pos': pipe.numpad_to_pixel(wp.region)
+    }
+
+
+def _stream_variant_strokes(pipe: MinimalStrokePipeline, var_name: str,
+                             variant_template: list, bbox: tuple,
+                             quick_stroke_score_fn) -> Generator[dict, None, tuple]:
+    """Stream frames while processing a single template variant.
+
+    Args:
+        pipe: The MinimalStrokePipeline instance.
+        var_name: Name of this variant.
+        variant_template: List of stroke templates for this variant.
+        bbox: Bounding box tuple (x_min, y_min, x_max, y_max).
+        quick_stroke_score_fn: Function to score strokes.
+
+    Yields:
+        Frame dicts for each processing step.
+
+    Returns:
+        Tuple of (strokes, score, all_waypoint_markers).
+    """
+    strokes = []
+    all_waypoint_markers = []
+    global_traced = set()
+
+    mid_x = (bbox[0] + bbox[2]) / 2
+    mid_y = (bbox[1] + bbox[3]) / 2
+    h = bbox[3] - bbox[1]
+    third_h = h / 3
+    top_bound = bbox[1] + third_h
+    bot_bound = bbox[1] + 2 * third_h
+    waist_margin = h * 0.05
+
+    for stroke_idx, stroke_template in enumerate(variant_template):
+        yield {
+            'phase': 'Template',
+            'step': f'{var_name}: Processing stroke {stroke_idx + 1}/{len(variant_template)}',
+            'strokes': strokes,
+            'markers': all_waypoint_markers
+        }
+
+        waypoints, segment_configs = parse_stroke_template(stroke_template)
+        stroke_waypoint_markers = []
+
+        for wp_idx, wp in enumerate(waypoints):
+            marker = _resolve_waypoint_marker(
+                pipe, wp, wp_idx, segment_configs, waypoints,
+                mid_x, mid_y, top_bound, bot_bound, waist_margin
+            )
+            stroke_waypoint_markers.append(marker)
+
+            template_pos = marker['_template_pos']
+            resolved_pos = (marker['x'], marker['y'])
+            dist = ((resolved_pos[0] - template_pos[0])**2 +
+                    (resolved_pos[1] - template_pos[1])**2)**0.5
+
+            yield {
+                'phase': 'Waypoint',
+                'step': f'{var_name} S{stroke_idx + 1}: WP{wp_idx + 1} [{marker["wp_type"]}] region {wp.region} -> ({resolved_pos[0]:.0f},{resolved_pos[1]:.0f}) dist={dist:.1f}',
+                'strokes': strokes,
+                'markers': all_waypoint_markers + stroke_waypoint_markers
+            }
+
+        stroke_points = pipe.process_stroke_template(stroke_template, global_traced, trace_paths=True)
+
+        if stroke_points and len(stroke_points) >= 2:
+            strokes.append(stroke_points)
+            all_waypoint_markers.extend(stroke_waypoint_markers)
+
+            yield {
+                'phase': 'Stroke',
+                'step': f'{var_name}: Completed stroke {stroke_idx + 1}/{len(variant_template)} ({len(stroke_points)} points)',
+                'strokes': strokes,
+                'markers': all_waypoint_markers
+            }
+
+    score = 0.0
+    if strokes:
+        score = quick_stroke_score_fn(strokes, pipe.mask)
+        yield {
+            'phase': 'Score',
+            'step': f'{var_name}: Score = {score:.3f}',
+            'strokes': strokes,
+            'markers': [],
+            'score': score
+        }
+
+    return strokes, score, all_waypoint_markers
+
+
+def _stream_skeleton_evaluation(pipe: MinimalStrokePipeline, variants: dict,
+                                 best_strokes: list, best_score: float,
+                                 best_variant: str, mask,
+                                 quick_stroke_score_fn) -> Generator[dict, None, tuple]:
+    """Stream frames while evaluating skeleton method.
+
+    Args:
+        pipe: The MinimalStrokePipeline instance.
+        variants: Dict of template variants for this character.
+        best_strokes: Current best strokes from template evaluation.
+        best_score: Current best score.
+        best_variant: Name of current best variant.
+        mask: Glyph mask array.
+        quick_stroke_score_fn: Function to score strokes.
+
+    Yields:
+        Frame dicts for skeleton evaluation steps.
+
+    Returns:
+        Tuple of (final_strokes, final_score, final_variant).
+    """
+    yield {
+        'phase': 'Skeleton Method',
+        'step': 'Trying pure skeleton extraction...',
+        'strokes': best_strokes or [],
+        'markers': []
+    }
+
+    skel_result = pipe.try_skeleton_method()
+
+    if skel_result.strokes:
+        raw_stroke_count = len(skel_result.strokes)
+        yield {
+            'phase': 'Skeleton Method',
+            'step': f'Extracted {raw_stroke_count} strokes from skeleton (after merge/adjustment)',
+            'strokes': skel_result.strokes,
+            'markers': []
+        }
+
+        skel_score = skel_result.score
+        yield {
+            'phase': 'Skeleton Method',
+            'step': f'Skeleton score = {skel_score:.3f}',
+            'strokes': skel_result.strokes,
+            'markers': [],
+            'score': skel_score
+        }
+
+        # Apply penalty for stroke count mismatch
+        if variants:
+            expected_counts = [len(t) for t in variants.values()]
+            expected_count = min(expected_counts) if expected_counts else raw_stroke_count
+
+            if raw_stroke_count != expected_count:
+                penalty = 0.3 * abs(raw_stroke_count - expected_count)
+                adjusted_score = skel_score - penalty
+                yield {
+                    'phase': 'Skeleton Penalty',
+                    'step': f'Stroke count {raw_stroke_count} != expected {expected_count}, penalty {penalty:.2f} -> adjusted score {adjusted_score:.3f}',
+                    'strokes': skel_result.strokes,
+                    'markers': [],
+                    'score': adjusted_score
+                }
+                skel_score = adjusted_score
+
+        # Compare with best template
+        if skel_score >= best_score:
+            if skel_score == best_score:
+                yield {
+                    'phase': 'Selection',
+                    'step': f'Skeleton ({skel_score:.3f}) ties template {best_variant} ({best_score:.3f}) - preferring skeleton',
+                    'strokes': skel_result.strokes,
+                    'markers': [],
+                    'score': skel_score
+                }
+            else:
+                yield {
+                    'phase': 'Selection',
+                    'step': f'Skeleton ({skel_score:.3f}) beats template {best_variant} ({best_score:.3f})',
+                    'strokes': skel_result.strokes,
+                    'markers': [],
+                    'score': skel_score
+                }
+            return skel_result.strokes, skel_score, 'skeleton'
+        else:
+            yield {
+                'phase': 'Selection',
+                'step': f'Template {best_variant} ({best_score:.3f}) beats skeleton ({skel_score:.3f})',
+                'strokes': best_strokes or [],
+                'markers': [],
+                'score': best_score
+            }
+            return best_strokes, best_score, best_variant
+
+    elif not variants:
+        # No variants and skeleton failed - try raw skeleton
+        raw_skel = skel_strokes(mask, min_len=5)
+        if raw_skel:
+            score = quick_stroke_score_fn(raw_skel, mask)
+            yield {
+                'phase': 'Skeleton Method',
+                'step': f'Using raw skeleton: {len(raw_skel)} strokes, score = {score:.3f}',
+                'strokes': raw_skel,
+                'markers': [],
+                'score': score
+            }
+            return raw_skel, score, 'skeleton'
+
+    return best_strokes, best_score, best_variant
 
 
 def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) -> Generator[dict, None, None]:
@@ -127,13 +390,12 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
         yield {'phase': 'Error', 'step': 'Failed to render mask', 'strokes': [], 'markers': [], 'done': True}
         return
 
-    # Phase 2: Create pipeline (this does skeleton analysis lazily)
+    # Phase 2: Create pipeline and analyze skeleton
     yield {'phase': 'Skeleton', 'step': 'Analyzing skeleton...', 'strokes': [], 'markers': []}
 
-    # Create the same pipeline as min_strokes() does
     pipe = MinimalStrokePipeline(
         font_path, char, canvas_size,
-        resolve_font_path_fn=lambda x: x,  # Already resolved
+        resolve_font_path_fn=lambda x: x,
         render_glyph_mask_fn=render_glyph_mask,
         analyze_skeleton_fn=analyze_skeleton,
         find_skeleton_segments_fn=find_skeleton_segments,
@@ -144,11 +406,10 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
         resample_path_fn=resample_path,
         skeleton_to_strokes_fn=skel_strokes,
         apply_stroke_template_fn=_merge_to_expected_count,
-        adjust_stroke_paths_fn=lambda st, c, m: st,  # No-op
+        adjust_stroke_paths_fn=lambda st, c, m: st,
         quick_stroke_score_fn=quick_stroke_score,
     )
 
-    # Trigger skeleton analysis
     analysis = pipe.analysis
     if analysis is None:
         yield {'phase': 'Error', 'step': 'Failed to analyze skeleton', 'strokes': [], 'markers': [], 'done': True}
@@ -157,17 +418,8 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
     info = analysis.info
     bbox = analysis.bbox
 
-    # Show skeleton points as markers
-    skel_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'skeleton'}
-                    for p in list(info['skel_set'])[:500]]  # Limit for performance
-
-    # Show endpoints
-    ep_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'endpoint'}
-                  for p in info['endpoints']]
-
-    # Show junctions
-    jp_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'junction'}
-                  for p in info['junction_pixels']]
+    # Create skeleton visualization markers
+    skel_markers, ep_markers, jp_markers = _create_skeleton_markers(info)
 
     yield {
         'phase': 'Skeleton',
@@ -186,7 +438,6 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
 
     # Phase 4: Evaluate template variants
     variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
-
     best_strokes = None
     best_score = -1
     best_variant = None
@@ -199,7 +450,6 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
             'markers': []
         }
 
-        # Try each variant using the actual pipeline
         for var_name, variant_template in variants.items():
             yield {
                 'phase': 'Template',
@@ -208,198 +458,31 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
                 'markers': []
             }
 
-            # Use the pipeline's run() method, but we'll also visualize intermediate steps
-            strokes = []
-            all_waypoint_markers = []
-            global_traced = set()
+            # Stream variant evaluation
+            var_gen = _stream_variant_strokes(pipe, var_name, variant_template, bbox, quick_stroke_score)
+            strokes, score, _ = None, 0.0, None
 
-            # Process parameters matching pipeline
-            mid_x = (bbox[0] + bbox[2]) / 2
-            mid_y = (bbox[1] + bbox[3]) / 2
-            h = bbox[3] - bbox[1]
-            third_h = h / 3
-            top_bound = bbox[1] + third_h
-            bot_bound = bbox[1] + 2 * third_h
-            waist_margin = h * 0.05
+            try:
+                while True:
+                    frame = next(var_gen)
+                    yield frame
+            except StopIteration as e:
+                strokes, score, _ = e.value
 
-            # Process each stroke in the template
-            for stroke_idx, stroke_template in enumerate(variant_template):
-                yield {
-                    'phase': 'Template',
-                    'step': f'{var_name}: Processing stroke {stroke_idx + 1}/{len(variant_template)}',
-                    'strokes': strokes,
-                    'markers': all_waypoint_markers
-                }
+            if strokes and score > best_score:
+                best_score = score
+                best_strokes = strokes
+                best_variant = var_name
 
-                # First, resolve waypoints for visualization (before drawing stroke)
-                waypoints, segment_configs = parse_stroke_template(stroke_template)
-                stroke_waypoint_markers = []
+    # Phase 5: Evaluate skeleton method
+    skel_gen = _stream_skeleton_evaluation(pipe, variants, best_strokes, best_score, best_variant, mask, quick_stroke_score)
 
-                for wp_idx, wp in enumerate(waypoints):
-                    # Resolve using pipeline's method to get actual positions
-                    next_dir = segment_configs[wp_idx].direction if wp_idx < len(segment_configs) else None
-
-                    # Infer direction from next waypoint if not specified (matching pipeline behavior)
-                    if next_dir is None and wp_idx + 1 < len(waypoints):
-                        next_dir = pipe._infer_direction(wp.region, waypoints[wp_idx + 1].region)
-
-                    resolved_wp = pipe.resolve_waypoint(wp, next_dir, mid_x, mid_y,
-                                                       top_bound, bot_bound, waist_margin)
-
-                    # Determine waypoint type for display
-                    wp_type = 'terminal'
-                    if wp.is_intersection:
-                        wp_type = 'intersection'
-                    elif wp.is_vertex:
-                        wp_type = 'vertex'
-                    elif wp.is_curve:
-                        wp_type = 'curve'
-
-                    template_pos = pipe.numpad_to_pixel(wp.region)
-                    dist = ((resolved_wp.position[0] - template_pos[0])**2 +
-                            (resolved_wp.position[1] - template_pos[1])**2)**0.5
-
-                    # Add waypoint marker
-                    wp_marker = {
-                        'x': float(resolved_wp.position[0]),
-                        'y': float(resolved_wp.position[1]),
-                        'type': 'waypoint',
-                        'label': f'WP{wp_idx + 1}',
-                        'wp_type': wp_type
-                    }
-                    stroke_waypoint_markers.append(wp_marker)
-
-                    yield {
-                        'phase': 'Waypoint',
-                        'step': f'{var_name} S{stroke_idx + 1}: WP{wp_idx + 1} [{wp_type}] region {wp.region} -> ({resolved_wp.position[0]:.0f},{resolved_wp.position[1]:.0f}) dist={dist:.1f}',
-                        'strokes': strokes,
-                        'markers': all_waypoint_markers + stroke_waypoint_markers
-                    }
-
-                # Now use the pipeline's process_stroke_template method to get actual stroke
-                stroke_points = pipe.process_stroke_template(stroke_template, global_traced, trace_paths=True)
-
-                if stroke_points and len(stroke_points) >= 2:
-                    strokes.append(stroke_points)
-                    all_waypoint_markers.extend(stroke_waypoint_markers)
-
-                    yield {
-                        'phase': 'Stroke',
-                        'step': f'{var_name}: Completed stroke {stroke_idx + 1}/{len(variant_template)} ({len(stroke_points)} points)',
-                        'strokes': strokes,
-                        'markers': all_waypoint_markers
-                    }
-
-            # Score this variant
-            if strokes:
-                score = quick_stroke_score(strokes, mask)
-                yield {
-                    'phase': 'Score',
-                    'step': f'{var_name}: Score = {score:.3f}',
-                    'strokes': strokes,
-                    'markers': [],
-                    'score': score
-                }
-
-                if score > best_score:
-                    best_score = score
-                    best_strokes = strokes
-                    best_variant = var_name
-
-    # Phase 5: Try skeleton method using pipeline's method
-    yield {
-        'phase': 'Skeleton Method',
-        'step': 'Trying pure skeleton extraction...',
-        'strokes': best_strokes or [],
-        'markers': []
-    }
-
-    # Use the pipeline's try_skeleton_method which applies all the proper
-    # merging and adjustments
-    skel_result = pipe.try_skeleton_method()
-
-    if skel_result.strokes:
-        raw_stroke_count = len(skel_result.strokes)
-        yield {
-            'phase': 'Skeleton Method',
-            'step': f'Extracted {raw_stroke_count} strokes from skeleton (after merge/adjustment)',
-            'strokes': skel_result.strokes,
-            'markers': []
-        }
-
-        skel_score = skel_result.score
-
-        yield {
-            'phase': 'Skeleton Method',
-            'step': f'Skeleton score = {skel_score:.3f}',
-            'strokes': skel_result.strokes,
-            'markers': [],
-            'score': skel_score
-        }
-
-        # Apply the same penalty logic as evaluate_all_variants
-        if variants:
-            expected_counts = [len(t) for t in variants.values()]
-            expected_count = min(expected_counts) if expected_counts else raw_stroke_count
-
-            if raw_stroke_count != expected_count:
-                penalty = 0.3 * abs(raw_stroke_count - expected_count)
-                adjusted_score = skel_score - penalty
-                yield {
-                    'phase': 'Skeleton Penalty',
-                    'step': f'Stroke count {raw_stroke_count} != expected {expected_count}, penalty {penalty:.2f} -> adjusted score {adjusted_score:.3f}',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': adjusted_score
-                }
-                skel_score = adjusted_score
-
-        # Compare with best template (prefer skeleton when scores are tied)
-        if skel_score >= best_score:
-            if skel_score == best_score:
-                yield {
-                    'phase': 'Selection',
-                    'step': f'Skeleton ({skel_score:.3f}) ties template {best_variant} ({best_score:.3f}) - preferring skeleton',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': skel_score
-                }
-            else:
-                yield {
-                    'phase': 'Selection',
-                    'step': f'Skeleton ({skel_score:.3f}) beats template {best_variant} ({best_score:.3f})',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': skel_score
-                }
-            best_score = skel_score
-            best_strokes = skel_result.strokes
-            best_variant = 'skeleton'
-        else:
-            yield {
-                'phase': 'Selection',
-                'step': f'Template {best_variant} ({best_score:.3f}) beats skeleton ({skel_score:.3f})',
-                'strokes': best_strokes or [],
-                'markers': [],
-                'score': best_score
-            }
-
-    # If no variants existed, skeleton is the only option
-    elif not variants:
-        # Get raw skeleton strokes as fallback
-        raw_skel = skel_strokes(mask, min_len=5)
-        if raw_skel:
-            score = quick_stroke_score(raw_skel, mask)
-            yield {
-                'phase': 'Skeleton Method',
-                'step': f'Using raw skeleton: {len(raw_skel)} strokes, score = {score:.3f}',
-                'strokes': raw_skel,
-                'markers': [],
-                'score': score
-            }
-            best_strokes = raw_skel
-            best_score = score
-            best_variant = 'skeleton'
+    try:
+        while True:
+            frame = next(skel_gen)
+            yield frame
+    except StopIteration as e:
+        best_strokes, best_score, best_variant = e.value
 
     # Final result
     yield {

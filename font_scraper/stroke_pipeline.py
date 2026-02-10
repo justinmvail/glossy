@@ -414,6 +414,33 @@ class MinimalStrokePipeline:
         return self._resolve_terminal(wp.region, template_pos, next_direction,
                                       mid_x, top_bound, bot_bound)
 
+    def _find_extremum_by_direction(self, pixels: list, direction: str | None,
+                                     template_pos: tuple[float, float]) -> tuple | None:
+        """Find extremum point from pixel list based on direction.
+
+        Args:
+            pixels: List of (x, y) pixel positions.
+            direction: Direction hint ('up', 'down', 'left', 'right', or None).
+            template_pos: Template position for nearest-point fallback.
+
+        Returns:
+            The extremum pixel or None if no pixels.
+        """
+        if not pixels:
+            return None
+
+        if direction == 'down':
+            return min(pixels, key=lambda p: p[1])
+        elif direction == 'up':
+            return max(pixels, key=lambda p: p[1])
+        elif direction == 'left':
+            return max(pixels, key=lambda p: p[0])
+        elif direction == 'right':
+            return min(pixels, key=lambda p: p[0])
+        else:
+            return min(pixels, key=lambda p:
+                      (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
     def _resolve_terminal(self, region: int, template_pos: tuple[float, float],
                           next_direction: str | None, mid_x: float,
                           top_bound: float, bot_bound: float) -> ResolvedWaypoint:
@@ -434,19 +461,14 @@ class MinimalStrokePipeline:
 
         Returns:
             ResolvedWaypoint with the computed position.
-
-        Note:
-            For corner regions (7, 9, 1, 3), the algorithm prefers skeleton
-            endpoints and uses the next_direction to select appropriate
-            extremum points for stroke ordering.
         """
         analysis = self.analysis
         bbox = analysis.bbox
         skel_list = analysis.skel_list
         info = analysis.info
 
+        # Get pixels in region, with fallback to Y-band
         region_pixels = [p for p in skel_list if self._point_in_region(p, region, bbox)]
-
         if not region_pixels:
             if template_pos[1] < top_bound:
                 region_pixels = [p for p in skel_list if p[1] < top_bound]
@@ -459,56 +481,34 @@ class MinimalStrokePipeline:
             pos = self.find_nearest_skeleton(template_pos)
             return ResolvedWaypoint(position=(float(pos[0]), float(pos[1])), region=region)
 
-        extremum = None
         is_corner = region in [7, 9, 1, 3]
+        extremum = None
 
-        # For corner regions, prefer endpoints based on direction
-        # (start from the extremum in the opposite direction to trace toward)
+        # For corners, prefer endpoints by direction
         if is_corner:
-            endpoints_in_region = [ep for ep in info['endpoints'] if self._point_in_region(ep, region, bbox)]
-            if endpoints_in_region:
-                if next_direction == 'down':
-                    # Going down: start from topmost endpoint
-                    extremum = min(endpoints_in_region, key=lambda p: p[1])
-                elif next_direction == 'up':
-                    # Going up: start from bottommost endpoint
-                    extremum = max(endpoints_in_region, key=lambda p: p[1])
-                elif next_direction == 'left':
-                    # Going left: start from rightmost endpoint
-                    extremum = max(endpoints_in_region, key=lambda p: p[0])
-                elif next_direction == 'right':
-                    # Going right: start from leftmost endpoint
-                    extremum = min(endpoints_in_region, key=lambda p: p[0])
-                else:
-                    # No direction: find endpoint closest to template position
-                    extremum = min(endpoints_in_region, key=lambda p:
-                                  (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+            endpoints_in_region = [ep for ep in info['endpoints']
+                                   if self._point_in_region(ep, region, bbox)]
+            extremum = self._find_extremum_by_direction(endpoints_in_region, next_direction, template_pos)
 
-        # For non-corner regions with direction, prefer junctions connecting to
-        # segments going in that direction
-        if extremum is None and next_direction in ('down', 'up', 'left', 'right') and not is_corner:
+        # For non-corners, try junction-based direction
+        if extremum is None and next_direction and not is_corner:
             extremum = self._find_junction_for_direction(
-                region_pixels, next_direction, template_pos, region, bbox
-            )
+                region_pixels, next_direction, template_pos, region, bbox)
 
-        # Fallback to direction-based extremum
+        # Fallback: direction-based extremum from region pixels
         if extremum is None:
-            if next_direction == 'down':
-                extremum = min(region_pixels, key=lambda p: p[1])
-            elif next_direction == 'up':
-                extremum = max(region_pixels, key=lambda p: p[1])
-            elif next_direction == 'left':
-                extremum = max(region_pixels, key=lambda p: p[0])
-            elif next_direction == 'right':
-                extremum = min(region_pixels, key=lambda p: p[0])
-            elif info['endpoints']:
-                endpoints_in_region = [ep for ep in info['endpoints'] if self._point_in_region(ep, region, bbox)]
-                if endpoints_in_region:
-                    extremum = min(endpoints_in_region, key=lambda p:
-                                  (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+            extremum = self._find_extremum_by_direction(region_pixels, next_direction, template_pos)
 
+        # If still None, try nearest endpoint
+        if extremum is None and info['endpoints']:
+            endpoints_in_region = [ep for ep in info['endpoints']
+                                   if self._point_in_region(ep, region, bbox)]
+            if endpoints_in_region:
+                extremum = min(endpoints_in_region, key=lambda p:
+                              (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
+        # Final fallback based on region position
         if extremum is None:
-            is_corner = region in [7, 9, 1, 3]
             if is_corner:
                 extremum = min(region_pixels, key=lambda p:
                               abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1]))
