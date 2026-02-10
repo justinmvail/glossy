@@ -72,6 +72,24 @@ from stroke_dataclasses import (
 from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
 
 
+def extract_region_from_waypoint(wp) -> int | None:
+    """Extract the region number from a waypoint definition.
+
+    Waypoints can be specified as plain integers, tuples like (region, modifier),
+    or other formats. This function extracts just the region number.
+
+    Args:
+        wp: Waypoint definition - can be int, tuple with int first element,
+            or other format.
+
+    Returns:
+        The region number (1-9) if extractable, None otherwise.
+    """
+    if isinstance(wp, tuple):
+        return wp[0] if isinstance(wp[0], int) else None
+    return wp if isinstance(wp, int) else None
+
+
 class MinimalStrokePipeline:
     """Pipeline for generating minimal strokes from skeleton analysis.
 
@@ -786,12 +804,8 @@ class MinimalStrokePipeline:
         if len(stroke_template) != 2:
             return False
 
-        def extract_region(wp):
-            if isinstance(wp, tuple):
-                return wp[0] if isinstance(wp[0], int) else None
-            return wp if isinstance(wp, int) else None
-
-        r1, r2 = extract_region(stroke_template[0]), extract_region(stroke_template[1])
+        r1 = extract_region_from_waypoint(stroke_template[0])
+        r2 = extract_region_from_waypoint(stroke_template[1])
         if r1 is None or r2 is None:
             return False
 
@@ -813,12 +827,8 @@ class MinimalStrokePipeline:
             List of [x, y] coordinate pairs forming the stroke path. Returns
             a simple two-point line if tracing fails.
         """
-        def extract_region(wp):
-            if isinstance(wp, tuple):
-                return wp[0] if isinstance(wp[0], int) else None
-            return wp if isinstance(wp, int) else None
-
-        r1, r2 = extract_region(stroke_template[0]), extract_region(stroke_template[1])
+        r1 = extract_region_from_waypoint(stroke_template[0])
+        r2 = extract_region_from_waypoint(stroke_template[1])
         p1, p2 = self.numpad_to_pixel(r1), self.numpad_to_pixel(r2)
         seg = self.find_best_vertical_segment(p1, p2)
         start_pt = (int(round(seg[0][0])), int(round(seg[0][1]))) if seg else self.find_nearest_skeleton(p1)

@@ -76,20 +76,22 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 2. Critical Code Duplication
 
-- [ ] **stroke_rendering.py:64-78 & 123-138** - Font scaling logic duplicated
-  - Create `_scale_font_to_fit(pil_font, char, canvas_size)` helper
+- [x] **stroke_rendering.py:64-78 & 123-138** - Font scaling logic duplicated
+  - ✅ Created `_scale_font_to_fit()` helper with CANVAS_FILL_THRESHOLD constant
 
-- [ ] **stroke_rendering.py:83-87, 143-147, 210-217** - Image centering logic 3x
-  - Create `_compute_centered_position(bbox, canvas_size)` helper
+- [x] **stroke_rendering.py:83-87, 143-147, 210-217** - Image centering logic 3x
+  - ✅ Created `_compute_centered_position(bbox, canvas_size)` helper
 
-- [ ] **stroke_routes_core.py:460-522 & 526-582** - Quality check logic duplicated
-  - Extract `_check_font_quality(pil_font)` shared function
+- [x] **stroke_routes_core.py:460-522 & 526-582** - Quality check logic duplicated
+  - ✅ Extracted `_check_font_quality(pil_font, font_path)` shared function
+  - ✅ Added constants: MIN_SHAPE_COUNT, MAX_SHAPE_COUNT, MAX_WIDTH_RATIO
 
-- [ ] **stroke_pipeline.py:789-792 & 816-819** - `extract_region()` defined twice
-  - Move to module level or class method
+- [x] **stroke_pipeline.py:789-792 & 816-819** - `extract_region()` defined twice
+  - ✅ Moved to module level as `extract_region_from_waypoint()`
 
-- [ ] **stroke_merge.py:469-742** - Four stub absorption functions with similar patterns
-  - Create generic `_absorb_stubs_generic()` with strategy pattern
+- [x] **stroke_merge.py:469-742** - Four stub absorption functions with similar patterns
+  - ✅ Reviewed: Functions have different core logic (extend/merge/remove)
+  - Kept separate for clarity - consolidating would reduce readability
 
 - [x] **stroke_scoring.py:134 & 228** - `FREE_OVERLAP = 0.25` defined twice
   - ✅ Moved to module-level constant with other scoring constants
@@ -350,6 +352,11 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_pipeline.py: Extracted 2 methods for _trace_resolved_waypoints
   - stroke_pipeline_stream.py: Extracted 2 helpers for _stream_skeleton_evaluation
 - [x] Fixed duplicate FREE_OVERLAP constant in stroke_scoring.py
+- [x] Code duplication fixes (2026-02-10)
+  - stroke_rendering.py: Extracted _scale_font_to_fit(), _compute_centered_position()
+  - stroke_routes_core.py: Extracted _check_font_quality() with quality constants
+  - stroke_pipeline.py: Moved extract_region() to module level
+  - stroke_merge.py stub functions: Reviewed, kept separate for clarity
 
 ### In Progress
 - [ ] None currently

@@ -29,6 +29,68 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
 
+# Constants for rendering
+CANVAS_FILL_THRESHOLD = 0.9  # Max fraction of canvas a glyph can fill
+BINARIZATION_THRESHOLD = 128  # Grayscale threshold for mask generation
+
+
+def _scale_font_to_fit(font_path: str, pil_font, char: str,
+                       canvas_size: int, threshold: float = CANVAS_FILL_THRESHOLD):
+    """Scale a font to fit within the canvas bounds.
+
+    Args:
+        font_path: Path to the font file.
+        pil_font: Currently loaded PIL font object.
+        char: Character to measure.
+        canvas_size: Target canvas size in pixels.
+        threshold: Maximum fraction of canvas the glyph can fill.
+
+    Returns:
+        Tuple of (scaled_font, bbox) where scaled_font may be the same as
+        pil_font if no scaling was needed. Returns (None, None) on error.
+    """
+    bbox = pil_font.getbbox(char)
+    if not bbox:
+        return pil_font, bbox
+
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    max_dim = canvas_size * threshold
+
+    if w <= max_dim and h <= max_dim:
+        return pil_font, bbox
+
+    # Need to scale down
+    scale = min(max_dim / w, max_dim / h)
+    current_size = pil_font.size
+    new_size = int(current_size * scale)
+
+    try:
+        scaled_font = ImageFont.truetype(font_path, new_size)
+        new_bbox = scaled_font.getbbox(char)
+        return scaled_font, new_bbox
+    except OSError:
+        return None, None
+
+
+def _compute_centered_position(bbox: tuple, canvas_size: int) -> tuple[int, int]:
+    """Compute the position to center a bounding box in a canvas.
+
+    Args:
+        bbox: Bounding box as (x0, y0, x1, y1) from font.getbbox().
+        canvas_size: Width/height of the square canvas.
+
+    Returns:
+        Tuple of (x, y) offset for draw.text() to center the glyph.
+    """
+    if not bbox:
+        return 0, 0
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    x = (canvas_size - w) // 2 - bbox[0]
+    y = (canvas_size - h) // 2 - bbox[1]
+    return x, y
+
 
 def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=DEFAULT_CANVAS_SIZE):
     """Render a character to a centered grayscale PNG image.
@@ -60,33 +122,16 @@ def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=
     except OSError:
         return None
 
-    # Get bbox and scale if needed
-    bbox = pil_font.getbbox(char)
-    if bbox:
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        if w > canvas_size * 0.9 or h > canvas_size * 0.9:
-            scale = min(canvas_size * 0.9 / w, canvas_size * 0.9 / h)
-            font_size = int(font_size * scale)
-            try:
-                pil_font = ImageFont.truetype(font_path, font_size)
-            except OSError:
-                return None
-            bbox = pil_font.getbbox(char)
-            if bbox:
-                w = bbox[2] - bbox[0]
-                h = bbox[3] - bbox[1]
+    # Scale font to fit and get centered position
+    pil_font, bbox = _scale_font_to_fit(font_path, pil_font, char, canvas_size)
+    if pil_font is None:
+        return None
 
     img = Image.new('L', (canvas_size, canvas_size), 255)
     draw = ImageDraw.Draw(img)
-
-    if bbox:
-        x = (canvas_size - w) // 2 - bbox[0]
-        y = (canvas_size - h) // 2 - bbox[1]
-    else:
-        x, y = 0, 0
-
+    x, y = _compute_centered_position(bbox, canvas_size)
     draw.text((x, y), char, fill=0, font=pil_font)
+
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     return buf.getvalue()
@@ -120,34 +165,17 @@ def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
     except OSError:
         return None
 
-    bbox = pil_font.getbbox(char)
-    font_size = 200
-    if bbox:
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        if w > canvas_size * 0.9 or h > canvas_size * 0.9:
-            scale = min(canvas_size * 0.9 / w, canvas_size * 0.9 / h)
-            font_size = int(font_size * scale)
-            try:
-                pil_font = ImageFont.truetype(font_path, font_size)
-            except OSError:
-                return None
-            bbox = pil_font.getbbox(char)
-            if bbox:
-                w = bbox[2] - bbox[0]
-                h = bbox[3] - bbox[1]
+    # Scale font to fit and get centered position
+    pil_font, bbox = _scale_font_to_fit(font_path, pil_font, char, canvas_size)
+    if pil_font is None:
+        return None
 
     img = Image.new('L', (canvas_size, canvas_size), 255)
     draw = ImageDraw.Draw(img)
-
-    if bbox:
-        x = (canvas_size - w) // 2 - bbox[0]
-        y = (canvas_size - h) // 2 - bbox[1]
-    else:
-        x, y = 0, 0
-
+    x, y = _compute_centered_position(bbox, canvas_size)
     draw.text((x, y), char, fill=0, font=pil_font)
-    return np.array(img) < 128
+
+    return np.array(img) < BINARIZATION_THRESHOLD
 
 
 def check_case_mismatch(font_path, threshold=0.80):

@@ -88,6 +88,45 @@ from stroke_rendering import (
 # Alias for backward compatibility
 _font = get_font
 
+# Quality check thresholds
+MIN_SHAPE_COUNT = 10
+MAX_SHAPE_COUNT = 15
+MAX_WIDTH_RATIO = 0.225
+EXPECTED_EXCLAMATION_SHAPES = 2
+
+
+def _check_font_quality(pil_font, font_path: str) -> tuple[bool, int, float, list]:
+    """Check font quality based on standard criteria.
+
+    Args:
+        pil_font: Loaded PIL ImageFont object.
+        font_path: Path to the font file (for case mismatch check).
+
+    Returns:
+        Tuple of (is_bad, shape_count, max_width, case_mismatches) where:
+            - is_bad: True if font fails quality checks
+            - shape_count: Number of shapes in "Hello World" rendering
+            - max_width: Maximum width ratio from analysis
+            - case_mismatches: List of case mismatch issues
+    """
+    arr = render_text_for_analysis(pil_font, "Hello World")
+    if arr is None:
+        return True, 0, 0, []
+
+    shape_count, max_width = analyze_shape_metrics(arr, arr.shape[1])
+    case_mismatches = check_case_mismatch(font_path)
+
+    is_bad = (
+        shape_count < MIN_SHAPE_COUNT or
+        shape_count > MAX_SHAPE_COUNT or
+        max_width > MAX_WIDTH_RATIO or
+        check_char_holes(pil_font, 'l') or
+        not check_char_shape_count(pil_font, '!', EXPECTED_EXCLAMATION_SHAPES) or
+        bool(case_mismatches)
+    )
+
+    return is_bad, int(shape_count), max_width, case_mismatches
+
 
 @app.route('/')
 def font_list():
@@ -512,12 +551,10 @@ def api_check_connected(fid):
     fp = resolve_font_path(f['file_path'])
     try:
         pf = ImageFont.truetype(fp, 60)
-        arr = render_text_for_analysis(pf, "Hello World")
-        if arr is None:
+        is_bad, shape_count, _max_width, case_mismatches = _check_font_quality(pf, fp)
+        if shape_count == 0:
             return jsonify(error="Could not render"), 500
-        ns, mw = analyze_shape_metrics(arr, arr.shape[1])
-        bad = ns < 10 or ns > 15 or mw > 0.225 or check_char_holes(pf, 'l') or not check_char_shape_count(pf, '!', 2)
-        return jsonify(shapes=int(ns), bad=bool(bad), case_mismatches=check_case_mismatch(fp))
+        return jsonify(shapes=shape_count, bad=is_bad, case_mismatches=case_mismatches)
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -566,14 +603,15 @@ def api_reject_connected():
     rej, chk = 0, 0
     for f in fonts:
         try:
-            pf = ImageFont.truetype(resolve_font_path(f['file_path']), 60)
-            arr = render_text_for_analysis(pf, "Hello World")
-            if arr is None:
+            fp = resolve_font_path(f['file_path'])
+            pf = ImageFont.truetype(fp, 60)
+            is_bad, shape_count, _max_width, _case_mismatches = _check_font_quality(pf, fp)
+            if shape_count == 0:
                 continue
-            ns, mw = analyze_shape_metrics(arr, arr.shape[1])
             chk += 1
-            if ns < 10 or ns > 15 or mw > 0.225 or check_char_holes(pf, 'l') or not check_char_shape_count(pf, '!', 2) or check_case_mismatch(resolve_font_path(f['file_path'])):
-                db.execute("INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)", (f['id'], f'{ns} shapes'))
+            if is_bad:
+                db.execute("INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)",
+                           (f['id'], f'{shape_count} shapes'))
                 rej += 1
         except (OSError, ValueError, MemoryError):
             continue
