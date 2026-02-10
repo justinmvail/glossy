@@ -42,6 +42,129 @@ from stroke_shapes import (
     param_vector_to_shapes as _param_vector_to_shapes,
 )
 
+# Module-level constants for scoring
+FREE_OVERLAP = 0.25       # Fraction of overlap allowed before penalty
+SNAP_PENALTY_WEIGHT = 0.5  # Weight for off-mask penalty
+EDGE_PENALTY_WEIGHT = 0.1  # Weight for near-edge penalty
+OVERLAP_PENALTY_WEIGHT = 0.5  # Weight for overlap penalty
+EDGE_THRESHOLD = 1.5      # Distance threshold for "near edge"
+SNAP_THRESHOLD = 0.5      # Distance threshold for "off mask"
+
+
+def _snap_points_to_mask(all_pts: np.ndarray, snap_xi: np.ndarray,
+                          snap_yi: np.ndarray, w: int, h: int) -> np.ndarray:
+    """Snap stroke points to nearest mask pixels.
+
+    Args:
+        all_pts: Nx2 array of (x, y) stroke point coordinates.
+        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
+        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+
+    Returns:
+        Nx2 array of snapped (x, y) coordinates.
+    """
+    xi = np.clip(np.round(all_pts[:, 0]).astype(int), 0, w - 1)
+    yi = np.clip(np.round(all_pts[:, 1]).astype(int), 0, h - 1)
+    snapped_x = snap_xi[yi, xi].astype(float)
+    snapped_y = snap_yi[yi, xi].astype(float)
+    return np.column_stack([snapped_x, snapped_y])
+
+
+def _compute_snap_penalty(all_pts: np.ndarray, snapped: np.ndarray) -> float:
+    """Compute penalty for stroke points that fall outside the mask.
+
+    Args:
+        all_pts: Original Nx2 array of stroke points.
+        snapped: Snapped Nx2 array of stroke points.
+
+    Returns:
+        Weighted penalty based on fraction of points off mask.
+    """
+    snap_dist = np.sqrt((all_pts[:, 0] - snapped[:, 0]) ** 2 +
+                        (all_pts[:, 1] - snapped[:, 1]) ** 2)
+    off_mask = float(np.mean(snap_dist > SNAP_THRESHOLD))
+    return SNAP_PENALTY_WEIGHT * off_mask
+
+
+def _compute_edge_penalty(snapped: np.ndarray, dist_map: np.ndarray,
+                          w: int, h: int) -> float:
+    """Compute penalty for stroke points near the glyph edge.
+
+    Args:
+        snapped: Nx2 array of snapped stroke point coordinates.
+        dist_map: Distance transform of the mask.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+
+    Returns:
+        Weighted penalty based on fraction of points near edge.
+    """
+    if dist_map is None:
+        return 0.0
+    sxi = np.clip(np.round(snapped[:, 0]).astype(int), 0, w - 1)
+    syi = np.clip(np.round(snapped[:, 1]).astype(int), 0, h - 1)
+    dt_vals = dist_map[syi, sxi]
+    near_edge = float(np.mean(dt_vals < EDGE_THRESHOLD))
+    return EDGE_PENALTY_WEIGHT * near_edge
+
+
+def _compute_per_shape_coverage(all_shapes: list[np.ndarray], snapped: np.ndarray,
+                                 cloud_tree: cKDTree, radius: float) -> list[set]:
+    """Compute coverage sets for each shape.
+
+    Args:
+        all_shapes: List of Nx2 arrays, one per shape.
+        snapped: All snapped points concatenated.
+        cloud_tree: KD-tree of target point cloud.
+        radius: Coverage radius.
+
+    Returns:
+        List of sets, each containing indices of cloud points covered by that shape.
+    """
+    per_shape = []
+    offset = 0
+    for shape_pts in all_shapes:
+        n = len(shape_pts)
+        shape_snapped = snapped[offset:offset + n]
+        offset += n
+        hits = cloud_tree.query_ball_point(shape_snapped, radius)
+        sc = set()
+        for lst in hits:
+            sc.update(lst)
+        per_shape.append(sc)
+    return per_shape
+
+
+def _compute_overlap_penalty(per_shape: list[set]) -> float:
+    """Compute penalty for excessive overlap between shapes.
+
+    Args:
+        per_shape: List of coverage sets, one per shape.
+
+    Returns:
+        Weighted penalty based on overlap exceeding FREE_OVERLAP threshold.
+    """
+    n_shapes = len(per_shape)
+    if n_shapes <= 1:
+        return 0.0
+
+    overlap_excess = 0.0
+    for i in range(n_shapes):
+        if not per_shape[i]:
+            continue
+        others = set()
+        for j in range(n_shapes):
+            if j != i:
+                others |= per_shape[j]
+        frac = len(per_shape[i] & others) / len(per_shape[i])
+        if frac > FREE_OVERLAP:
+            overlap_excess += (frac - FREE_OVERLAP)
+    overlap_excess /= n_shapes
+
+    return OVERLAP_PENALTY_WEIGHT * overlap_excess
+
 
 def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
                       slices: list[tuple[int, int]], bbox: tuple,
@@ -92,62 +215,18 @@ def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
     if len(all_pts) == 0:
         return 0.0
 
-    # Snap all stroke points to nearest mask pixel
-    xi = np.clip(np.round(all_pts[:, 0]).astype(int), 0, w - 1)
-    yi = np.clip(np.round(all_pts[:, 1]).astype(int), 0, h - 1)
-    snapped_x = snap_xi[yi, xi].astype(float)
-    snapped_y = snap_yi[yi, xi].astype(float)
-    snapped = np.column_stack([snapped_x, snapped_y])
+    # Snap points and compute penalties
+    snapped = _snap_points_to_mask(all_pts, snap_xi, snap_yi, w, h)
+    snap_penalty = _compute_snap_penalty(all_pts, snapped)
+    edge_penalty = _compute_edge_penalty(snapped, dist_map, w, h)
 
-    # White-space penalty: fraction of stroke points that lie outside the mask.
-    snap_dist = np.sqrt((all_pts[:, 0] - snapped_x) ** 2 +
-                        (all_pts[:, 1] - snapped_y) ** 2)
-    off_mask = float(np.mean(snap_dist > 0.5))
-    snap_penalty = 0.5 * off_mask
-
-    # Edge penalty: penalise stroke points near the glyph boundary.
-    edge_penalty = 0.0
-    if dist_map is not None:
-        sxi = np.clip(np.round(snapped_x).astype(int), 0, w - 1)
-        syi = np.clip(np.round(snapped_y).astype(int), 0, h - 1)
-        dt_vals = dist_map[syi, sxi]
-        near_edge = float(np.mean(dt_vals < 1.5))
-        edge_penalty = 0.1 * near_edge
-
-    # Per-shape coverage sets
-    per_shape = []
-    offset = 0
-    for i in range(len(shape_types)):
-        n = len(all_shapes[i])
-        shape_snapped = snapped[offset:offset + n]
-        offset += n
-        hits = cloud_tree.query_ball_point(shape_snapped, radius)
-        sc = set()
-        for lst in hits:
-            sc.update(lst)
-        per_shape.append(sc)
-
+    # Compute per-shape coverage
+    per_shape = _compute_per_shape_coverage(all_shapes, snapped, cloud_tree, radius)
     covered_all = set().union(*per_shape) if per_shape else set()
     coverage = len(covered_all) / n_cloud
 
-    # Overlap penalty
-    FREE_OVERLAP = 0.25
-    overlap_excess = 0.0
-    n_shapes = len(per_shape)
-    if n_shapes > 1:
-        for i in range(n_shapes):
-            if not per_shape[i]:
-                continue
-            others = set()
-            for j in range(n_shapes):
-                if j != i:
-                    others |= per_shape[j]
-            frac = len(per_shape[i] & others) / len(per_shape[i])
-            if frac > FREE_OVERLAP:
-                overlap_excess += (frac - FREE_OVERLAP)
-        overlap_excess /= n_shapes
-
-    overlap_penalty = 0.5 * overlap_excess
+    # Compute overlap penalty
+    overlap_penalty = _compute_overlap_penalty(per_shape)
 
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
 
@@ -192,56 +271,20 @@ def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
         return 0.0
 
     all_pts = np.concatenate(processed, axis=0)
-    xi = np.clip(np.round(all_pts[:, 0]).astype(int), 0, w - 1)
-    yi = np.clip(np.round(all_pts[:, 1]).astype(int), 0, h - 1)
-    snapped_x = snap_xi[yi, xi].astype(float)
-    snapped_y = snap_yi[yi, xi].astype(float)
-    snapped = np.column_stack([snapped_x, snapped_y])
 
-    snap_dist = np.sqrt((all_pts[:, 0] - snapped_x) ** 2 +
-                        (all_pts[:, 1] - snapped_y) ** 2)
-    off_mask = float(np.mean(snap_dist > 0.5))
-    snap_penalty = 0.5 * off_mask
+    # Snap points and compute penalties using shared helpers
+    snapped = _snap_points_to_mask(all_pts, snap_xi, snap_yi, w, h)
+    snap_penalty = _compute_snap_penalty(all_pts, snapped)
+    edge_penalty = _compute_edge_penalty(snapped, dist_map, w, h)
 
-    edge_penalty = 0.0
-    if dist_map is not None:
-        sxi = np.clip(np.round(snapped_x).astype(int), 0, w - 1)
-        syi = np.clip(np.round(snapped_y).astype(int), 0, h - 1)
-        near_edge = float(np.mean(dist_map[syi, sxi] < 1.5))
-        edge_penalty = 0.1 * near_edge
-
-    per_shape = []
-    offset = 0
-    for arr in processed:
-        n = len(arr)
-        shape_snapped = snapped[offset:offset + n]
-        offset += n
-        hits = cloud_tree.query_ball_point(shape_snapped, radius)
-        sc = set()
-        for lst in hits:
-            sc.update(lst)
-        per_shape.append(sc)
-
+    # Compute per-shape coverage
+    per_shape = _compute_per_shape_coverage(processed, snapped, cloud_tree, radius)
     covered_all = set().union(*per_shape) if per_shape else set()
     coverage = len(covered_all) / n_cloud
 
-    FREE_OVERLAP = 0.25
-    overlap_excess = 0.0
-    n_shapes = len(per_shape)
-    if n_shapes > 1:
-        for i in range(n_shapes):
-            if not per_shape[i]:
-                continue
-            others = set()
-            for j in range(n_shapes):
-                if j != i:
-                    others |= per_shape[j]
-            frac = len(per_shape[i] & others) / len(per_shape[i])
-            if frac > FREE_OVERLAP:
-                overlap_excess += (frac - FREE_OVERLAP)
-        overlap_excess /= n_shapes
+    # Compute overlap penalty
+    overlap_penalty = _compute_overlap_penalty(per_shape)
 
-    overlap_penalty = 0.5 * overlap_excess
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
 
 

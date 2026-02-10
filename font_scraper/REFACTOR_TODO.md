@@ -2,7 +2,7 @@
 
 This document tracks code quality issues identified through a comprehensive review of the glossy/font_scraper codebase. Issues are prioritized and will be checked off as they are fixed.
 
-**Last Updated**: 2026-02-10
+**Last Updated**: 2026-02-10 (Long function refactoring completed)
 **Review Scope**: All stroke_*.py files, stroke_lib package, Flask routes
 
 ---
@@ -36,36 +36,43 @@ This document tracks code quality issues identified through a comprehensive revi
   - Already has helpers but main function still too long
   - Extract initialization and finalization phases
 
-- [ ] **stroke_pipeline_stream.py:201** - `_stream_skeleton_evaluation()` - 109 lines
-  - Split penalty calculation and comparison logic
+- [x] **stroke_pipeline_stream.py:201** - `_stream_skeleton_evaluation()` - 109 lines
+  - ✅ Extracted `_apply_stroke_count_penalty()` and `_make_selection_frame()` helpers
 
-- [ ] **stroke_skeleton.py:168** - `find_skeleton_segments()` - 106 lines
-  - Extract segment tracing and classification
+- [x] **stroke_skeleton.py:168** - `find_skeleton_segments()` - 106 lines
+  - ✅ Extracted `_build_pixel_to_junction_map()`, `_collect_segment_start_points()`,
+    `_trace_segment_from_start()`, `_create_segment_dict()` helpers
 
-- [ ] **stroke_scoring.py:46** - `score_all_strokes()` - 107 lines
-  - Extract penalty calculations into separate functions
+- [x] **stroke_scoring.py:46** - `score_all_strokes()` - 107 lines
+  - ✅ Extracted `_snap_points_to_mask()`, `_compute_snap_penalty()`, `_compute_edge_penalty()`,
+    `_compute_per_shape_coverage()`, `_compute_overlap_penalty()` helpers
+  - ✅ Added module-level constants (FREE_OVERLAP, penalty weights, thresholds)
 
-- [ ] **stroke_lib/analysis/segments.py:105** - `find_best_vertical_chain()` - 105 lines
-  - Extract graph building, BFS, and scoring phases
+- [x] **stroke_lib/analysis/segments.py:105** - `find_best_vertical_chain()` - 105 lines
+  - ✅ Extracted `_build_junction_connectivity()`, `_find_connected_chains()`,
+    `_score_chain()` methods
 
-- [ ] **stroke_utils.py:322** - `build_guide_path()` - 100 lines
-  - Extract nested functions to module level
-  - Split waypoint processing from path building
+- [x] **stroke_utils.py:322** - `build_guide_path()` - 100 lines
+  - ✅ Extracted `_snap_to_skeleton_region()`, `_resolve_waypoint_position()`,
+    `_constrain_points_to_mask()` helpers
 
-- [ ] **stroke_merge.py:164** - `run_merge_pass()` - 96 lines
-  - Extract merge candidate selection logic
+- [x] **stroke_merge.py:164** - `run_merge_pass()` - 96 lines
+  - ✅ Extracted `_build_cluster_endpoint_map()`, `_is_loop_stroke()`,
+    `_find_best_merge_pair()`, `_execute_merge()` helpers
 
-- [ ] **stroke_pipeline.py:834** - `_trace_resolved_waypoints()` - 95 lines
-  - Split arrival branch management and apex extension
+- [x] **stroke_pipeline.py:834** - `_trace_resolved_waypoints()` - 95 lines
+  - ✅ Extracted `_trace_single_segment()`, `_apply_apex_extensions()` methods
 
-- [ ] **stroke_merge.py:262** - `merge_t_junctions()` - 94 lines
-  - Extract junction detection and merge execution
+- [x] **stroke_merge.py:262** - `merge_t_junctions()` - 94 lines
+  - ✅ Extracted `_find_t_junction_candidate()`, `_remove_short_cross_strokes()` helpers
+  - ✅ Reuses `_build_cluster_endpoint_map()` and `_execute_merge()`
 
 - [ ] **stroke_skeleton.py:306** - `trace_skeleton_path()` - 93 lines
   - Extract neighbor scoring logic
 
-- [ ] **stroke_dataclasses.py:191** - `parse_stroke_template()` - 91 lines
-  - Extract regex parsing and waypoint construction
+- [x] **stroke_dataclasses.py:191** - `parse_stroke_template()` - 91 lines
+  - ✅ Extracted `_apply_hint_to_config()`, `_parse_waypoint_item()` helpers
+  - ✅ Pre-compiled regex patterns as module constants
 
 ### 2. Critical Code Duplication
 
@@ -84,8 +91,8 @@ This document tracks code quality issues identified through a comprehensive revi
 - [ ] **stroke_merge.py:469-742** - Four stub absorption functions with similar patterns
   - Create generic `_absorb_stubs_generic()` with strategy pattern
 
-- [ ] **stroke_scoring.py:134 & 228** - `FREE_OVERLAP = 0.25` defined twice
-  - Move to module-level constant
+- [x] **stroke_scoring.py:134 & 228** - `FREE_OVERLAP = 0.25` defined twice
+  - ✅ Moved to module-level constant with other scoring constants
 
 ### 3. Missing Error Handling
 
@@ -333,6 +340,16 @@ This document tracks code quality issues identified through a comprehensive revi
 ### Completed
 - [x] Initial code review (2026-02-10)
 - [x] Created this tracking document
+- [x] Long function refactoring (2026-02-10)
+  - stroke_scoring.py: Extracted 5 helpers, added module constants
+  - stroke_skeleton.py: Extracted 4 helpers for find_skeleton_segments
+  - stroke_utils.py: Extracted 3 helpers for build_guide_path
+  - stroke_merge.py: Extracted 6 helpers for run_merge_pass and merge_t_junctions
+  - stroke_dataclasses.py: Extracted 2 helpers, pre-compiled regex patterns
+  - stroke_lib/analysis/segments.py: Extracted 3 methods for find_best_vertical_chain
+  - stroke_pipeline.py: Extracted 2 methods for _trace_resolved_waypoints
+  - stroke_pipeline_stream.py: Extracted 2 helpers for _stream_skeleton_evaluation
+- [x] Fixed duplicate FREE_OVERLAP constant in stroke_scoring.py
 
 ### In Progress
 - [ ] None currently

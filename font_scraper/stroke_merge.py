@@ -161,6 +161,117 @@ def endpoint_cluster(stroke: list[tuple], from_end: bool, assigned: list[set]) -
     return -1
 
 
+def _build_cluster_endpoint_map(strokes: list[list[tuple]],
+                                 assigned: list[set]) -> dict[int, list[tuple]]:
+    """Build a mapping from cluster indices to stroke endpoints.
+
+    Args:
+        strokes: List of stroke paths.
+        assigned: List of junction cluster sets.
+
+    Returns:
+        Dict mapping cluster index to list of (stroke_index, 'start'/'end') tuples.
+    """
+    cluster_map = defaultdict(list)
+    for si, s in enumerate(strokes):
+        sc = endpoint_cluster(s, False, assigned)
+        if sc >= 0:
+            cluster_map[sc].append((si, 'start'))
+        ec = endpoint_cluster(s, True, assigned)
+        if ec >= 0:
+            cluster_map[ec].append((si, 'end'))
+    return cluster_map
+
+
+def _is_loop_stroke(stroke: list[tuple], assigned: list[set]) -> bool:
+    """Check if a stroke has both endpoints in the same cluster.
+
+    Args:
+        stroke: Stroke path.
+        assigned: List of junction cluster sets.
+
+    Returns:
+        True if both endpoints are in the same cluster.
+    """
+    sc = endpoint_cluster(stroke, False, assigned)
+    ec = endpoint_cluster(stroke, True, assigned)
+    return sc >= 0 and sc == ec
+
+
+def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
+                          assigned: list[set], min_len: int, max_angle: float,
+                          max_ratio: float) -> tuple | None:
+    """Find the best pair of strokes to merge.
+
+    Args:
+        strokes: List of stroke paths.
+        cluster_map: Cluster to endpoints mapping.
+        assigned: List of junction cluster sets.
+        min_len: Minimum stroke length for merging.
+        max_angle: Maximum angle deviation for merging.
+        max_ratio: Maximum length ratio for merging.
+
+    Returns:
+        Tuple (si, side_i, sj, side_j) for best merge, or None if no valid merge.
+    """
+    best_score = float('inf')
+    best_merge = None
+
+    for _cid, entries in cluster_map.items():
+        if len(entries) < 2:
+            continue
+        for ai in range(len(entries)):
+            si, side_i = entries[ai]
+            dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
+
+            for bi in range(ai + 1, len(entries)):
+                sj, side_j = entries[bi]
+                if sj == si:
+                    continue
+
+                # Check length constraints
+                li, lj = len(strokes[si]), len(strokes[sj])
+                if min(li, lj) < min_len:
+                    continue
+                if max_ratio > 0 and max(li, lj) / max(min(li, lj), 1) > max_ratio:
+                    continue
+
+                # Skip loop strokes
+                if _is_loop_stroke(strokes[si], assigned):
+                    continue
+                if _is_loop_stroke(strokes[sj], assigned):
+                    continue
+
+                # Check angle alignment
+                dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
+                angle = np.pi - angle_between(dir_i, dir_j)
+                if angle < max_angle and angle < best_score:
+                    best_score = angle
+                    best_merge = (si, side_i, sj, side_j)
+
+    return best_merge
+
+
+def _execute_merge(strokes: list[list[tuple]], si: int, side_i: str,
+                   sj: int, side_j: str) -> None:
+    """Execute a merge of two strokes.
+
+    Args:
+        strokes: List of stroke paths (modified in place).
+        si: Index of first stroke.
+        side_i: Which end of first stroke ('start' or 'end').
+        sj: Index of second stroke.
+        side_j: Which end of second stroke ('start' or 'end').
+    """
+    seg_i = strokes[si] if side_i == 'end' else list(reversed(strokes[si]))
+    seg_j = strokes[sj] if side_j == 'start' else list(reversed(strokes[sj]))
+    merged_stroke = seg_i + seg_j[1:]
+    hi, lo = max(si, sj), min(si, sj)
+    strokes.pop(hi)
+    strokes.pop(lo)
+    strokes.append(merged_stroke)
+
+
 def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
                    min_len: int = 0, max_angle: float = np.pi/4,
                    max_ratio: float = 0) -> list[list[tuple]]:
@@ -205,58 +316,95 @@ def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
-        cluster_map = defaultdict(list)
-        for si, s in enumerate(strokes):
-            sc = endpoint_cluster(s, False, assigned)
-            if sc >= 0:
-                cluster_map[sc].append((si, 'start'))
-            ec = endpoint_cluster(s, True, assigned)
-            if ec >= 0:
-                cluster_map[ec].append((si, 'end'))
-
-        best_score = float('inf')
-        best_merge = None
-        for _cid, entries in cluster_map.items():
-            if len(entries) < 2:
-                continue
-            for ai in range(len(entries)):
-                si, side_i = entries[ai]
-                dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
-                for bi in range(ai + 1, len(entries)):
-                    sj, side_j = entries[bi]
-                    if sj == si:
-                        continue
-                    li, lj = len(strokes[si]), len(strokes[sj])
-                    if min(li, lj) < min_len:
-                        continue
-                    if max_ratio > 0 and max(li, lj) / max(min(li, lj), 1) > max_ratio:
-                        continue
-                    # Don't merge with a loop stroke
-                    sci = endpoint_cluster(strokes[si], False, assigned)
-                    eci = endpoint_cluster(strokes[si], True, assigned)
-                    scj = endpoint_cluster(strokes[sj], False, assigned)
-                    ecj = endpoint_cluster(strokes[sj], True, assigned)
-                    if sci >= 0 and sci == eci:
-                        continue
-                    if scj >= 0 and scj == ecj:
-                        continue
-                    dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
-                    angle = np.pi - angle_between(dir_i, dir_j)
-                    if angle < max_angle and angle < best_score:
-                        best_score = angle
-                        best_merge = (si, side_i, sj, side_j)
+        cluster_map = _build_cluster_endpoint_map(strokes, assigned)
+        best_merge = _find_best_merge_pair(
+            strokes, cluster_map, assigned, min_len, max_angle, max_ratio
+        )
 
         if best_merge:
             si, side_i, sj, side_j = best_merge
-            seg_i = strokes[si] if side_i == 'end' else list(reversed(strokes[si]))
-            seg_j = strokes[sj] if side_j == 'start' else list(reversed(strokes[sj]))
-            merged_stroke = seg_i + seg_j[1:]
-            hi, lo = max(si, sj), min(si, sj)
-            strokes.pop(hi)
-            strokes.pop(lo)
-            strokes.append(merged_stroke)
+            _execute_merge(strokes, si, side_i, sj, side_j)
             changed = True
+
     return strokes
+
+
+def _find_t_junction_candidate(strokes: list[list[tuple]], cluster_map: dict,
+                                assigned: list[set]) -> tuple | None:
+    """Find a T-junction candidate for merging.
+
+    Args:
+        strokes: List of stroke paths.
+        cluster_map: Cluster to endpoints mapping.
+        assigned: List of junction cluster sets.
+
+    Returns:
+        Tuple (cid, si, side_i, sj, side_j, second_longest_len) if found, else None.
+    """
+    T_JUNCTION_MAX_ANGLE = 2 * np.pi / 3  # 120 degrees
+
+    for cid, entries in cluster_map.items():
+        if len(entries) < 3:
+            continue
+
+        entries_sorted = sorted(entries, key=lambda e: len(strokes[e[0]]), reverse=True)
+        shortest_idx, _shortest_side = entries_sorted[-1]
+        shortest_stroke = strokes[shortest_idx]
+        second_longest_len = len(strokes[entries_sorted[1][0]])
+
+        # Check shortest stroke has valid junctions
+        s_sc = endpoint_cluster(shortest_stroke, False, assigned)
+        s_ec = endpoint_cluster(shortest_stroke, True, assigned)
+        if s_sc < 0 or s_ec < 0:
+            continue
+        if len(shortest_stroke) >= second_longest_len * 0.4:
+            continue
+
+        # Get the two longest strokes
+        si, side_i = entries_sorted[0]
+        sj, side_j = entries_sorted[1]
+        if si == sj:
+            continue
+
+        # Check they don't form a loop
+        far_i = endpoint_cluster(strokes[si], from_end=(side_i != 'end'), assigned=assigned)
+        far_j = endpoint_cluster(strokes[sj], from_end=(side_j != 'end'), assigned=assigned)
+        if far_i >= 0 and far_i == far_j:
+            continue
+
+        # Check angle alignment
+        dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
+        dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
+        angle = np.pi - angle_between(dir_i, dir_j)
+
+        if angle < T_JUNCTION_MAX_ANGLE:
+            return (cid, si, side_i, sj, side_j, second_longest_len)
+
+    return None
+
+
+def _remove_short_cross_strokes(strokes: list[list[tuple]], cid: int,
+                                 threshold_len: float, assigned: list[set]) -> bool:
+    """Remove short cross-strokes at a junction.
+
+    Args:
+        strokes: List of stroke paths (modified in place).
+        cid: Cluster ID to check.
+        threshold_len: Length threshold (40% of second longest).
+        assigned: List of junction cluster sets.
+
+    Returns:
+        True if a stroke was removed.
+    """
+    for sk in range(len(strokes)):
+        s = strokes[sk]
+        s_sc = endpoint_cluster(s, False, assigned)
+        s_ec = endpoint_cluster(s, True, assigned)
+        if s_sc >= 0 and s_ec >= 0 and len(s) < threshold_len:
+            if s_sc == cid or s_ec == cid:
+                strokes.pop(sk)
+                return True
+    return False
 
 
 def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
@@ -295,63 +443,15 @@ def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
     changed = True
     while changed:
         changed = False
-        cluster_map = defaultdict(list)
-        for si, s in enumerate(strokes):
-            sc = endpoint_cluster(s, False, assigned)
-            if sc >= 0:
-                cluster_map[sc].append((si, 'start'))
-            ec = endpoint_cluster(s, True, assigned)
-            if ec >= 0:
-                cluster_map[ec].append((si, 'end'))
+        cluster_map = _build_cluster_endpoint_map(strokes, assigned)
+        candidate = _find_t_junction_candidate(strokes, cluster_map, assigned)
 
-        for cid, entries in cluster_map.items():
-            if len(entries) < 3:
-                continue
-            entries_sorted = sorted(entries, key=lambda e: len(strokes[e[0]]), reverse=True)
-            shortest_idx, _shortest_side = entries_sorted[-1]
-            shortest_stroke = strokes[shortest_idx]
-            second_longest_len = len(strokes[entries_sorted[1][0]])
+        if candidate:
+            cid, si, side_i, sj, side_j, second_longest_len = candidate
+            _execute_merge(strokes, si, side_i, sj, side_j)
+            _remove_short_cross_strokes(strokes, cid, second_longest_len * 0.4, assigned)
+            changed = True
 
-            s_sc = endpoint_cluster(shortest_stroke, False, assigned)
-            s_ec = endpoint_cluster(shortest_stroke, True, assigned)
-            if s_sc < 0 or s_ec < 0:
-                continue
-            if len(shortest_stroke) >= second_longest_len * 0.4:
-                continue
-
-            si, side_i = entries_sorted[0]
-            sj, side_j = entries_sorted[1]
-            if si == sj:
-                continue
-
-            far_i = endpoint_cluster(strokes[si], from_end=(side_i != 'end'), assigned=assigned)
-            far_j = endpoint_cluster(strokes[sj], from_end=(side_j != 'end'), assigned=assigned)
-            if far_i >= 0 and far_i == far_j:
-                continue
-
-            dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
-            dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
-            angle = np.pi - angle_between(dir_i, dir_j)
-
-            if angle < 2 * np.pi / 3:
-                seg_i = strokes[si] if side_i == 'end' else list(reversed(strokes[si]))
-                seg_j = strokes[sj] if side_j == 'start' else list(reversed(strokes[sj]))
-                merged_stroke = seg_i + seg_j[1:]
-                hi, lo = max(si, sj), min(si, sj)
-                strokes.pop(hi)
-                strokes.pop(lo)
-                strokes.append(merged_stroke)
-
-                for sk in range(len(strokes)):
-                    s = strokes[sk]
-                    s_sc2 = endpoint_cluster(s, False, assigned)
-                    s_ec2 = endpoint_cluster(s, True, assigned)
-                    if s_sc2 >= 0 and s_ec2 >= 0 and len(s) < second_longest_len * 0.4:
-                        if s_sc2 == cid or s_ec2 == cid:
-                            strokes.pop(sk)
-                            break
-                changed = True
-                break
     return strokes
 
 

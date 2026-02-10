@@ -198,6 +198,67 @@ def _stream_variant_strokes(pipe: MinimalStrokePipeline, var_name: str,
     return strokes, score, all_waypoint_markers
 
 
+def _apply_stroke_count_penalty(skel_score: float, stroke_count: int,
+                                 variants: dict) -> tuple[float, dict | None]:
+    """Apply penalty for stroke count mismatch.
+
+    Args:
+        skel_score: Original skeleton score.
+        stroke_count: Number of strokes extracted.
+        variants: Dict of template variants.
+
+    Returns:
+        Tuple of (adjusted_score, penalty_frame or None).
+    """
+    if not variants:
+        return skel_score, None
+
+    expected_counts = [len(t) for t in variants.values()]
+    expected_count = min(expected_counts) if expected_counts else stroke_count
+
+    if stroke_count != expected_count:
+        penalty = 0.3 * abs(stroke_count - expected_count)
+        adjusted_score = skel_score - penalty
+        frame = {
+            'phase': 'Skeleton Penalty',
+            'step': f'Stroke count {stroke_count} != expected {expected_count}, penalty {penalty:.2f} -> adjusted score {adjusted_score:.3f}',
+            'markers': [],
+            'score': adjusted_score
+        }
+        return adjusted_score, frame
+
+    return skel_score, None
+
+
+def _make_selection_frame(skel_score: float, best_score: float,
+                          best_variant: str, skel_wins: bool) -> dict:
+    """Create a selection comparison frame.
+
+    Args:
+        skel_score: Skeleton method score.
+        best_score: Best template score.
+        best_variant: Best template variant name.
+        skel_wins: True if skeleton method wins.
+
+    Returns:
+        Frame dict for the selection step.
+    """
+    if skel_wins:
+        if skel_score == best_score:
+            step = f'Skeleton ({skel_score:.3f}) ties template {best_variant} ({best_score:.3f}) - preferring skeleton'
+        else:
+            step = f'Skeleton ({skel_score:.3f}) beats template {best_variant} ({best_score:.3f})'
+    else:
+        step = f'Template {best_variant} ({best_score:.3f}) beats skeleton ({skel_score:.3f})'
+
+    return {
+        'phase': 'Selection',
+        'step': step,
+        'markers': [],
+        'score': skel_score if skel_wins else best_score
+    }
+
+
 def _stream_skeleton_evaluation(pipe: MinimalStrokePipeline, variants: dict,
                                  best_strokes: list, best_score: float,
                                  best_variant: str, mask,
@@ -247,49 +308,22 @@ def _stream_skeleton_evaluation(pipe: MinimalStrokePipeline, variants: dict,
         }
 
         # Apply penalty for stroke count mismatch
-        if variants:
-            expected_counts = [len(t) for t in variants.values()]
-            expected_count = min(expected_counts) if expected_counts else raw_stroke_count
-
-            if raw_stroke_count != expected_count:
-                penalty = 0.3 * abs(raw_stroke_count - expected_count)
-                adjusted_score = skel_score - penalty
-                yield {
-                    'phase': 'Skeleton Penalty',
-                    'step': f'Stroke count {raw_stroke_count} != expected {expected_count}, penalty {penalty:.2f} -> adjusted score {adjusted_score:.3f}',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': adjusted_score
-                }
-                skel_score = adjusted_score
+        skel_score, penalty_frame = _apply_stroke_count_penalty(
+            skel_score, raw_stroke_count, variants
+        )
+        if penalty_frame:
+            penalty_frame['strokes'] = skel_result.strokes
+            yield penalty_frame
 
         # Compare with best template
-        if skel_score >= best_score:
-            if skel_score == best_score:
-                yield {
-                    'phase': 'Selection',
-                    'step': f'Skeleton ({skel_score:.3f}) ties template {best_variant} ({best_score:.3f}) - preferring skeleton',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': skel_score
-                }
-            else:
-                yield {
-                    'phase': 'Selection',
-                    'step': f'Skeleton ({skel_score:.3f}) beats template {best_variant} ({best_score:.3f})',
-                    'strokes': skel_result.strokes,
-                    'markers': [],
-                    'score': skel_score
-                }
+        skel_wins = skel_score >= best_score
+        sel_frame = _make_selection_frame(skel_score, best_score, best_variant, skel_wins)
+        sel_frame['strokes'] = skel_result.strokes if skel_wins else (best_strokes or [])
+        yield sel_frame
+
+        if skel_wins:
             return skel_result.strokes, skel_score, 'skeleton'
         else:
-            yield {
-                'phase': 'Selection',
-                'step': f'Template {best_variant} ({best_score:.3f}) beats skeleton ({skel_score:.3f})',
-                'strokes': best_strokes or [],
-                'markers': [],
-                'score': best_score
-            }
             return best_strokes, best_score, best_variant
 
     elif not variants:

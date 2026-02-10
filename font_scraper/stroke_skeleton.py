@@ -165,6 +165,110 @@ def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
     return clusters
 
 
+def _build_pixel_to_junction_map(junction_clusters: list[set]) -> dict:
+    """Map junction pixels to their cluster index.
+
+    Args:
+        junction_clusters: List of sets of (x, y) junction pixel positions.
+
+    Returns:
+        Dict mapping each junction pixel to its cluster index.
+    """
+    pixel_to_junction = {}
+    for i, cluster in enumerate(junction_clusters):
+        for p in cluster:
+            pixel_to_junction[p] = i
+    return pixel_to_junction
+
+
+def _collect_segment_start_points(junction_clusters: list[set], endpoints: list,
+                                   junction_pixels: list, adj: dict) -> list[tuple]:
+    """Collect starting points for segment tracing.
+
+    Args:
+        junction_clusters: List of junction cluster sets.
+        endpoints: List of endpoint pixels.
+        junction_pixels: List of junction pixel positions.
+        adj: Adjacency dict.
+
+    Returns:
+        List of (start, first_step, junction_idx) tuples for tracing.
+    """
+    start_points = []
+    # Junction cluster border pixels
+    for i, cluster in enumerate(junction_clusters):
+        for p in cluster:
+            for nb in adj[p]:
+                if nb not in junction_pixels:
+                    start_points.append((p, nb, i))
+    # Endpoints
+    for ep in endpoints:
+        if ep not in junction_pixels:
+            start_points.append((ep, None, -1))
+    return start_points
+
+
+def _trace_segment_from_start(start: tuple, first_step: tuple, adj: dict,
+                               junction_pixels: list, endpoints: list) -> list[tuple]:
+    """Trace a segment path from a starting point.
+
+    Args:
+        start: Starting pixel position.
+        first_step: First step direction (or None to use first neighbor).
+        adj: Adjacency dict.
+        junction_pixels: List of junction pixel positions.
+        endpoints: List of endpoint pixels.
+
+    Returns:
+        List of (x, y) tuples representing the traced path.
+    """
+    if first_step is None:
+        neighbors = adj[start]
+        if not neighbors:
+            return []
+        first_step = neighbors[0]
+
+    path = [start, first_step]
+    current = first_step
+    prev = start
+
+    while current not in junction_pixels and current not in endpoints:
+        neighbors = [n for n in adj[current] if n != prev]
+        if not neighbors or len(neighbors) > 1:
+            break
+        prev = current
+        current = neighbors[0]
+        path.append(current)
+
+    return path
+
+
+def _create_segment_dict(path: list[tuple], start_junc: int, end_junc: int) -> dict:
+    """Create a segment dictionary from a traced path.
+
+    Args:
+        path: List of (x, y) points along the segment.
+        start_junc: Junction cluster index at start (-1 for endpoint).
+        end_junc: Junction cluster index at end (-1 for endpoint).
+
+    Returns:
+        Segment dict with path, endpoints, junctions, angle, and length.
+    """
+    dx = path[-1][0] - path[0][0]
+    dy = path[-1][1] - path[0][1]
+    angle = np.degrees(np.arctan2(dy, dx))
+
+    return {
+        'path': path,
+        'start': path[0],
+        'end': path[-1],
+        'start_junction': start_junc,
+        'end_junction': end_junc,
+        'angle': angle,
+        'length': len(path),
+    }
+
+
 def find_skeleton_segments(info: dict) -> list[dict]:
     """Find and classify skeleton path segments between junctions.
 
@@ -196,55 +300,26 @@ def find_skeleton_segments(info: dict) -> list[dict]:
     junction_clusters = info['junction_clusters']
     endpoints = info['endpoints']
 
+    # Build lookup structures
+    pixel_to_junction = _build_pixel_to_junction_map(junction_clusters)
+    start_points = _collect_segment_start_points(
+        junction_clusters, endpoints, junction_pixels, adj
+    )
+
     segments = []
-
-    # Map pixels to their junction cluster index
-    pixel_to_junction = {}
-    for i, cluster in enumerate(junction_clusters):
-        for p in cluster:
-            pixel_to_junction[p] = i
-
-    # Find all segments between junctions/endpoints
     visited_pairs = set()
 
-    # Start points: junction cluster border pixels and endpoints
-    start_points = []
-    for i, cluster in enumerate(junction_clusters):
-        for p in cluster:
-            for nb in adj[p]:
-                if nb not in junction_pixels:
-                    start_points.append((p, nb, i))  # (start, next, junction_idx)
-    for ep in endpoints:
-        if ep not in junction_pixels:
-            start_points.append((ep, None, -1))
-
     for start, first_step, start_junc in start_points:
-        if first_step is None:
-            neighbors = adj[start]
-            if not neighbors:
-                continue
-            first_step = neighbors[0]
+        path = _trace_segment_from_start(start, first_step, adj,
+                                          junction_pixels, endpoints)
+        if len(path) < 2:
+            continue
 
-        # Trace path until we hit another junction or endpoint
-        path = [start, first_step]
-        current = first_step
-        prev = start
+        current = path[-1]
 
-        while current not in junction_pixels and current not in endpoints:
-            neighbors = [n for n in adj[current] if n != prev]
-            if not neighbors:
-                break
-            if len(neighbors) > 1:
-                break
-            prev = current
-            current = neighbors[0]
-            path.append(current)
-
-        # Determine end junction/endpoint
+        # Determine end junction
         if current in junction_pixels:
             end_junc = pixel_to_junction.get(current, -1)
-        elif current in endpoints:
-            end_junc = -1
         else:
             end_junc = -1
 
@@ -255,20 +330,7 @@ def find_skeleton_segments(info: dict) -> list[dict]:
             continue
         visited_pairs.add(pair)
 
-        if len(path) >= 2:
-            dx = path[-1][0] - path[0][0]
-            dy = path[-1][1] - path[0][1]
-            angle = np.degrees(np.arctan2(dy, dx))
-
-            segments.append({
-                'path': path,
-                'start': path[0],
-                'end': path[-1],
-                'start_junction': start_junc,
-                'end_junction': end_junc,
-                'angle': angle,
-                'length': len(path),
-            })
+        segments.append(_create_segment_dict(path, start_junc, end_junc))
 
     return segments
 

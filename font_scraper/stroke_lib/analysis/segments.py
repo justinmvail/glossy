@@ -31,7 +31,7 @@ Example usage:
 
 from __future__ import annotations
 import math
-from typing import List, Dict, Set, Tuple
+from typing import Dict, List, Set, Tuple
 from collections import defaultdict
 
 from ..domain.geometry import Segment, Point
@@ -150,6 +150,111 @@ class SegmentClassifier:
         """
         return [s for s in segments if s.is_horizontal]
 
+    def _build_junction_connectivity(
+        self,
+        vertical: List[Segment]
+    ) -> Dict[int, List[int]]:
+        """Build a mapping from junction indices to segment indices.
+
+        Args:
+            vertical: List of vertical Segment objects.
+
+        Returns:
+            Dict mapping junction index to list of segment indices connected to it.
+        """
+        junction_to_segs = defaultdict(list)
+        for i, seg in enumerate(vertical):
+            if seg.start_junction >= 0:
+                junction_to_segs[seg.start_junction].append(i)
+            if seg.end_junction >= 0:
+                junction_to_segs[seg.end_junction].append(i)
+        return junction_to_segs
+
+    def _find_connected_chains(
+        self,
+        vertical: List[Segment],
+        junction_to_segs: Dict[int, List[int]]
+    ) -> List[List[int]]:
+        """Find connected chains of segments via BFS.
+
+        Args:
+            vertical: List of vertical Segment objects.
+            junction_to_segs: Junction to segment index mapping.
+
+        Returns:
+            List of chains, where each chain is a list of segment indices.
+        """
+        visited = set()
+        chains = []
+
+        for i in range(len(vertical)):
+            if i in visited:
+                continue
+
+            chain = []
+            queue = [i]
+
+            while queue:
+                seg_idx = queue.pop(0)
+                if seg_idx in visited:
+                    continue
+                visited.add(seg_idx)
+                chain.append(seg_idx)
+
+                seg = vertical[seg_idx]
+                for junc in [seg.start_junction, seg.end_junction]:
+                    if junc >= 0:
+                        for other_idx in junction_to_segs[junc]:
+                            if other_idx not in visited:
+                                queue.append(other_idx)
+
+            if chain:
+                chains.append(chain)
+
+        return chains
+
+    def _score_chain(
+        self,
+        chain: List[int],
+        vertical: List[Segment],
+        template_start: Point,
+        template_end: Point
+    ) -> Tuple[float, Tuple[Point, Point] | None]:
+        """Score a chain by distance to template positions.
+
+        Args:
+            chain: List of segment indices in the chain.
+            vertical: List of vertical Segment objects.
+            template_start: Target start position.
+            template_end: Target end position.
+
+        Returns:
+            Tuple of (score, (top_point, bottom_point)) or (inf, None) if empty.
+        """
+        points = []
+        for seg_idx in chain:
+            seg = vertical[seg_idx]
+            points.append(seg.start)
+            points.append(seg.end)
+
+        if not points:
+            return float('inf'), None
+
+        # Find extremes by y-coordinate
+        points.sort(key=lambda p: p.y)
+        top = points[0]
+        bottom = points[-1]
+
+        # Score by distance to template (try both orientations)
+        d1 = top.distance_to(template_start) + bottom.distance_to(template_end)
+        d2 = bottom.distance_to(template_start) + top.distance_to(template_end)
+        score = min(d1, d2)
+
+        if d1 <= d2:
+            return score, (top, bottom)
+        else:
+            return score, (bottom, top)
+
     def find_best_vertical_chain(
         self,
         segments: List[Segment],
@@ -180,78 +285,26 @@ class SegmentClassifier:
             minimize total distance to template positions. Returns None
             if no vertical segments are found.
         """
+        # Filter to vertical segments
         vertical = [s for s in segments if 75 <= abs(s.angle) <= 105]
         if not vertical:
             vertical = self.find_vertical_segments(segments)
         if not vertical:
             return None
 
-        # Build junction connectivity graph
-        junction_to_segs = defaultdict(list)
-        for i, seg in enumerate(vertical):
-            if seg.start_junction >= 0:
-                junction_to_segs[seg.start_junction].append(i)
-            if seg.end_junction >= 0:
-                junction_to_segs[seg.end_junction].append(i)
+        # Build connectivity and find chains
+        junction_to_segs = self._build_junction_connectivity(vertical)
+        chains = self._find_connected_chains(vertical, junction_to_segs)
 
-        # Find connected chains
-        visited = set()
-        chains = []
-
-        for i in range(len(vertical)):
-            if i in visited:
-                continue
-
-            chain = []
-            queue = [i]
-
-            while queue:
-                seg_idx = queue.pop(0)
-                if seg_idx in visited:
-                    continue
-                visited.add(seg_idx)
-                chain.append(seg_idx)
-
-                seg = vertical[seg_idx]
-                for junc in [seg.start_junction, seg.end_junction]:
-                    if junc >= 0:
-                        for other_idx in junction_to_segs[junc]:
-                            if other_idx not in visited:
-                                queue.append(other_idx)
-
-            if chain:
-                chains.append(chain)
-
-        # Score each chain
+        # Score chains and select best
         best = None
         best_score = float('inf')
 
         for chain in chains:
-            points = []
-            for seg_idx in chain:
-                seg = vertical[seg_idx]
-                points.append(seg.start)
-                points.append(seg.end)
-
-            if not points:
-                continue
-
-            # Find extremes
-            points.sort(key=lambda p: p.y)
-            top = points[0]
-            bottom = points[-1]
-
-            # Score by distance to template
-            d1 = top.distance_to(template_start) + bottom.distance_to(template_end)
-            d2 = bottom.distance_to(template_start) + top.distance_to(template_end)
-            score = min(d1, d2)
-
+            score, result = self._score_chain(chain, vertical, template_start, template_end)
             if score < best_score:
                 best_score = score
-                if d1 <= d2:
-                    best = (top, bottom)
-                else:
-                    best = (bottom, top)
+                best = result
 
         return best
 

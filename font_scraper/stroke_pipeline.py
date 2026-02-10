@@ -831,6 +831,73 @@ class MinimalStrokePipeline:
             return [[float(p[0]), float(p[1])] for p in resampled]
         return [[float(start_pt[0]), float(start_pt[1])], [float(end_pt[0]), float(end_pt[1])]]
 
+    def _trace_single_segment(self, start_pt: tuple, end_pt: tuple,
+                               config: SegmentConfig, resolved_i: ResolvedWaypoint,
+                               resolved_next: ResolvedWaypoint, already_traced: set,
+                               arrival_branch: set) -> tuple[list | None, set]:
+        """Trace a single segment between two waypoints.
+
+        Args:
+            start_pt: Starting point.
+            end_pt: Ending point.
+            config: Segment configuration.
+            resolved_i: Current waypoint.
+            resolved_next: Target waypoint.
+            already_traced: Set of already-traced pixels.
+            arrival_branch: Set of arrival branch pixels.
+
+        Returns:
+            Tuple of (traced_path, updated_arrival_branch).
+        """
+        info = self.analysis.info
+
+        if config.straight:
+            return self._generate_straight_line(start_pt, end_pt), set()
+
+        if resolved_next.is_intersection:
+            traced = self._trace_segment(start_pt, end_pt, config, info['adj'],
+                                         info['skel_set'], avoid_pixels=None)
+            if traced and len(traced) >= 2:
+                return traced, set(traced[-ARRIVAL_BRANCH_SIZE:])
+            return traced, set()
+
+        if resolved_i.is_intersection and arrival_branch:
+            traced = self._trace_segment(start_pt, end_pt, config, info['adj'],
+                                         info['skel_set'], avoid_pixels=already_traced,
+                                         fallback_avoid=arrival_branch)
+            return traced, set()
+
+        if resolved_next.is_curve and resolved_next.region is not None:
+            traced = self._trace_to_region(start_pt, resolved_next.region,
+                                           self.analysis.bbox, info['adj'],
+                                           info['skel_set'], avoid_pixels=already_traced)
+            if traced is None:
+                traced = self._trace_to_region(start_pt, resolved_next.region,
+                                               self.analysis.bbox, info['adj'],
+                                               info['skel_set'], avoid_pixels=None)
+            return traced, arrival_branch
+
+        traced = self._trace_segment(start_pt, end_pt, config, info['adj'],
+                                     info['skel_set'], avoid_pixels=already_traced)
+        return traced, arrival_branch
+
+    def _apply_apex_extensions(self, full_path: list, resolved: list[ResolvedWaypoint]) -> None:
+        """Insert apex extension points into the path.
+
+        Args:
+            full_path: Path to modify in place.
+            resolved: List of resolved waypoints with potential apex extensions.
+        """
+        for rw in resolved:
+            if rw.apex_extension:
+                direction, apex_pt = rw.apex_extension
+                sx, sy = int(round(rw.position[0])), int(round(rw.position[1]))
+                for j, fp in enumerate(full_path):
+                    if abs(fp[0] - sx) <= 2 and abs(fp[1] - sy) <= 2:
+                        apex = (int(round(apex_pt[0])), int(round(apex_pt[1])))
+                        full_path.insert(j if direction == 'top' else j + 1, apex)
+                        break
+
     def _trace_resolved_waypoints(self, resolved: list[ResolvedWaypoint],
                                   segment_configs: list[SegmentConfig],
                                   global_traced: set[tuple[int, int]]) -> list[list[float]]:
@@ -856,9 +923,6 @@ class MinimalStrokePipeline:
             - Leaving intersections: Avoids the arrival branch
             - Curve targets: Traces to region rather than specific point
         """
-        analysis = self.analysis
-        info = analysis.info
-
         full_path = []
         already_traced = set(global_traced)
         arrival_branch = set()
@@ -872,31 +936,11 @@ class MinimalStrokePipeline:
                       int(round(resolved[i+1].position[1])))
 
             config = segment_configs[i] if i < len(segment_configs) else SegmentConfig()
-            current_is_intersection = resolved[i].is_intersection
-            target_is_curve = resolved[i+1].is_curve
-            target_is_intersection = resolved[i+1].is_intersection
-            target_region = resolved[i+1].region
 
-            if config.straight:
-                traced = self._generate_straight_line(start_pt, end_pt)
-            elif target_is_intersection:
-                traced = self._trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                       avoid_pixels=None)
-                if traced and len(traced) >= 2:
-                    arrival_branch = set(traced[-ARRIVAL_BRANCH_SIZE:])
-            elif current_is_intersection and arrival_branch:
-                traced = self._trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                       avoid_pixels=already_traced, fallback_avoid=arrival_branch)
-                arrival_branch = set()
-            elif target_is_curve and target_region is not None:
-                traced = self._trace_to_region(start_pt, target_region, analysis.bbox,
-                                          info['adj'], info['skel_set'], avoid_pixels=already_traced)
-                if traced is None:
-                    traced = self._trace_to_region(start_pt, target_region, analysis.bbox,
-                                              info['adj'], info['skel_set'], avoid_pixels=None)
-            else:
-                traced = self._trace_segment(start_pt, end_pt, config, info['adj'], info['skel_set'],
-                                       avoid_pixels=already_traced)
+            traced, arrival_branch = self._trace_single_segment(
+                start_pt, end_pt, config, resolved[i], resolved[i+1],
+                already_traced, arrival_branch
+            )
 
             if traced:
                 if i == 0:
@@ -912,17 +956,9 @@ class MinimalStrokePipeline:
                     already_traced.add(start_pt)
                 break
 
-        # Apply apex extensions
-        for rw in resolved:
-            if rw.apex_extension:
-                direction, apex_pt = rw.apex_extension
-                sx, sy = int(round(rw.position[0])), int(round(rw.position[1]))
-                for j, fp in enumerate(full_path):
-                    if abs(fp[0] - sx) <= 2 and abs(fp[1] - sy) <= 2:
-                        apex = (int(round(apex_pt[0])), int(round(apex_pt[1])))
-                        full_path.insert(j if direction == 'top' else j + 1, apex)
-                        break
+        self._apply_apex_extensions(full_path, resolved)
         global_traced.update(already_traced)
+
         if len(full_path) > 3:
             full_path = self._resample_path(full_path, num_points=min(30, len(full_path)))
         return [[float(p[0]), float(p[1])] for p in full_path]

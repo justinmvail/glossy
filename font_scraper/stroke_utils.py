@@ -319,6 +319,95 @@ def catmull_rom_segment(p_prev: tuple, p0: tuple, p1: tuple, p_next: tuple,
 # (canonical implementation) at the top of this file.
 
 
+def _snap_to_skeleton_region(region: int, glyph_bbox: tuple,
+                              skel_features: dict | None) -> tuple | None:
+    """Find the best skeleton position for a region.
+
+    Args:
+        region: Numpad region (1-9).
+        glyph_bbox: Bounding box as (x_min, y_min, x_max, y_max).
+        skel_features: Optional dict mapping region numbers to skeleton positions.
+
+    Returns:
+        The (x, y) skeleton position, or None if no skeleton features available.
+    """
+    if skel_features is None:
+        return None
+    candidates = skel_features.get(region, [])
+    if candidates:
+        return candidates[0]
+    target = numpad_to_pixel(region, glyph_bbox)
+    all_skel = skel_features.get('all_skel', [])
+    if not all_skel:
+        return None
+    best = min(all_skel, key=lambda p: (p[0]-target[0])**2 + (p[1]-target[1])**2)
+    return best
+
+
+def _resolve_waypoint_position(region: int, kind: str, glyph_bbox: tuple,
+                                mask: np.ndarray, centroid: tuple,
+                                dist_in: np.ndarray, snap_indices: np.ndarray,
+                                skel_features: dict | None) -> tuple | None:
+    """Resolve a waypoint to its pixel position.
+
+    Args:
+        region: Numpad region (1-9).
+        kind: Waypoint kind ('terminal', 'vertex', or 'curve').
+        glyph_bbox: Bounding box.
+        mask: Binary glyph mask.
+        centroid: Glyph centroid (x, y).
+        dist_in: Distance transform of mask.
+        snap_indices: Snap indices from distance transform.
+        skel_features: Optional skeleton features dict.
+
+    Returns:
+        The (x, y) position, or None if waypoint cannot be placed.
+    """
+    h, w = mask.shape
+
+    # Try skeleton position first
+    skel_pos = _snap_to_skeleton_region(region, glyph_bbox, skel_features)
+    if skel_pos is not None:
+        return (float(skel_pos[0]), float(skel_pos[1]))
+
+    # Handle based on waypoint kind
+    if kind == 'terminal':
+        return snap_to_glyph_edge(numpad_to_pixel(region, glyph_bbox), centroid, mask)
+
+    # Vertex or curve - place deep inside
+    pos = snap_deep_inside(numpad_to_pixel(region, glyph_bbox),
+                           centroid, dist_in, mask, snap_indices)
+    ix = int(round(min(max(pos[0], 0), w - 1)))
+    iy = int(round(min(max(pos[1], 0), h - 1)))
+    if not mask[iy, ix]:
+        return None
+    return pos
+
+
+def _constrain_points_to_mask(points: list[tuple], mask: np.ndarray,
+                               snap_indices: np.ndarray) -> list[tuple]:
+    """Constrain a list of points to lie within the mask.
+
+    Args:
+        points: List of (x, y) coordinates.
+        mask: Binary glyph mask.
+        snap_indices: Snap indices from distance transform.
+
+    Returns:
+        List of constrained (x, y) coordinates.
+    """
+    h, w = mask.shape
+    constrained = []
+    for x, y in points:
+        ix = int(round(min(max(x, 0), w - 1)))
+        iy = int(round(min(max(y, 0), h - 1)))
+        if mask[iy, ix]:
+            constrained.append((x, y))
+        else:
+            constrained.append(snap_inside((x, y), mask, snap_indices))
+    return constrained
+
+
 def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
                      skel_features: dict | None = None) -> list[tuple]:
     """Build a guide path from a sequence of waypoints.
@@ -364,43 +453,21 @@ def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
         centroid = (float(cols.mean()), float(rows.mean()))
 
     # Pre-compute distance fields for snapping
-    h, w = mask.shape
     _dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
     dist_in = distance_transform_edt(mask)
 
-    def snap_to_skeleton_region(region):
-        if skel_features is None:
-            return None
-        candidates = skel_features.get(region, [])
-        if candidates:
-            return candidates[0]
-        target = numpad_to_pixel(region, glyph_bbox)
-        all_skel = skel_features.get('all_skel', [])
-        if not all_skel:
-            return None
-        best = min(all_skel, key=lambda p: (p[0]-target[0])**2 + (p[1]-target[1])**2)
-        return best
-
-    # Map waypoints to pixel positions
+    # Resolve all waypoints to positions
     positions = []
     for region, kind in parsed:
-        skel_pos = snap_to_skeleton_region(region)
-        if skel_pos is not None:
-            pos = (float(skel_pos[0]), float(skel_pos[1]))
-        elif kind == 'terminal':
-            pos = snap_to_glyph_edge(numpad_to_pixel(region, glyph_bbox), centroid, mask)
-            if pos is None:
-                return []
-        else:
-            pos = snap_deep_inside(numpad_to_pixel(region, glyph_bbox),
-                                   centroid, dist_in, mask, snap_indices)
-            ix = int(round(min(max(pos[0], 0), w - 1)))
-            iy = int(round(min(max(pos[1], 0), h - 1)))
-            if not mask[iy, ix]:
-                return []
+        pos = _resolve_waypoint_position(
+            region, kind, glyph_bbox, mask, centroid,
+            dist_in, snap_indices, skel_features
+        )
+        if pos is None:
+            return []
         positions.append(pos)
 
-    # Build path segments
+    # Build path segments between consecutive waypoints
     all_points = []
     for i in range(n_wp - 1):
         seg = linear_segment(positions[i], positions[i + 1], step=2.0)
@@ -409,16 +476,7 @@ def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
         all_points.extend(seg)
 
     # Constrain all guide points to be inside the mask
-    constrained = []
-    for x, y in all_points:
-        ix = int(round(min(max(x, 0), w - 1)))
-        iy = int(round(min(max(y, 0), h - 1)))
-        if mask[iy, ix]:
-            constrained.append((x, y))
-        else:
-            constrained.append(snap_inside((x, y), mask, snap_indices))
-
-    return constrained
+    return _constrain_points_to_mask(all_points, mask, snap_indices)
 
 
 def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:

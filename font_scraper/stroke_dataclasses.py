@@ -188,6 +188,57 @@ class VariantResult:
     variant_name: str
 
 
+# Regex patterns for waypoint parsing
+_VERTEX_PATTERN = re.compile(r'^v\((\d)\)$')
+_CURVE_PATTERN = re.compile(r'^c\((\d)\)$')
+_INTERSECTION_PATTERN = re.compile(r'^i\((\d)\)$')
+
+
+def _apply_hint_to_config(hint: str, config: SegmentConfig) -> None:
+    """Apply a hint string to a segment configuration.
+
+    Args:
+        hint: Hint string ('down', 'up', 'left', 'right', or 'straight').
+        config: SegmentConfig to modify in place.
+    """
+    if hint in DIRECTION_HINTS:
+        config.direction = hint
+    elif hint == 'straight':
+        config.straight = True
+
+
+def _parse_waypoint_item(item) -> ParsedWaypoint | None:
+    """Parse a single template item into a ParsedWaypoint.
+
+    Args:
+        item: Integer region or string notation (v(n), c(n), i(n)).
+
+    Returns:
+        ParsedWaypoint if the item is a valid waypoint, None otherwise.
+    """
+    if isinstance(item, int):
+        return ParsedWaypoint(region=item)
+
+    item_str = str(item)
+
+    # Try vertex pattern
+    m = _VERTEX_PATTERN.match(item_str)
+    if m:
+        return ParsedWaypoint(region=int(m.group(1)), is_vertex=True)
+
+    # Try curve pattern
+    m = _CURVE_PATTERN.match(item_str)
+    if m:
+        return ParsedWaypoint(region=int(m.group(1)), is_curve=True)
+
+    # Try intersection pattern
+    m = _INTERSECTION_PATTERN.match(item_str)
+    if m:
+        return ParsedWaypoint(region=int(m.group(1)), is_intersection=True)
+
+    return None
+
+
 def parse_stroke_template(stroke_template: list) -> tuple[list[ParsedWaypoint], list[SegmentConfig]]:
     """Parse a stroke template into waypoints and segment configurations.
 
@@ -240,35 +291,13 @@ def parse_stroke_template(stroke_template: list) -> tuple[list[ParsedWaypoint], 
 
         # Check if it's a hint
         if isinstance(item, str) and item in ALL_HINTS:
-            if item in DIRECTION_HINTS:
-                pending_config.direction = item
-            elif item == 'straight':
-                pending_config.straight = True
+            _apply_hint_to_config(item, pending_config)
             continue
 
-        # Parse waypoint type
-        wp = ParsedWaypoint(region=0)
-
-        if isinstance(item, int):
-            wp.region = item
-        else:
-            # Try v(n), c(n), i(n) patterns
-            m = re.match(r'^v\((\d)\)$', str(item))
-            if m:
-                wp.region = int(m.group(1))
-                wp.is_vertex = True
-            else:
-                m = re.match(r'^c\((\d)\)$', str(item))
-                if m:
-                    wp.region = int(m.group(1))
-                    wp.is_curve = True
-                else:
-                    m = re.match(r'^i\((\d)\)$', str(item))
-                    if m:
-                        wp.region = int(m.group(1))
-                        wp.is_intersection = True
-                    else:
-                        continue  # Unknown format, skip
+        # Try to parse as waypoint
+        wp = _parse_waypoint_item(item)
+        if wp is None:
+            continue  # Unknown format, skip
 
         waypoints.append(wp)
 
