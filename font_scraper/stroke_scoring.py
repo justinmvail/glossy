@@ -1,7 +1,35 @@
 """Stroke scoring functions for optimization.
 
-This module contains functions for scoring strokes against point clouds
-and glyph masks during shape fitting optimization.
+This module provides functions for scoring strokes against target point clouds
+and glyph masks during shape fitting optimization. It supports both gradient-based
+optimization (via differentiable objectives) and greedy fitting approaches.
+
+The scoring system evaluates strokes based on:
+    - Coverage: How well strokes cover the target point cloud
+    - Overlap penalty: Discourages redundant overlapping strokes
+    - Snap penalty: Penalizes stroke points that fall outside the glyph mask
+    - Edge penalty: Penalizes strokes that hug glyph edges instead of
+      running through the interior
+
+Key functions:
+    - score_all_strokes: Main objective for multi-stroke optimization
+    - score_raw_strokes: Score pre-built stroke arrays
+    - score_single_shape: Score individual shapes for greedy fitting
+    - quick_stroke_score: Fast coverage estimation for validation
+
+Typical usage:
+    from stroke_scoring import score_all_strokes, quick_stroke_score
+
+    # Optimize stroke parameters
+    result = minimize(
+        lambda p: score_all_strokes(p, shape_types, slices, bbox,
+                                    cloud_tree, n_cloud, radius,
+                                    snap_yi, snap_xi, w, h, dist_map),
+        initial_params
+    )
+
+    # Quick quality check
+    coverage = quick_stroke_score(strokes, mask)
 """
 
 
@@ -20,16 +48,44 @@ def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
                       cloud_tree: cKDTree, n_cloud: int, radius: float,
                       snap_yi: np.ndarray, snap_xi: np.ndarray,
                       w: int, h: int, dist_map: np.ndarray = None) -> float:
-    """Objective for optimisation (minimisation -> returns -score).
+    """Compute the optimization objective for a set of stroke parameters.
 
-    Snaps stroke points to nearest mask pixel before scoring so the
-    optimiser sees the same benefit as the post-processing pipeline.
+    This is the main objective function for stroke fitting optimization.
+    It evaluates how well the parameterized strokes cover the target point
+    cloud while penalizing strokes that fall outside the glyph or overlap
+    excessively.
 
-    Score = coverage - snap_penalty - edge_penalty
-      coverage:       fraction of cloud points within radius of any stroke
-      snap_penalty:   fraction of stroke points in white space (hard penalty)
-      edge_penalty:   penalises strokes hugging the glyph edge instead of
-                      running through the interior
+    The function returns a negative score (for minimization), computed as:
+        score = -(coverage - overlap_penalty - snap_penalty - edge_penalty)
+
+    Args:
+        param_vector: Flat numpy array of shape parameters for all strokes.
+        shape_types: List of shape type strings (e.g., 'line', 'arc', 'bezier')
+            corresponding to each stroke.
+        slices: List of (start, end) tuples indicating the parameter indices
+            for each shape in param_vector.
+        bbox: Bounding box as (x_min, y_min, x_max, y_max).
+        cloud_tree: scipy cKDTree built from target point cloud coordinates.
+        n_cloud: Total number of points in the target cloud.
+        radius: Coverage radius - a cloud point is "covered" if within this
+            distance of any stroke point.
+        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
+        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+        dist_map: Optional distance transform of the mask. If provided,
+            enables edge penalty calculation.
+
+    Returns:
+        Negative float score for minimization. Lower (more negative) values
+        indicate better stroke coverage with fewer penalties.
+
+    Notes:
+        - Stroke points are snapped to the nearest mask pixel before scoring,
+          so the optimizer sees consistent benefits from mask-constrained paths.
+        - Snap penalty: 0.5 * fraction of points outside mask
+        - Edge penalty: 0.1 * fraction of points within 1.5px of edge
+        - Overlap penalty: 0.5 * excess overlap beyond 25% free overlap
     """
     all_shapes = _param_vector_to_shapes(param_vector, shape_types, slices, bbox)
     all_pts = np.concatenate(all_shapes, axis=0)
@@ -102,8 +158,31 @@ def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
                       dist_map: np.ndarray = None, mask: np.ndarray = None) -> float:
     """Score pre-built stroke point arrays against the target point cloud.
 
-    Like score_all_strokes but accepts raw Nx2 arrays (one per stroke)
-    instead of a shape-parameter vector.
+    Similar to score_all_strokes but accepts raw Nx2 coordinate arrays
+    instead of shape parameters. Useful for scoring strokes that were
+    generated through non-parametric methods (e.g., skeleton tracing).
+
+    Args:
+        stroke_arrays: List of Nx2 numpy arrays, one per stroke. Each array
+            contains (x, y) coordinates for points along the stroke.
+        cloud_tree: scipy cKDTree built from target point cloud coordinates.
+        n_cloud: Total number of points in the target cloud.
+        radius: Coverage radius for determining if cloud points are covered.
+        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
+        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+        dist_map: Optional distance transform for edge penalty calculation.
+        mask: Binary mask array (currently unused, reserved for future use).
+
+    Returns:
+        Negative float score for minimization. Lower values indicate better
+        stroke quality.
+
+    Notes:
+        - Strokes with fewer than 2 points are filtered out.
+        - Returns 0.0 if no valid strokes are provided.
+        - Uses the same penalty weights as score_all_strokes.
     """
     if not stroke_arrays or all(len(s) == 0 for s in stroke_arrays):
         return 0.0
@@ -171,9 +250,34 @@ def score_single_shape(params: np.ndarray, shape_type: str, bbox: tuple,
                        n_uncovered: int, radius: float,
                        snap_yi: np.ndarray, snap_xi: np.ndarray,
                        w: int, h: int, n_pts: int | None = None) -> float:
-    """Score a single shape against uncovered points only (for greedy fitting).
+    """Score a single shape against uncovered points for greedy fitting.
 
-    Returns negative coverage of uncovered points minus snap penalty.
+    Evaluates how many previously-uncovered points a shape would cover,
+    used during iterative greedy stroke fitting to select the best next
+    stroke to add.
+
+    Args:
+        params: Numpy array of shape parameters for this shape.
+        shape_type: Shape type string (e.g., 'line', 'arc', 'bezier').
+        bbox: Bounding box as (x_min, y_min, x_max, y_max).
+        uncovered_pts: Nx2 array of currently uncovered point coordinates.
+        uncovered_tree: cKDTree built from uncovered_pts.
+        n_uncovered: Number of uncovered points.
+        radius: Coverage radius for determining if points are covered.
+        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
+        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+        n_pts: Optional number of points to sample along the shape.
+            If None, automatically determined based on bounding box size.
+
+    Returns:
+        Negative coverage fraction minus snap penalty. Lower values indicate
+        better shapes that cover more uncovered points with fewer mask violations.
+
+    Notes:
+        - Only penalizes for snap distance (no edge or overlap penalties).
+        - Designed for fast evaluation during greedy search.
     """
     if n_pts is None:
         bw = bbox[2] - bbox[0]
@@ -200,9 +304,24 @@ def score_single_shape(params: np.ndarray, shape_type: str, bbox: tuple,
 
 
 def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> float:
-    """Quick scoring for stroke quality - coverage of glyph mask.
+    """Compute a quick coverage score for stroke quality validation.
 
-    Returns fraction of mask pixels covered by strokes (0 to 1).
+    Estimates what fraction of the glyph mask is covered by the given
+    strokes, using distance transform dilation for efficient computation.
+
+    Args:
+        strokes: List of strokes, where each stroke is a list of [x, y]
+            coordinate pairs.
+        mask: Binary numpy array where True indicates glyph pixels.
+
+    Returns:
+        Float between 0 and 1 representing the fraction of glyph pixels
+        that are within the coverage radius of any stroke point.
+
+    Notes:
+        - Uses a fixed coverage radius of 6 pixels (approximate stroke half-width).
+        - Returns 0.0 if strokes is empty, mask is None, or glyph has no pixels.
+        - Faster than full scoring but less accurate for optimization.
     """
     from scipy.ndimage import distance_transform_edt
 
@@ -242,9 +361,28 @@ def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> fl
 
 def score_shape_coverage(shape_pts: np.ndarray, tree: cKDTree, radius: float,
                          claimed: set | None = None) -> float:
-    """Count cloud points within radius of shape path.
+    """Count cloud points within radius of a shape path.
 
-    Gives a bonus weight for unclaimed points.
+    Provides a weighted coverage count that gives bonus weight to
+    unclaimed points, useful for prioritizing shapes that cover
+    new territory.
+
+    Args:
+        shape_pts: Nx2 array of points along the shape.
+        tree: cKDTree built from the target point cloud.
+        radius: Coverage radius for determining if points are hit.
+        claimed: Optional set of point indices already covered by
+            other shapes. Unclaimed hits receive full weight (1.0),
+            claimed hits receive reduced weight (0.3).
+
+    Returns:
+        Weighted coverage score. If claimed is None, returns the simple
+        count of covered points. Otherwise returns:
+            unclaimed_hits * 1.0 + claimed_hits * 0.3
+
+    Notes:
+        - Returns 0 if shape_pts is empty.
+        - Useful for greedy shape selection to favor covering new areas.
     """
     if len(shape_pts) == 0:
         return 0

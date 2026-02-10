@@ -1,25 +1,76 @@
-"""
-InkSight Font Vectorizer
+"""InkSight Font Vectorizer.
 
-Converts outline fonts to single-line vector strokes using Google's InkSight model.
-InkSight is designed for handwriting recognition, which makes it ideal for extracting
-natural-looking stroke paths from handwriting fonts.
+This module converts outline fonts to single-line vector strokes using Google's
+InkSight model. InkSight is a Vision-Language model designed for handwriting
+recognition, which makes it ideal for extracting natural-looking stroke paths
+from handwriting fonts.
 
-Pipeline:
-1. Render font character/word as image
-2. Run InkSight inference to get stroke tokens
-3. Post-process: filter artifacts, smooth, connect gaps
-4. Validate with OCR (TrOCR) - only keep results that are readable
+The vectorization pipeline:
+    1. Render font character/word as a rasterized image
+    2. Run InkSight inference to get stroke tokens
+    3. Detokenize to extract (x, y) coordinate sequences
+    4. Post-process: filter artifacts, smooth curves, connect gaps
+    5. Optionally validate with OCR (TrOCR) to ensure readability
+
+InkSight produces stroke orderings that follow natural handwriting patterns,
+making the output suitable for applications like pen plotters, laser engravers,
+or animation systems that need to draw characters stroke-by-stroke.
+
+Model Information:
+    InkSight uses a Vision Transformer encoder with a text decoder that outputs
+    special tokens representing ink coordinates. The coordinate space is 224x224
+    pixels with tokens encoding x (0-224), y (225-449), and stroke start (450).
 
 Requirements:
-    conda activate inksight  # or micromamba
-    # TensorFlow 2.15-2.17, tensorflow-text
-    pip install transformers  # for TrOCR validation
+    Core dependencies::
 
-Usage:
-    python inksight_vectorizer.py --font path/to/font.ttf --output output_dir
+        tensorflow>=2.15,<2.18
+        tensorflow-text  # Required by InkSight model
+        numpy
+        Pillow
+        scipy
+
+    For OCR validation::
+
+        transformers  # For TrOCR
+        torch
+
+    Recommended environment::
+
+        conda activate inksight  # or micromamba
+
+Example:
+    Basic vectorization::
+
+        from inksight_vectorizer import InkSightVectorizer, visualize
+
+        vectorizer = InkSightVectorizer(model_path='/path/to/inksight/model')
+        result = vectorizer.process('/fonts/MyScript.ttf', 'Hello')
+
+        print(f"Extracted {len(result.strokes)} strokes")
+        visualize(result, output_path='output.png')
+
+    With OCR validation::
+
+        from inksight_vectorizer import InkSightVectorizer, OCRValidator
+
+        vectorizer = InkSightVectorizer()
+        result = vectorizer.process('/fonts/MyScript.ttf', 'Hello')
+
+        validator = OCRValidator()
+        passed, recognized, score = validator.validate(result)
+        print(f"OCR: '{recognized}' (similarity: {score:.1%})")
+
+Command-line Usage:
     python inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --show
+    python inksight_vectorizer.py --font path/to/font.ttf --charset --output output_dir
     python inksight_vectorizer.py --font path/to/font.ttf --word "Hello" --validate
+
+Attributes:
+    Stroke: Dataclass representing a single stroke as (x, y) points.
+    InkResult: Dataclass containing vectorization results and metadata.
+    InkSightVectorizer: Main class for running InkSight inference.
+    OCRValidator: Optional validator using TrOCR for quality checking.
 """
 
 import argparse
@@ -38,19 +89,60 @@ from scipy.interpolate import splprep, splev
 
 @dataclass
 class Stroke:
-    """A single stroke as a sequence of (x, y) points."""
+    """A single stroke represented as a sequence of (x, y) points.
+
+    Strokes are the fundamental unit of vector output from InkSight. Each stroke
+    represents a continuous pen movement without lifting. The points are ordered
+    from start to end of the stroke.
+
+    Attributes:
+        points: NumPy array of shape (N, 2) containing [x, y] coordinates.
+            Coordinates are in the 224x224 InkSight coordinate space.
+
+    Example:
+        >>> stroke = Stroke(np.array([[10, 20], [15, 25], [20, 30]]))
+        >>> print(f"Stroke has {len(stroke)} points")
+        Stroke has 3 points
+        >>> copy = stroke.copy()  # Create independent copy
+    """
     points: np.ndarray  # Shape: (N, 2)
 
     def __len__(self):
+        """Return the number of points in the stroke.
+
+        Returns:
+            Integer count of coordinate points.
+        """
         return len(self.points)
 
     def copy(self):
+        """Create a deep copy of the stroke.
+
+        Returns:
+            A new Stroke instance with copied point data.
+        """
         return Stroke(self.points.copy())
 
 
 @dataclass
 class InkResult:
-    """Result of InkSight vectorization."""
+    """Complete result of InkSight vectorization.
+
+    Contains all strokes extracted from a font rendering, along with metadata
+    about the input. This is the primary output type from InkSightVectorizer.
+
+    Attributes:
+        strokes: List of Stroke objects representing the extracted paths.
+        image: The original PIL Image that was processed.
+        word: The text string that was rendered and vectorized.
+        font_path: Path to the font file used for rendering.
+
+    Example:
+        >>> result = vectorizer.process('/fonts/Script.ttf', 'Hello')
+        >>> print(f"'{result.word}' has {len(result.strokes)} strokes")
+        >>> for i, stroke in enumerate(result.strokes):
+        ...     print(f"  Stroke {i}: {len(stroke)} points")
+    """
     strokes: List[Stroke]
     image: Image.Image
     word: str
@@ -58,20 +150,41 @@ class InkResult:
 
 
 class InkSightVectorizer:
-    """
-    Convert fonts to vector strokes using Google's InkSight model.
+    """Convert fonts to vector strokes using Google's InkSight model.
 
     InkSight is a Vision-Language model that converts images of handwriting
-    to digital ink (vector strokes). We use it to extract stroke paths from
-    rendered font images.
+    to digital ink (vector strokes). This class wraps the model for use with
+    font rendering, providing a complete pipeline from font file to strokes.
+
+    The model operates in a 224x224 coordinate space and outputs special tokens
+    that encode stroke coordinates. This class handles rendering, inference,
+    detokenization, and post-processing.
+
+    Attributes:
+        model_path (str): Path to the InkSight saved_model directory.
+        model: Loaded TensorFlow SavedModel (None until load_model() called).
+        infer: Model inference signature function.
+        coordinate_length (int): Size of coordinate space (224).
+        num_token_per_dim (int): Number of tokens per dimension (225).
+        start_token (int): Token ID indicating stroke start (450).
+
+    Example:
+        >>> vectorizer = InkSightVectorizer('/path/to/model')
+        >>> vectorizer.load_model()  # Explicit loading (optional)
+        >>> result = vectorizer.process('/fonts/Script.ttf', 'Hello')
+        >>> svg = vectorizer.to_svg(result)
     """
 
     def __init__(self, model_path: str = "/home/server/inksight/model"):
-        """
-        Initialize the vectorizer.
+        """Initialize the vectorizer with model path.
+
+        The model is not loaded immediately; it will be loaded lazily on first
+        inference or can be loaded explicitly with load_model().
 
         Args:
-            model_path: Path to InkSight saved_model directory
+            model_path: Path to the InkSight TensorFlow saved_model directory.
+                This directory should contain 'saved_model.pb' and the
+                'variables' subdirectory.
         """
         self.model_path = model_path
         self.model = None
@@ -83,7 +196,18 @@ class InkSightVectorizer:
         self.start_token = self.num_token_per_dim * 2  # 450
 
     def load_model(self):
-        """Load InkSight TensorFlow model."""
+        """Load the InkSight TensorFlow model.
+
+        Loads the saved_model from disk and extracts the inference signature.
+        This method is idempotent; subsequent calls have no effect.
+
+        The model requires TensorFlow and tensorflow-text to be installed.
+        Loading prints progress messages to stdout.
+
+        Raises:
+            ImportError: If TensorFlow or tensorflow-text is not installed.
+            OSError: If the model files cannot be found at model_path.
+        """
         if self.model is not None:
             return
 
@@ -104,19 +228,29 @@ class InkSightVectorizer:
         bg_color: Tuple[int, int, int] = (255, 255, 255),
         fg_color: Tuple[int, int, int] = (0, 0, 0)
     ) -> Image.Image:
-        """
-        Render a word using the specified font.
+        """Render a word using the specified font.
+
+        Creates a square image with the text centered. The font size is
+        specified directly; use a larger canvas_size for higher resolution
+        output.
 
         Args:
-            font_path: Path to TTF/OTF font file
-            word: Text to render
-            size: Font size in pixels
-            canvas_size: Output image size (square)
-            bg_color: Background color (RGB)
-            fg_color: Text color (RGB)
+            font_path: Path to the TrueType (.ttf) or OpenType (.otf) font file.
+            word: Text string to render. Can be a single character or word.
+            size: Font size in pixels. Default 120.
+            canvas_size: Output image dimensions (square). Default 512.
+            bg_color: Background color as RGB tuple. Default white (255,255,255).
+            fg_color: Text color as RGB tuple. Default black (0,0,0).
 
         Returns:
-            PIL Image with rendered text
+            PIL Image in RGB mode with the rendered text centered.
+
+        Raises:
+            OSError: If the font file cannot be loaded.
+
+        Example:
+            >>> image = vectorizer.render_word('/fonts/Arial.ttf', 'Hello', size=100)
+            >>> image.save('rendered.png')
         """
         img = Image.new('RGB', (canvas_size, canvas_size), bg_color)
         draw = ImageDraw.Draw(img)
@@ -133,19 +267,26 @@ class InkSightVectorizer:
         return img
 
     def _detokenize(self, tokens: List[int]) -> List[np.ndarray]:
-        """
-        Convert InkSight tokens to stroke coordinates.
+        """Convert InkSight tokens to stroke coordinates.
 
-        Token format:
-        - 450 = start of new stroke
-        - 0-224 = x coordinate
-        - 225-449 = y coordinate (subtract 225)
+        InkSight outputs special tokens that encode coordinates:
+        - Token 450: Start of a new stroke
+        - Tokens 0-224: X coordinate value
+        - Tokens 225-449: Y coordinate value (subtract 225)
+
+        Tokens are consumed in pairs (x, y) between stroke start tokens.
 
         Args:
-            tokens: List of token integers
+            tokens: List of integer token IDs extracted from model output.
 
         Returns:
-            List of numpy arrays, each shape (N, 2) for stroke points
+            List of numpy arrays, each with shape (N, 2) containing the
+            [x, y] coordinates for one stroke.
+
+        Example:
+            >>> tokens = [450, 100, 325, 110, 335]  # One stroke, two points
+            >>> strokes = vectorizer._detokenize(tokens)
+            >>> print(strokes[0])  # [[100, 100], [110, 110]]
         """
         strokes = []
         current_stroke = []
@@ -177,14 +318,22 @@ class InkSightVectorizer:
         return strokes
 
     def infer_strokes(self, image: Image.Image) -> List[np.ndarray]:
-        """
-        Run InkSight inference on an image.
+        """Run InkSight inference on an image.
+
+        Encodes the image, runs the model with the "Recognize and derender"
+        prompt, and parses the output tokens into stroke coordinates.
 
         Args:
-            image: PIL Image (will be resized/processed as needed)
+            image: PIL Image to process. Should be RGB mode. The image is
+                JPEG-encoded before being sent to the model.
 
         Returns:
-            List of stroke arrays, each shape (N, 2)
+            List of stroke arrays, each with shape (N, 2) containing raw
+            coordinates in the 224x224 space. These are unprocessed strokes
+            that may contain artifacts.
+
+        Note:
+            This method calls load_model() if the model is not yet loaded.
         """
         import tensorflow as tf
 
@@ -217,19 +366,25 @@ class InkSightVectorizer:
 
     @staticmethod
     def smart_filter(strokes: List[np.ndarray], min_points: int = 2) -> List[np.ndarray]:
-        """
-        Remove artifact strokes (single points at image edges).
+        """Remove artifact strokes while preserving valid short strokes.
 
-        InkSight sometimes produces single-point artifacts at the very edge
-        of the 224x224 coordinate space. This removes them while keeping
-        legitimate short strokes (like dots on 'i').
+        InkSight sometimes produces single-point artifacts at the edges of the
+        224x224 coordinate space (e.g., stray points at [0,0] or [223,223]).
+        This filter removes those while keeping legitimate short strokes like
+        dots on 'i' or 'j'.
 
         Args:
-            strokes: List of stroke arrays
-            min_points: Minimum points for automatic inclusion
+            strokes: List of stroke arrays from infer_strokes().
+            min_points: Minimum points for automatic inclusion. Strokes with
+                at least this many points are always kept. Default 2.
 
         Returns:
-            Filtered list of strokes
+            Filtered list of strokes with edge artifacts removed.
+
+        Example:
+            >>> raw_strokes = vectorizer.infer_strokes(image)
+            >>> filtered = InkSightVectorizer.smart_filter(raw_strokes)
+            >>> print(f"Kept {len(filtered)}/{len(raw_strokes)} strokes")
         """
         filtered = []
         for s in strokes:
@@ -244,15 +399,22 @@ class InkSightVectorizer:
 
     @staticmethod
     def smooth_gaussian(stroke: np.ndarray, sigma: float = 1.5) -> np.ndarray:
-        """
-        Smooth stroke using Gaussian filter.
+        """Smooth stroke coordinates using Gaussian filter.
+
+        Applies 1D Gaussian smoothing independently to x and y coordinates.
+        This reduces noise and jagged edges while preserving overall shape.
 
         Args:
-            stroke: Stroke array shape (N, 2)
-            sigma: Gaussian sigma (higher = smoother)
+            stroke: Stroke array of shape (N, 2) with [x, y] coordinates.
+            sigma: Standard deviation for Gaussian kernel. Higher values
+                produce smoother curves but may lose detail. Default 1.5.
 
         Returns:
-            Smoothed stroke array
+            Smoothed stroke array with same shape as input.
+            Returns input unchanged if fewer than 3 points.
+
+        Example:
+            >>> smoothed = InkSightVectorizer.smooth_gaussian(stroke, sigma=2.0)
         """
         if len(stroke) < 3:
             return stroke
@@ -264,16 +426,26 @@ class InkSightVectorizer:
     @staticmethod
     def smooth_spline(stroke: np.ndarray, smoothing: float = 1.0,
                       num_points: int = None) -> np.ndarray:
-        """
-        Smooth stroke using B-spline interpolation.
+        """Smooth stroke using B-spline interpolation.
+
+        Fits a B-spline curve through the stroke points, optionally resampling
+        to a different number of points. This produces very smooth curves and
+        can increase or decrease point density.
 
         Args:
-            stroke: Stroke array shape (N, 2)
-            smoothing: Spline smoothing factor
-            num_points: Number of output points (None = 2x input)
+            stroke: Stroke array of shape (N, 2) with [x, y] coordinates.
+            smoothing: Spline smoothing factor. Higher values allow more
+                deviation from original points. Default 1.0.
+            num_points: Number of points in output stroke. If None, uses
+                2x the input point count for increased smoothness.
 
         Returns:
-            Smoothed stroke array
+            Smoothed stroke array. Returns input unchanged if fewer than
+            4 points (minimum for cubic B-spline).
+
+        Example:
+            >>> # Double the point density with smoothing
+            >>> upsampled = InkSightVectorizer.smooth_spline(stroke, num_points=200)
         """
         if len(stroke) < 4:
             return stroke
@@ -307,17 +479,25 @@ class InkSightVectorizer:
         seg_start: np.ndarray,
         seg_end: np.ndarray
     ) -> Tuple[Optional[float], Optional[np.ndarray]]:
-        """
-        Find intersection of ray with line segment.
+        """Find intersection of a ray with a line segment.
+
+        Uses parametric ray-segment intersection to find where a ray
+        starting at ray_origin in direction ray_dir crosses the line
+        segment from seg_start to seg_end.
 
         Args:
-            ray_origin: Ray starting point
-            ray_dir: Ray direction (normalized)
-            seg_start: Segment start point
-            seg_end: Segment end point
+            ray_origin: 2D point where the ray starts.
+            ray_dir: 2D direction vector for the ray (should be normalized).
+            seg_start: 2D point at start of line segment.
+            seg_end: 2D point at end of line segment.
 
         Returns:
-            (t, point) where t is distance along ray, or (None, None)
+            A tuple of (t, point) where:
+            - t: Distance along ray to intersection (None if no intersection)
+            - point: 2D intersection coordinates (None if no intersection)
+
+            Returns (None, None) if ray is parallel to segment or doesn't
+            intersect within the segment bounds.
         """
         v1 = ray_origin - seg_start
         v2 = seg_end - seg_start
@@ -341,20 +521,28 @@ class InkSightVectorizer:
         strokes: List[np.ndarray],
         max_extension: float = 8.0
     ) -> List[np.ndarray]:
-        """
-        Extend stroke endpoints to connect nearby strokes.
+        """Extend stroke endpoints to connect nearby strokes.
 
-        For each stroke endpoint, cast a ray along the stroke's trajectory.
-        If it intersects another stroke within max_extension pixels,
-        extend to that intersection point.
+        For each stroke endpoint, casts a ray along the stroke's trajectory.
+        If the ray intersects another stroke within max_extension pixels,
+        adds interpolated points to extend the stroke to that intersection.
+
+        This helps connect strokes that should be joined but have small gaps
+        due to model imprecision or font design. Works well for connecting
+        within characters (e.g., joining the loop of a 'p').
 
         Args:
-            strokes: List of stroke arrays
-            max_extension: Maximum extension distance in pixels
-                          (8 works well for within-character gaps)
+            strokes: List of stroke arrays to potentially extend.
+            max_extension: Maximum extension distance in pixels. Strokes
+                are only extended if the intersection is within this
+                distance. Default 8.0 (suitable for within-character gaps).
 
         Returns:
-            List of strokes with extensions added
+            List of strokes with extensions added. Strokes that don't need
+            extension are returned unchanged (as copies).
+
+        Example:
+            >>> connected = vectorizer.extend_to_connect(strokes, max_extension=10.0)
         """
         result = [s.copy() for s in strokes]
 
@@ -420,18 +608,29 @@ class InkSightVectorizer:
         smooth_sigma: float = 1.5,
         max_extension: float = 8.0
     ) -> InkResult:
-        """
-        Full pipeline: render, infer, post-process.
+        """Run the full vectorization pipeline.
+
+        Complete workflow from font file to processed strokes:
+        1. Render the word as an image
+        2. Run InkSight inference
+        3. Filter artifact strokes
+        4. Apply Gaussian smoothing
+        5. Extend endpoints to connect gaps
 
         Args:
-            font_path: Path to font file
-            word: Text to vectorize
-            font_size: Font rendering size
-            smooth_sigma: Gaussian smoothing sigma
-            max_extension: Max stroke extension distance
+            font_path: Path to the font file (.ttf, .otf).
+            word: Text to vectorize. Can be a single character or word.
+            font_size: Font size for rendering. Default 120.
+            smooth_sigma: Gaussian smoothing sigma. Default 1.5.
+            max_extension: Maximum stroke extension distance. Default 8.0.
 
         Returns:
-            InkResult with strokes and metadata
+            InkResult containing the processed strokes and metadata.
+
+        Example:
+            >>> result = vectorizer.process('/fonts/Script.ttf', 'Hello')
+            >>> print(f"Extracted {len(result.strokes)} strokes")
+            >>> svg = InkSightVectorizer.to_svg(result)
         """
         # Render
         image = self.render_word(font_path, word, size=font_size)
@@ -457,16 +656,26 @@ class InkSightVectorizer:
         chars: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
         **kwargs
     ) -> dict:
-        """
-        Process all characters in a charset.
+        """Process all characters in a charset.
+
+        Batch-processes multiple characters from the same font. Failures on
+        individual characters are logged but don't stop processing.
 
         Args:
-            font_path: Path to font file
-            chars: Characters to process
-            **kwargs: Passed to process()
+            font_path: Path to the font file.
+            chars: String of characters to process. Default includes
+                uppercase, lowercase, and digits.
+            **kwargs: Additional arguments passed to process() for each
+                character (e.g., font_size, smooth_sigma).
 
         Returns:
-            Dict mapping char -> InkResult
+            Dictionary mapping character string to InkResult. Characters
+            that failed processing are not included.
+
+        Example:
+            >>> results = vectorizer.process_charset('/fonts/Script.ttf', 'ABC')
+            >>> for char, result in results.items():
+            ...     print(f"'{char}': {len(result.strokes)} strokes")
         """
         results = {}
         for char in chars:
@@ -480,15 +689,21 @@ class InkSightVectorizer:
 
     @staticmethod
     def to_svg(result: InkResult, stroke_width: float = 2.0) -> str:
-        """
-        Export strokes to SVG.
+        """Export strokes to SVG format.
+
+        Creates an SVG document with each stroke as a path element. Strokes
+        are rendered as black polylines with rounded line caps and joins.
 
         Args:
-            result: InkResult from process()
-            stroke_width: SVG stroke width
+            result: InkResult from process() or process_charset().
+            stroke_width: Width of strokes in SVG units. Default 2.0.
 
         Returns:
-            SVG string
+            Complete SVG document as a string.
+
+        Example:
+            >>> svg = InkSightVectorizer.to_svg(result, stroke_width=1.5)
+            >>> Path('output.svg').write_text(svg)
         """
         paths = []
         for stroke in result.strokes:
@@ -511,14 +726,24 @@ class InkSightVectorizer:
 
     @staticmethod
     def to_json(result: InkResult) -> dict:
-        """
-        Export strokes to JSON-serializable dict.
+        """Export strokes to JSON-serializable dictionary.
+
+        Converts the InkResult to a plain dictionary that can be serialized
+        with json.dumps(). Stroke coordinates are converted from numpy
+        arrays to nested Python lists.
 
         Args:
-            result: InkResult from process()
+            result: InkResult from process() or process_charset().
 
         Returns:
-            Dict with stroke data
+            Dictionary with keys:
+            - 'word': The input word
+            - 'font': Path to font file
+            - 'strokes': List of strokes, each as [[x, y], ...]
+
+        Example:
+            >>> data = InkSightVectorizer.to_json(result)
+            >>> json.dumps(data, indent=2)
         """
         return {
             'word': result.word,
@@ -531,26 +756,45 @@ class InkSightVectorizer:
 
 
 class OCRValidator:
-    """
-    Validate vectorization results using TrOCR handwriting recognition.
+    """Validate vectorization results using TrOCR handwriting recognition.
 
-    If TrOCR can read the rendered strokes and match the expected word,
-    the vectorization is considered successful.
+    Uses Microsoft's TrOCR model to read rendered strokes and compare against
+    the expected text. This provides a quality metric for vectorization
+    results: if OCR can read the strokes, they are likely to be human-readable.
 
-    Uses subprocess isolation to avoid TensorFlow/PyTorch GPU conflicts.
+    The validator supports two execution modes:
+    1. Subprocess mode (default): Runs OCR in a separate process to avoid
+       GPU conflicts between TensorFlow (InkSight) and PyTorch (TrOCR).
+    2. Direct mode: Runs OCR in the same process (faster but may have issues).
+
+    Subprocess mode maintains a persistent worker process that loads the
+    model once and processes multiple images efficiently.
+
+    Attributes:
+        model_name (str): HuggingFace model identifier for TrOCR.
+        use_subprocess (bool): Whether to use subprocess isolation.
+        processor: TrOCR processor (None until loaded, direct mode only).
+        model: TrOCR model (None until loaded, direct mode only).
+        device: PyTorch device for inference (direct mode only).
+
+    Example:
+        >>> validator = OCRValidator()
+        >>> result = vectorizer.process('/fonts/Script.ttf', 'Hello')
+        >>> passed, text, score = validator.validate(result)
+        >>> print(f"OCR read: '{text}' (similarity: {score:.1%})")
     """
 
     def __init__(self, model_name: str = "microsoft/trocr-base-handwritten", use_subprocess: bool = True):
-        """
-        Initialize the OCR validator.
+        """Initialize the OCR validator.
 
         Args:
-            model_name: HuggingFace model name for TrOCR
-                Options:
+            model_name: HuggingFace model identifier for TrOCR. Options:
                 - "microsoft/trocr-base-handwritten" (default, good balance)
                 - "microsoft/trocr-large-handwritten" (more accurate, slower)
                 - "microsoft/trocr-small-handwritten" (faster, less accurate)
-            use_subprocess: If True, run OCR in separate process (avoids GPU conflicts)
+            use_subprocess: If True (default), runs OCR in a separate Python
+                process to avoid TensorFlow/PyTorch GPU conflicts. The worker
+                process is started lazily and reused across calls.
         """
         self.model_name = model_name
         self.use_subprocess = use_subprocess
@@ -559,7 +803,17 @@ class OCRValidator:
         self.device = None
 
     def load_model(self):
-        """Load TrOCR model and processor (only if not using subprocess)."""
+        """Load TrOCR model and processor.
+
+        In direct mode, loads the model into memory. In subprocess mode,
+        this is a no-op since the model is loaded in the worker process.
+
+        Only needs to be called explicitly if you want to preload the model;
+        it will be called automatically on first use.
+
+        Raises:
+            ImportError: If transformers or torch is not installed.
+        """
         if self.use_subprocess:
             return  # Model loaded in subprocess
 
@@ -584,17 +838,24 @@ class OCRValidator:
         stroke_width: int = 3,
         padding: int = 20
     ) -> Image.Image:
-        """
-        Render strokes to an image for OCR.
+        """Render strokes to an image for OCR.
+
+        Creates a centered rendering of the strokes on a white background.
+        The strokes are automatically scaled to fit the canvas while
+        preserving aspect ratio.
 
         Args:
-            strokes: List of Stroke objects
-            size: Output image size
-            stroke_width: Line thickness
-            padding: Padding around strokes
+            strokes: List of Stroke objects to render.
+            size: Output image dimensions (square). Default 384.
+            stroke_width: Line thickness in pixels. Default 3.
+            padding: Margin around strokes in pixels. Default 20.
 
         Returns:
-            PIL Image with rendered strokes
+            PIL Image in RGB mode with rendered strokes.
+
+        Example:
+            >>> img = validator.render_strokes(result.strokes)
+            >>> img.save('strokes.png')
         """
         # Get bounding box of all strokes
         all_points = np.vstack([s.points for s in strokes if len(s.points) > 0])
@@ -629,14 +890,20 @@ class OCRValidator:
         return img
 
     def recognize(self, image: Image.Image) -> str:
-        """
-        Run OCR on an image.
+        """Run OCR on an image.
+
+        Dispatches to either subprocess or direct recognition depending
+        on the use_subprocess setting.
 
         Args:
-            image: PIL Image to recognize
+            image: PIL Image to recognize. Should contain rendered text
+                or strokes on a white background.
 
         Returns:
-            Recognized text string
+            Recognized text string.
+
+        Raises:
+            RuntimeError: If OCR fails (subprocess mode).
         """
         if self.use_subprocess:
             return self._recognize_subprocess(image)
@@ -644,7 +911,14 @@ class OCRValidator:
             return self._recognize_direct(image)
 
     def _recognize_direct(self, image: Image.Image) -> str:
-        """Run OCR directly in this process."""
+        """Run OCR directly in this process.
+
+        Args:
+            image: PIL Image to recognize.
+
+        Returns:
+            Recognized text string.
+        """
         import torch
         self.load_model()
 
@@ -667,7 +941,17 @@ class OCRValidator:
     _worker_stdout = None
 
     def _start_worker(self):
-        """Start persistent OCR worker process."""
+        """Start the persistent OCR worker process.
+
+        Launches a Python subprocess that loads the TrOCR model and waits
+        for images sent via stdin. The worker stays running until explicitly
+        stopped with shutdown_worker().
+
+        The worker protocol:
+        - Input: Base64-encoded PNG image, one per line
+        - Output: Recognized text, one per line
+        - Special: "QUIT" input terminates the worker
+        """
         import subprocess
 
         if OCRValidator._worker_process is not None:
@@ -728,7 +1012,20 @@ while True:
         print("OCR worker ready.")
 
     def _recognize_subprocess(self, image: Image.Image) -> str:
-        """Run OCR via persistent worker process."""
+        """Run OCR via the persistent worker process.
+
+        Encodes the image as base64 PNG, sends to the worker, and reads
+        the recognized text response.
+
+        Args:
+            image: PIL Image to recognize.
+
+        Returns:
+            Recognized text string.
+
+        Raises:
+            RuntimeError: If the worker returns an error.
+        """
         import base64
         from io import BytesIO
 
@@ -755,7 +1052,20 @@ while True:
 
     @classmethod
     def shutdown_worker(cls):
-        """Shutdown the persistent OCR worker."""
+        """Shutdown the persistent OCR worker process.
+
+        Sends a quit signal to the worker and waits for it to terminate.
+        If the worker doesn't respond within 5 seconds, it is forcefully
+        killed.
+
+        This should be called when OCR validation is complete to clean up
+        resources. It's safe to call even if no worker is running.
+
+        Example:
+            >>> validator = OCRValidator()
+            >>> # ... do validation ...
+            >>> OCRValidator.shutdown_worker()
+        """
         if cls._worker_process is not None:
             try:
                 cls._worker_process.stdin.write("QUIT\n")
@@ -772,16 +1082,29 @@ while True:
         threshold: float = 0.8,
         case_sensitive: bool = False
     ) -> Tuple[bool, str, float]:
-        """
-        Validate an InkResult by checking if OCR can read it.
+        """Validate an InkResult by checking if OCR can read it.
+
+        Renders the strokes to an image, runs OCR, and compares the
+        recognized text to the expected word using sequence matching.
 
         Args:
-            result: InkResult to validate
-            threshold: Minimum similarity ratio (0-1) to pass
-            case_sensitive: Whether comparison is case-sensitive
+            result: InkResult to validate.
+            threshold: Minimum similarity ratio (0-1) to pass. Default 0.8
+                means the recognized text must be 80% similar to expected.
+            case_sensitive: If False (default), comparison is case-insensitive.
 
         Returns:
-            Tuple of (passed, recognized_text, similarity_score)
+            A tuple of (passed, recognized_text, similarity_score):
+            - passed: True if similarity >= threshold
+            - recognized_text: What OCR recognized
+            - similarity_score: Float 0-1 indicating match quality
+
+        Example:
+            >>> passed, text, score = validator.validate(result, threshold=0.7)
+            >>> if passed:
+            ...     print(f"Valid! OCR read: '{text}'")
+            ... else:
+            ...     print(f"Failed: expected '{result.word}', got '{text}'")
         """
         from difflib import SequenceMatcher
 
@@ -810,16 +1133,25 @@ while True:
         threshold: float = 0.8,
         verbose: bool = True
     ) -> List[InkResult]:
-        """
-        Filter a list of results, keeping only those that pass OCR validation.
+        """Filter a list of results, keeping only those that pass OCR validation.
+
+        Useful for batch processing where some vectorizations may fail. Only
+        results where OCR can recognize the text with sufficient confidence
+        are retained.
 
         Args:
-            results: List of InkResult objects
-            threshold: Minimum similarity to pass
-            verbose: Print progress
+            results: List of InkResult objects to validate.
+            threshold: Minimum similarity score to pass. Default 0.8.
+            verbose: If True, prints progress for each result.
 
         Returns:
-            Filtered list of InkResult objects that passed validation
+            Filtered list containing only InkResult objects that passed
+            validation.
+
+        Example:
+            >>> all_results = [vectorizer.process(font, word) for word in words]
+            >>> good_results = validator.filter_results(all_results)
+            >>> print(f"Kept {len(good_results)}/{len(all_results)}")
         """
         self.load_model()
 
@@ -842,13 +1174,23 @@ while True:
 
 
 def visualize(result: InkResult, output_path: str = None, show: bool = False):
-    """
-    Visualize InkSight result.
+    """Visualize InkSight vectorization result.
+
+    Creates a side-by-side comparison showing the original rendered font
+    image and the extracted strokes. Each stroke is drawn in a different
+    color with markers at endpoints.
 
     Args:
-        result: InkResult from process()
-        output_path: Path to save image (optional)
-        show: Whether to display interactively
+        result: InkResult from vectorizer.process().
+        output_path: Path to save the visualization image. If None, image
+            is not saved (only shown if show=True).
+        show: If True, displays the visualization interactively using
+            matplotlib. Default False.
+
+    Example:
+        >>> result = vectorizer.process('/fonts/Script.ttf', 'Hello')
+        >>> visualize(result, output_path='hello_vis.png')
+        >>> visualize(result, show=True)  # Interactive display
     """
     import matplotlib.pyplot as plt
 
@@ -892,6 +1234,17 @@ def visualize(result: InkResult, output_path: str = None, show: bool = False):
 
 
 def main():
+    """Command-line interface for InkSight vectorization.
+
+    Parses command-line arguments and runs vectorization on the specified
+    font. Supports single word processing, full charset processing, and
+    optional OCR validation.
+
+    Usage:
+        python inksight_vectorizer.py --font path/to/font.ttf --word "Hello"
+        python inksight_vectorizer.py --font path/to/font.ttf --charset --output output_dir
+        python inksight_vectorizer.py --font path/to/font.ttf --word "Test" --validate --show
+    """
     parser = argparse.ArgumentParser(
         description='Convert fonts to vector strokes using InkSight'
     )

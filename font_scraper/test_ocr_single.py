@@ -1,9 +1,40 @@
 #!/usr/bin/env python3
-"""
-Test OCR prefilter on a single font with detailed timing.
+"""Single-font OCR prefilter test with detailed timing analysis.
 
-Usage:
-    python test_ocr_single.py [--font-id ID] [--db fonts.db]
+This script tests the OCR-based font prefiltering pipeline on a single font,
+providing detailed timing breakdowns for each stage of processing. It uses
+TrOCR (Transformer-based OCR) running in a Docker container with GPU support
+to verify that fonts render legible text.
+
+The OCR prefilter is used to identify fonts that produce readable output,
+filtering out decorative or symbol fonts that would not be suitable for
+handwriting synthesis.
+
+Pipeline stages tested:
+    1. Database query: Retrieve font metadata from SQLite
+    2. Rendering: Generate sample text image using the font
+    3. OCR inference: Run TrOCR model via Docker
+    4. Confidence calculation: Compare OCR output to expected text
+
+The script also provides time estimates for processing the full font database
+in both batch mode (single container) and single mode (new container per font).
+
+Example:
+    Test a random passing font::
+
+        $ python3 test_ocr_single.py
+
+    Test a specific font by ID::
+
+        $ python3 test_ocr_single.py --font-id 42
+
+    Use a different database::
+
+        $ python3 test_ocr_single.py --db custom_fonts.db
+
+Attributes:
+    DEFAULT_SAMPLE_TEXT: The text rendered and recognized ("Hello World 123").
+    CONFIDENCE_THRESHOLD: Minimum OCR confidence to pass (0.7 = 70%).
 """
 
 import argparse
@@ -19,7 +50,25 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 def timed(name):
-    """Decorator to time a function."""
+    """Decorator factory to time function execution.
+
+    Creates a decorator that measures and prints the execution time of
+    the wrapped function.
+
+    Args:
+        name: Label to display in timing output.
+
+    Returns:
+        callable: Decorator function that wraps the target function.
+
+    Example:
+        >>> @timed("my_operation")
+        ... def slow_function():
+        ...     time.sleep(1)
+        ...     return "done"
+        >>> result, elapsed = slow_function()
+        [my_operation] 1.001s
+    """
     def decorator(func):
         def wrapper(*args, **kwargs):
             start = time.perf_counter()
@@ -32,13 +81,48 @@ def timed(name):
 
 
 class OCRTester:
+    """Orchestrates OCR testing for font prefiltering.
+
+    This class manages the complete OCR testing workflow including database
+    queries, font rendering, Docker-based OCR inference, and result analysis.
+
+    Attributes:
+        db_path: Path to the SQLite fonts database.
+        sample_text: Text string to render and recognize.
+        timings: Dictionary storing timing measurements for each stage.
+
+    Example:
+        >>> tester = OCRTester('fonts.db')
+        >>> tester.run(font_id=42)
+    """
+
     def __init__(self, db_path: str = 'fonts.db'):
+        """Initialize the OCR tester.
+
+        Args:
+            db_path: Path to SQLite database containing font metadata.
+                Defaults to 'fonts.db' in the current directory.
+        """
         self.db_path = db_path
         self.sample_text = "Hello World 123"
         self.timings = {}
 
     def get_passing_font(self, font_id: int = None):
-        """Get a font that passed all pre-AI checks."""
+        """Retrieve a font that passed all pre-AI quality checks.
+
+        Queries the database for fonts meeting the following criteria:
+            - Completeness score >= 90% (has required glyphs)
+            - Not cursive (is_cursive = 0)
+            - Not a duplicate (is_duplicate = 0 or NULL)
+
+        Args:
+            font_id: Specific font ID to retrieve. If None, returns the
+                first matching font. Defaults to None.
+
+        Returns:
+            dict: Font record with keys 'id', 'name', 'file_path', or None
+                if no matching font is found.
+        """
         import sqlite3
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -71,7 +155,19 @@ class OCRTester:
         return dict(row)
 
     def render_sample(self, font_path: str, output_path: str):
-        """Render sample text with the font."""
+        """Render sample text as an image using the specified font.
+
+        Creates a white background image with black text rendered using
+        the target font. The image is sized to fit the rendered text
+        with padding.
+
+        Args:
+            font_path: Path to the TrueType or OpenType font file.
+            output_path: Path where the rendered PNG image will be saved.
+
+        Returns:
+            bool: True if rendering succeeded, False on error.
+        """
         # Create image
         font_size = 48
         padding = 20
@@ -100,7 +196,23 @@ class OCRTester:
         return True
 
     def run_trocr_docker(self, image_path: str):
-        """Run TrOCR via Docker container."""
+        """Execute TrOCR inference via Docker container.
+
+        Runs the Microsoft TrOCR handwritten text recognition model inside
+        a Docker container with GPU support. The model is loaded from the
+        HuggingFace cache to avoid repeated downloads.
+
+        Args:
+            image_path: Path to the input image file to process.
+
+        Returns:
+            dict: OCR results containing:
+                - 'text': Recognized text string
+                - 'device': Compute device used ('cuda' or 'cpu')
+                - 'timings': Dict with model_load, gpu_transfer, preprocess,
+                    inference, and decode times in seconds
+            Returns None if OCR fails or cannot parse output.
+        """
         # Python script to run inside container
         ocr_script = '''
 import sys
@@ -198,7 +310,20 @@ print(json.dumps(result))
             os.unlink(script_path)
 
     def calculate_confidence(self, expected: str, actual: str) -> float:
-        """Calculate simple character-level confidence."""
+        """Calculate character-level match confidence between strings.
+
+        Performs a simple character-by-character comparison between the
+        expected and actual text, returning the fraction of matching
+        characters.
+
+        Args:
+            expected: The ground truth text that was rendered.
+            actual: The text recognized by OCR.
+
+        Returns:
+            float: Confidence score between 0.0 and 1.0, where 1.0 indicates
+                perfect character-level match.
+        """
         if not actual:
             return 0.0
 
@@ -215,7 +340,19 @@ print(json.dumps(result))
         return matches / max_len
 
     def run(self, font_id: int = None):
-        """Run the full OCR test on one font."""
+        """Execute the complete OCR prefilter test on one font.
+
+        Runs through all pipeline stages (database query, rendering, OCR,
+        confidence calculation) with detailed timing output. Also provides
+        estimates for processing the full font database.
+
+        Args:
+            font_id: Specific font ID to test. If None, uses the first
+                font that passes pre-AI checks. Defaults to None.
+
+        Returns:
+            None. Results are printed to stdout.
+        """
         print("=" * 60)
         print("OCR PREFILTER TEST - SINGLE FONT")
         print("=" * 60)
@@ -355,6 +492,11 @@ print(json.dumps(result))
 
 
 def main():
+    """Main entry point for the OCR prefilter test script.
+
+    Parses command-line arguments and runs the OCR test on the specified
+    font or a default font from the database.
+    """
     parser = argparse.ArgumentParser(description='Test OCR prefilter on single font')
     parser.add_argument('--font-id', type=int, help='Specific font ID to test')
     parser.add_argument('--db', default='fonts.db', help='Database path')

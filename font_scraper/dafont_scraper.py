@@ -1,13 +1,44 @@
-"""
-DaFont Scraper - Download handwriting fonts from DaFont.com
+"""DaFont Scraper - Download handwriting fonts from DaFont.com.
+
+This module provides a web scraper for downloading handwriting and calligraphy
+fonts from DaFont.com. It supports scraping multiple categories, handles
+pagination, and extracts TTF/OTF font files from ZIP downloads.
+
+The scraper respects rate limiting to avoid overwhelming the server and
+maintains metadata about downloaded fonts for tracking purposes.
 
 Categories:
-- cat=601: Calligraphy
-- cat=603: Handwritten
+    - cat=601: Calligraphy fonts
+    - cat=603: Handwritten fonts
 
-Usage:
-    python dafont_scraper.py --output ./fonts --pages 10
-    python dafont_scraper.py --output ./fonts --categories 601 603 --pages 20
+Example:
+    Basic usage with default settings::
+
+        $ python dafont_scraper.py --output ./fonts --pages 10
+
+    Download from specific categories with a font limit::
+
+        $ python dafont_scraper.py --output ./fonts --categories 601 603 --pages 20
+
+    Programmatic usage::
+
+        scraper = DaFontScraper('./output', rate_limit=1.0)
+        metadata = scraper.scrape_and_download(
+            categories=['601', '603'],
+            max_pages=10,
+            max_fonts=100
+        )
+
+Attributes:
+    BASE_URL (str): The base URL for DaFont.com.
+    CATEGORIES (dict): Mapping of category IDs to human-readable names.
+
+Command-line Arguments:
+    --output, -o: Output directory for downloaded fonts (default: ./dafont_fonts)
+    --categories, -c: Category IDs to scrape (default: 601 603)
+    --pages, -p: Maximum pages per category to scrape (default: 10)
+    --max-fonts, -m: Maximum total fonts to download (default: unlimited)
+    --rate-limit, -r: Seconds to wait between requests (default: 1.0)
 """
 
 import argparse
@@ -27,7 +58,15 @@ import json
 
 @dataclass
 class FontInfo:
-    """Information about a font from DaFont."""
+    """Information about a font from DaFont.
+
+    Attributes:
+        name: The display name of the font.
+        url: The URL to the font's detail page on DaFont.
+        download_url: The direct download URL for the font ZIP file.
+        category: The category name this font belongs to.
+        downloads: The number of downloads reported on DaFont (may be 0 if not parsed).
+    """
     name: str
     url: str
     download_url: str
@@ -35,6 +74,11 @@ class FontInfo:
     downloads: int = 0
 
     def to_dict(self):
+        """Convert the FontInfo to a dictionary for JSON serialization.
+
+        Returns:
+            dict: A dictionary containing all font information fields.
+        """
         return {
             'name': self.name,
             'url': self.url,
@@ -45,7 +89,24 @@ class FontInfo:
 
 
 class DaFontScraper:
-    """Scrape handwriting fonts from DaFont.com."""
+    """Scrape handwriting fonts from DaFont.com.
+
+    This class handles the complete workflow of discovering fonts from DaFont
+    category pages, parsing font information, downloading ZIP files, and
+    extracting TTF/OTF font files.
+
+    Attributes:
+        BASE_URL (str): The base URL for DaFont.com.
+        CATEGORIES (dict): Mapping of category IDs to human-readable names.
+            Keys are string category IDs (e.g., '601'), values are category
+            names (e.g., 'Calligraphy').
+        output_dir (Path): Directory where downloaded fonts are saved.
+        rate_limit (float): Delay in seconds between HTTP requests.
+        session (requests.Session): HTTP session for making requests.
+        fonts_found (List[FontInfo]): List of all fonts discovered during scraping.
+        downloaded (Set[str]): Set of font names that were successfully downloaded.
+        failed (List[str]): List of font names that failed to download.
+    """
 
     BASE_URL = "https://www.dafont.com"
 
@@ -56,10 +117,13 @@ class DaFontScraper:
     }
 
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
-        """
+        """Initialize the DaFont scraper.
+
         Args:
-            output_dir: Directory to save downloaded fonts
-            rate_limit: Seconds to wait between requests
+            output_dir: Directory path where downloaded fonts will be saved.
+                The directory will be created if it does not exist.
+            rate_limit: Minimum seconds to wait between HTTP requests to avoid
+                overwhelming the server. Defaults to 1.0 second.
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -77,15 +141,20 @@ class DaFontScraper:
         self.failed: List[str] = []
 
     def scrape_category(self, category: str, max_pages: int = 10) -> List[FontInfo]:
-        """
-        Scrape fonts from a category.
+        """Scrape fonts from a specific DaFont category.
+
+        Iterates through paginated category listings, parsing font information
+        from each page until no more fonts are found or max_pages is reached.
 
         Args:
-            category: Category ID (e.g., '601', '603')
-            max_pages: Maximum number of pages to scrape
+            category: The DaFont category ID (e.g., '601' for Calligraphy,
+                '603' for Handwritten).
+            max_pages: Maximum number of pages to scrape from this category.
+                Defaults to 10.
 
         Returns:
-            List of FontInfo objects
+            A list of FontInfo objects representing all fonts found in the
+            category across all scraped pages.
         """
         category_name = self.CATEGORIES.get(category, f'Unknown ({category})')
         print(f"\nScraping category: {category_name} (cat={category})")
@@ -120,7 +189,19 @@ class DaFontScraper:
         return fonts
 
     def _parse_font_list(self, html: str, category: str) -> List[FontInfo]:
-        """Parse font list from category page HTML."""
+        """Parse font list from category page HTML.
+
+        Extracts font information from the HTML of a DaFont category page.
+        Uses multiple parsing strategies to handle different page layouts.
+
+        Args:
+            html: The raw HTML content of the category page.
+            category: The human-readable category name to assign to parsed fonts.
+
+        Returns:
+            A list of FontInfo objects parsed from the page. Returns an empty
+            list if no fonts could be parsed.
+        """
         soup = BeautifulSoup(html, 'html.parser')
         fonts = []
 
@@ -173,7 +254,18 @@ class DaFontScraper:
         return fonts
 
     def _parse_font_list_alt(self, soup: BeautifulSoup, category: str) -> List[FontInfo]:
-        """Alternative parsing method - extract from download URLs."""
+        """Alternative parsing method using download URLs.
+
+        This fallback method extracts font information by finding download
+        links directly, used when the primary parsing method fails.
+
+        Args:
+            soup: BeautifulSoup object of the parsed HTML page.
+            category: The human-readable category name to assign to parsed fonts.
+
+        Returns:
+            A list of FontInfo objects parsed from download links.
+        """
         fonts = []
         seen = set()
 
@@ -217,14 +309,17 @@ class DaFontScraper:
         return fonts
 
     def download_font(self, font: FontInfo) -> bool:
-        """
-        Download a font and extract TTF/OTF files.
+        """Download a font and extract TTF/OTF files from the ZIP archive.
+
+        Downloads the font ZIP file from DaFont, extracts any TTF or OTF
+        font files, and saves them to the output directory.
 
         Args:
-            font: FontInfo object
+            font: FontInfo object containing the font's download URL and metadata.
 
         Returns:
-            True if successful, False otherwise
+            True if the font was successfully downloaded and at least one
+            font file was extracted, False otherwise.
         """
         if font.name in self.downloaded:
             return True
@@ -277,7 +372,15 @@ class DaFontScraper:
             return False
 
     def _safe_filename(self, name: str) -> str:
-        """Create a safe filename."""
+        """Create a safe filename by removing problematic characters.
+
+        Args:
+            name: The original filename that may contain unsafe characters.
+
+        Returns:
+            A sanitized filename safe for use on most filesystems.
+            Returns 'unnamed_font' if the result would be empty.
+        """
         # Remove/replace problematic characters
         safe = re.sub(r'[<>:"/\\|?*]', '_', name)
         safe = safe.strip('. ')
@@ -289,16 +392,28 @@ class DaFontScraper:
         max_pages: int = 10,
         max_fonts: int = None
     ) -> Dict:
-        """
-        Scrape and download fonts from specified categories.
+        """Scrape and download fonts from specified categories.
+
+        This is the main entry point for the scraper. It coordinates the
+        complete workflow of discovering fonts across categories, removing
+        duplicates, and downloading font files.
 
         Args:
-            categories: List of category IDs (default: all handwriting categories)
-            max_pages: Max pages per category
-            max_fonts: Max total fonts to download (None = unlimited)
+            categories: List of DaFont category IDs to scrape (e.g., ['601', '603']).
+                If None, defaults to all categories defined in CATEGORIES.
+            max_pages: Maximum number of pages to scrape per category.
+                Defaults to 10.
+            max_fonts: Maximum total number of fonts to download across all
+                categories. If None, downloads all discovered fonts.
+                Fonts are sorted by download count before limiting.
 
         Returns:
-            Summary dict with stats
+            A dictionary containing scraping statistics and metadata:
+                - fonts_found (int): Total number of fonts discovered.
+                - fonts_downloaded (int): Number of fonts successfully downloaded.
+                - fonts_failed (int): Number of fonts that failed to download.
+                - categories (list): List of category IDs that were scraped.
+                - font_list (list): List of font dictionaries with metadata.
         """
         if categories is None:
             categories = list(self.CATEGORIES.keys())
@@ -366,6 +481,11 @@ class DaFontScraper:
 
 
 def main():
+    """Parse command-line arguments and run the DaFont scraper.
+
+    This function serves as the entry point when the module is run as a script.
+    It configures argument parsing and initiates the scraping process.
+    """
     parser = argparse.ArgumentParser(description='Scrape handwriting fonts from DaFont')
     parser.add_argument('--output', '-o', type=str, default='./dafont_fonts',
                         help='Output directory for fonts')

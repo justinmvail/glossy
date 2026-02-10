@@ -1,12 +1,44 @@
-"""
-Font utilities for the training pipeline.
+"""Font utilities for the training pipeline.
 
-Includes:
-- FontDeduplicator: Find and remove duplicate fonts via perceptual hash
-- FontScorer: Score fonts on quality metrics
-- CursiveDetector: Detect connected/cursive fonts
-- CompletenessChecker: Check font character coverage
-- CharacterRenderer: Render individual characters as images
+This module provides a collection of utilities for font quality assessment,
+deduplication, and rendering as part of a font-based training data pipeline.
+
+The utilities handle:
+    - Finding and removing duplicate fonts via perceptual hashing
+    - Scoring fonts on quality metrics (coverage, style)
+    - Detecting connected/cursive fonts unsuitable for character training
+    - Checking font character coverage completeness
+    - Rendering individual characters as images
+
+Classes:
+    FontDeduplicator: Find and remove duplicate fonts via perceptual hash.
+    FontScorer: Score fonts on multiple quality metrics.
+    CursiveDetector: Detect connected/cursive fonts using multiple methods.
+    CompletenessChecker: Check font character coverage.
+    CharacterRenderer: Render individual characters as images.
+
+Example:
+    Basic font quality assessment::
+
+        from font_utils import FontScorer, CursiveDetector, CompletenessChecker
+
+        font_path = "/path/to/font.ttf"
+
+        # Check completeness
+        checker = CompletenessChecker()
+        score, missing = checker.check(font_path)
+        print(f"Coverage: {score:.1%}, Missing: {len(missing)} chars")
+
+        # Check for cursive
+        detector = CursiveDetector()
+        result = detector.check_all(font_path)
+        if result['is_cursive']:
+            print("Font is cursive - not suitable for training")
+
+        # Get overall score
+        scorer = FontScorer()
+        scores = scorer.score_font(font_path)
+        print(f"Overall quality: {scores['overall']:.1%}")
 """
 
 import json
@@ -26,21 +58,59 @@ ASCII_PRINTABLE = (
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`'
     'abcdefghijklmnopqrstuvwxyz{|}~'
 )
+"""str: All 95 printable ASCII characters (space through tilde).
+
+This constant defines the standard character set used for font completeness
+checks and coverage scoring. Fonts should ideally render all of these
+characters to be considered complete.
+"""
 
 
 class FontDeduplicator:
-    """Find and remove duplicate/similar fonts using perceptual hashing."""
+    """Find and remove duplicate/similar fonts using perceptual hashing.
+
+    Uses perceptual hashing (pHash) to compare fonts based on their visual
+    appearance rather than file contents. This catches fonts that are visually
+    identical or very similar even if they have different file names or metadata.
+
+    Attributes:
+        threshold: Maximum hamming distance to consider fonts as duplicates.
+            Lower values mean stricter matching.
+
+    Example:
+        >>> dedup = FontDeduplicator(threshold=8)
+        >>> fonts = [{'path': 'font1.ttf', 'phash': dedup.compute_phash('font1.ttf')},
+        ...          {'path': 'font2.ttf', 'phash': dedup.compute_phash('font2.ttf')}]
+        >>> duplicates = dedup.find_duplicates(fonts)
+        >>> keep, remove = dedup.select_best_from_groups(duplicates)
+    """
 
     def __init__(self, threshold: int = 8):
-        """
+        """Initialize the deduplicator with a similarity threshold.
+
         Args:
             threshold: Max hamming distance to consider fonts as duplicates.
-                       Lower = stricter matching. Default 8 works well.
+                Lower values mean stricter matching (fewer false positives).
+                Default 8 works well for catching true duplicates while
+                allowing stylistic variations.
         """
         self.threshold = threshold
 
     def compute_phash(self, font_path: str, sample_text: str = "The quick brown") -> Optional[str]:
-        """Compute perceptual hash for a font."""
+        """Compute perceptual hash for a font.
+
+        Renders sample text using the font and computes a perceptual hash
+        that is robust to minor variations in rendering.
+
+        Args:
+            font_path: Path to the font file (TTF, OTF, etc.).
+            sample_text: Text to render for hashing. Default uses a
+                phrase with varied letter shapes.
+
+        Returns:
+            Hex string representation of the perceptual hash, or None
+            if the font cannot be loaded or rendered.
+        """
         try:
             font = ImageFont.truetype(font_path, 48)
             img = Image.new('L', (256, 64), 255)
@@ -51,14 +121,19 @@ class FontDeduplicator:
             return None
 
     def find_duplicates(self, font_scores: List[Dict]) -> List[List[Dict]]:
-        """
-        Find duplicate fonts based on perceptual hash.
+        """Find duplicate fonts based on perceptual hash.
+
+        Groups fonts by their perceptual hash similarity, finding both
+        exact matches and near-duplicates within the threshold.
 
         Args:
-            font_scores: List of dicts with 'path' and 'phash' keys
+            font_scores: List of dicts with 'path' and 'phash' keys.
+                Additional keys (like scores) are preserved.
 
         Returns:
-            List of duplicate groups (each group is a list of font dicts)
+            List of duplicate groups, where each group is a list of
+            font dicts that are duplicates of each other. Only groups
+            with 2+ fonts are returned.
         """
         # Group by exact phash first
         hash_groups = defaultdict(list)
@@ -104,15 +179,19 @@ class FontDeduplicator:
         duplicate_groups: List[List[Dict]],
         score_key: str = 'overall'
     ) -> Tuple[List[Dict], List[Dict]]:
-        """
-        From each duplicate group, select the best font.
+        """From each duplicate group, select the best font to keep.
+
+        Ranks fonts within each group by a score key and selects the
+        highest-scoring font to keep, marking others for removal.
 
         Args:
-            duplicate_groups: List of duplicate groups
-            score_key: Dict key to use for ranking
+            duplicate_groups: List of duplicate groups from find_duplicates().
+            score_key: Dict key to use for ranking fonts. Default 'overall'.
 
         Returns:
-            Tuple of (fonts_to_keep, fonts_to_remove)
+            Tuple of (fonts_to_keep, fonts_to_remove):
+                - fonts_to_keep: Best font from each duplicate group
+                - fonts_to_remove: All other fonts from the groups
         """
         keep = []
         remove = []
@@ -130,21 +209,48 @@ class FontDeduplicator:
 
 
 class FontScorer:
-    """Score fonts on multiple quality metrics."""
+    """Score fonts on multiple quality metrics.
+
+    Evaluates fonts on character set coverage and visual style characteristics
+    to produce an overall quality score for filtering and ranking.
+
+    Attributes:
+        render_size: Size in pixels for test renders.
+
+    Example:
+        >>> scorer = FontScorer(render_size=64)
+        >>> scores = scorer.score_font("/path/to/font.ttf")
+        >>> print(f"Coverage: {scores['charset_coverage']:.1%}")
+        >>> print(f"Overall: {scores['overall']:.1%}")
+    """
 
     def __init__(self, render_size: int = 64):
+        """Initialize the scorer.
+
+        Args:
+            render_size: Pixel size for test character renders. Larger
+                sizes give more accurate style assessment but are slower.
+        """
         self.render_size = render_size
 
     def score_font(self, font_path: str) -> Dict:
-        """
-        Score a font on multiple criteria.
+        """Score a font on multiple criteria.
 
-        Returns dict with:
-            - path, name
-            - charset_coverage (0-1)
-            - style_score (0-1)
-            - phash (for deduplication)
-            - overall (weighted average)
+        Evaluates character coverage, visual style, and computes a
+        perceptual hash for deduplication.
+
+        Args:
+            font_path: Path to the font file.
+
+        Returns:
+            Dict containing:
+                - path: Original font path
+                - name: Font filename stem
+                - charset_coverage: Fraction of ASCII chars that render (0-1)
+                - style_score: Visual style quality heuristic (0-1)
+                - phash: Perceptual hash string for deduplication
+                - overall: Weighted average score (0-1)
+                - error: Error message if font failed to load (optional)
         """
         font_path = Path(font_path)
         scores = {
@@ -211,35 +317,56 @@ class FontScorer:
 
 
 class CursiveDetector:
-    """
-    Detect connected/cursive fonts using multiple methods:
-    1. Stroke connectivity analysis - counts connected components
-    2. Contextual glyph comparison - compares isolated vs in-word characters
+    """Detect connected/cursive fonts using multiple methods.
+
+    Uses two complementary detection approaches:
+        1. Stroke connectivity analysis - counts connected components in
+           rendered text to detect physically connected letterforms
+        2. Contextual glyph comparison - compares isolated vs in-word
+           characters to detect contextual alternates
 
     Fonts with contextual alternates (different glyphs based on position)
     are problematic for single-character training even if letters don't
     visually connect.
+
+    Attributes:
+        connectivity_threshold: Score above this indicates cursive.
+        context_threshold: Difference above this indicates contextual alternates.
+
+    Example:
+        >>> detector = CursiveDetector()
+        >>> result = detector.check_all("/path/to/font.ttf")
+        >>> if result['is_cursive']:
+        ...     print(f"Cursive detected via: {result['methods']}")
     """
 
     def __init__(self, connectivity_threshold: float = 0.7, context_threshold: float = 0.10):
-        """
+        """Initialize the detector with sensitivity thresholds.
+
         Args:
-            connectivity_threshold: Score above this = cursive (connectivity method)
-            context_threshold: Difference above this = has contextual alternates
+            connectivity_threshold: Score above this marks font as cursive
+                when using the connectivity method. Range 0-1.
+            context_threshold: Difference score above this marks font as
+                having contextual alternates. Range 0-1.
         """
         self.connectivity_threshold = connectivity_threshold
         self.context_threshold = context_threshold
 
     def check(self, font_path: str, test_word: str = "minimum") -> Tuple[bool, float]:
-        """
-        Check if a font is cursive by analyzing stroke connectivity.
+        """Check if a font is cursive by analyzing stroke connectivity.
+
+        Renders a test word and counts connected components. Cursive fonts
+        will have fewer components because letters connect together.
 
         Args:
-            font_path: Path to font file
-            test_word: Word to render (default "minimum" has many vertical strokes)
+            font_path: Path to font file.
+            test_word: Word to render. Default "minimum" has many vertical
+                strokes that would connect in cursive.
 
         Returns:
-            Tuple of (is_cursive, connectivity_score)
+            Tuple of (is_cursive, connectivity_score):
+                - is_cursive: True if connectivity score exceeds threshold
+                - connectivity_score: 0-1 score (1 = fully connected)
         """
         try:
             font = ImageFont.truetype(font_path, 64)
@@ -301,21 +428,23 @@ class CursiveDetector:
         font_path: str,
         test_chars: str = "aeimnou"
     ) -> Tuple[bool, float, Dict[str, float]]:
-        """
-        Detect contextual alternates by comparing isolated vs in-word glyphs.
+        """Detect contextual alternates by comparing isolated vs in-word glyphs.
 
-        Cursive fonts often have different glyphs depending on position:
-        - Initial (start of word)
-        - Medial (middle of word)
-        - Final (end of word)
-        - Isolated
+        Cursive fonts often have different glyphs depending on position
+        (initial, medial, final, isolated). This method detects such
+        contextual variations by comparing the same character in different
+        surrounding contexts.
 
         Args:
-            font_path: Path to font file
-            test_chars: Characters to test (lowercase letters common in cursive)
+            font_path: Path to font file.
+            test_chars: Characters to test. Default uses lowercase letters
+                commonly affected by contextual alternates.
 
         Returns:
-            Tuple of (has_contextual, avg_difference, per_char_differences)
+            Tuple of (has_contextual, avg_difference, per_char_differences):
+                - has_contextual: True if average difference exceeds threshold
+                - avg_difference: Mean difference score across test chars
+                - per_char_differences: Dict mapping char to its diff score
         """
         try:
             font = ImageFont.truetype(font_path, 64)
@@ -341,14 +470,19 @@ class CursiveDetector:
         return has_contextual, avg_diff, differences
 
     def _compare_glyph_contexts(self, font: ImageFont.FreeTypeFont, char: str) -> Optional[float]:
-        """
-        Compare a character in two different word contexts.
+        """Compare a character in two different word contexts.
 
         For print fonts, 'a' in "oao" should look identical to 'a' in "nan".
-        For cursive fonts with contextual alternates, they'll differ based on
-        surrounding characters.
+        For cursive fonts with contextual alternates, they will differ based
+        on the surrounding characters' connection points.
 
-        Returns normalized difference (0 = identical, 1 = completely different)
+        Args:
+            font: Loaded PIL font object.
+            char: Single character to compare.
+
+        Returns:
+            Normalized difference from 0 (identical) to 1 (completely different),
+            or None if comparison failed.
         """
         size = 64
         padding = 10
@@ -379,7 +513,17 @@ class CursiveDetector:
         size: int,
         padding: int
     ) -> Optional[np.ndarray]:
-        """Render a single character in isolation."""
+        """Render a single character in isolation.
+
+        Args:
+            font: Loaded PIL font object.
+            char: Single character to render.
+            size: Target image size (square).
+            padding: Padding around the character.
+
+        Returns:
+            Numpy array of the rendered grayscale image, or None on failure.
+        """
         try:
             # Get bounds
             temp_img = Image.new('L', (size * 2, size * 2), 255)
@@ -417,7 +561,21 @@ class CursiveDetector:
         size: int,
         padding: int
     ) -> Optional[np.ndarray]:
-        """Extract a specific character from a rendered word."""
+        """Extract a specific character from a rendered word.
+
+        Renders the full word and crops out the target character based
+        on advance width calculations.
+
+        Args:
+            font: Loaded PIL font object.
+            word: Full word to render.
+            char_index: Index of the character to extract (0-based).
+            size: Target size for the extracted character image.
+            padding: Padding for rendering.
+
+        Returns:
+            Numpy array of the extracted character image, or None on failure.
+        """
         try:
             # Get full word bounds for rendering
             temp_img = Image.new('L', (500, 200), 255)
@@ -483,11 +641,17 @@ class CursiveDetector:
             return None
 
     def _image_difference(self, img1: np.ndarray, img2: np.ndarray) -> float:
-        """
-        Calculate normalized difference between two images using perceptual hash.
+        """Calculate normalized difference between two images using perceptual hash.
 
-        Returns value from 0 (identical) to 1 (very different).
-        Uses imagehash for robust comparison that handles scale/position differences.
+        Uses imagehash for robust comparison that handles minor scale and
+        position differences.
+
+        Args:
+            img1: First grayscale image as numpy array.
+            img2: Second grayscale image as numpy array.
+
+        Returns:
+            Normalized difference from 0 (identical) to 1 (very different).
         """
         # Convert to PIL images
         pil1 = Image.fromarray(img1)
@@ -508,15 +672,21 @@ class CursiveDetector:
         return normalized
 
     def check_all(self, font_path: str) -> Dict:
-        """
-        Run all cursive detection methods and return combined result.
+        """Run all cursive detection methods and return combined result.
 
-        Returns dict with:
-            - is_cursive: bool (True if ANY method flags it)
-            - connectivity_score: float
-            - contextual_score: float
-            - contextual_details: dict per-character differences
-            - method: which method(s) flagged it
+        Executes both connectivity and contextual detection, combining
+        results for comprehensive cursive detection.
+
+        Args:
+            font_path: Path to font file.
+
+        Returns:
+            Dict containing:
+                - is_cursive: True if ANY method flags the font
+                - connectivity_score: Score from connectivity check
+                - contextual_score: Average score from contextual check
+                - contextual_details: Per-character difference scores
+                - methods: List of method names that flagged the font
         """
         # Run connectivity check
         is_cursive_conn, conn_score = self.check(font_path)
@@ -543,20 +713,44 @@ class CursiveDetector:
 
 
 class CompletenessChecker:
-    """Check font character coverage."""
+    """Check font character coverage.
+
+    Verifies which characters from a required set can be rendered by a font.
+    Useful for filtering fonts that are missing common characters.
+
+    Attributes:
+        required_chars: String of characters to check for.
+
+    Example:
+        >>> checker = CompletenessChecker()
+        >>> score, missing = checker.check("/path/to/font.ttf")
+        >>> print(f"Coverage: {score:.1%}")
+        >>> if missing:
+        ...     print(f"Missing: {missing[:5]}...")
+    """
 
     def __init__(self, required_chars: str = ASCII_PRINTABLE):
+        """Initialize with the required character set.
+
+        Args:
+            required_chars: String of characters that fonts should support.
+                Defaults to all ASCII printable characters.
+        """
         self.required_chars = required_chars
 
     def check(self, font_path: str) -> Tuple[float, List[str]]:
-        """
-        Check which characters a font can render.
+        """Check which characters a font can render.
+
+        Attempts to render each required character and checks if any
+        pixels were drawn.
 
         Args:
-            font_path: Path to font file
+            font_path: Path to font file.
 
         Returns:
-            Tuple of (completeness_score, missing_chars_list)
+            Tuple of (completeness_score, missing_chars_list):
+                - completeness_score: Fraction of chars that rendered (0-1)
+                - missing_chars_list: List of characters that failed to render
         """
         try:
             font = ImageFont.truetype(font_path, 48)
@@ -581,13 +775,27 @@ class CompletenessChecker:
 
 
 class CharacterRenderer:
-    """Render individual characters as images for InkSight processing."""
+    """Render individual characters as images for InkSight processing.
+
+    Creates consistent, properly-sized character images from fonts for
+    use in training data generation or OCR testing.
+
+    Attributes:
+        height: Target image height in pixels.
+        padding: Padding around the character.
+
+    Example:
+        >>> renderer = CharacterRenderer(height=64, padding=4)
+        >>> img, path = renderer.render("/path/to/font.ttf", 'A', '/output')
+        >>> print(f"Rendered to {path}")
+    """
 
     def __init__(self, height: int = 64, padding: int = 4):
-        """
+        """Initialize the renderer.
+
         Args:
-            height: Target image height (SDT uses 64)
-            padding: Padding around character
+            height: Target image height in pixels. SDT uses 64.
+            padding: Padding around the character in pixels.
         """
         self.height = height
         self.padding = padding
@@ -598,16 +806,20 @@ class CharacterRenderer:
         char: str,
         output_dir: Optional[str] = None
     ) -> Tuple[Optional[Image.Image], Optional[str]]:
-        """
-        Render a single character.
+        """Render a single character.
+
+        Creates a grayscale image with the character centered and scaled
+        to fit the target height.
 
         Args:
-            font_path: Path to font file
-            char: Character to render
-            output_dir: If provided, save image here
+            font_path: Path to font file.
+            char: Single character to render.
+            output_dir: If provided, save the image to this directory.
 
         Returns:
-            Tuple of (PIL Image, output_path or None)
+            Tuple of (PIL Image, output_path or None):
+                - The rendered PIL Image, or None on failure
+                - Path to saved file if output_dir was provided, else None
         """
         try:
             # Load font scaled to target height
@@ -672,11 +884,19 @@ class CharacterRenderer:
         output_dir: str,
         chars: str = ASCII_PRINTABLE
     ) -> Dict[str, str]:
-        """
-        Render all characters from a font.
+        """Render all characters from a font.
+
+        Renders each character in the given set and saves to the output
+        directory.
+
+        Args:
+            font_path: Path to font file.
+            output_dir: Directory to save rendered images.
+            chars: String of characters to render. Defaults to ASCII printable.
 
         Returns:
-            Dict mapping char -> output_path (only successful renders)
+            Dict mapping successfully rendered characters to their output paths.
+            Characters that failed to render are not included.
         """
         results = {}
         for char in chars:
@@ -687,7 +907,15 @@ class CharacterRenderer:
 
 
 def quick_test():
-    """Quick test of utilities."""
+    """Quick test of font utilities.
+
+    Runs all utility classes on a font provided as command line argument,
+    displaying results for completeness, cursive detection, scoring, and
+    rendering.
+
+    Usage:
+        python font_utils.py /path/to/font.ttf
+    """
     import sys
 
     if len(sys.argv) < 2:

@@ -1,9 +1,38 @@
 #!/usr/bin/env python3
-"""
-Test suite for minimal_strokes_from_skeleton.
+"""Test suite for minimal stroke generation from font skeleton analysis.
 
-Evaluates stroke quality across multiple letters and fonts to catch regressions.
-Run with: python3 test_minimal_strokes.py
+This module provides comprehensive regression testing for the
+minimal_strokes_from_skeleton function, which converts font glyphs into
+minimal stroke representations. The test suite evaluates stroke quality
+across multiple metrics:
+
+    - Coverage: What fraction of the glyph is covered by generated strokes
+    - Overshoot: What fraction of stroke pixels fall outside the glyph
+    - Stroke Count: Whether the number of strokes matches the expected template
+    - Topology: Whether strokes pass through expected waypoint regions
+
+Tests can be run against a baseline to detect regressions in stroke quality.
+
+Example:
+    Run tests on default font (Engineer's Hand)::
+
+        $ python3 test_minimal_strokes.py
+
+    Save results as new baseline::
+
+        $ python3 test_minimal_strokes.py --save-baseline
+
+    Check for regressions against baseline::
+
+        $ python3 test_minimal_strokes.py --check
+
+    Test specific characters::
+
+        $ python3 test_minimal_strokes.py --chars ABC
+
+Attributes:
+    NUMPAD_TEMPLATES: Template definitions for expected stroke waypoints.
+    NUMPAD_POS: Numpad region position mappings (1-9 grid).
 """
 
 import sys
@@ -23,9 +52,18 @@ from stroke_templates import NUMPAD_TEMPLATES, NUMPAD_POS
 def compute_stroke_coverage(strokes, mask, stroke_width=8):
     """Compute what fraction of the glyph is covered by strokes.
 
+    Renders the generated strokes onto a blank canvas and compares against
+    the original glyph mask to determine coverage and overshoot metrics.
+
+    Args:
+        strokes: List of strokes, where each stroke is a list of (x, y) points.
+        mask: 2D numpy array representing the glyph mask (non-zero = glyph).
+        stroke_width: Width in pixels to render strokes. Defaults to 8.
+
     Returns:
-        coverage: fraction of glyph pixels covered (0-1)
-        overshoot: fraction of stroke pixels outside glyph (0-1)
+        tuple: A tuple containing:
+            - coverage (float): Fraction of glyph pixels covered by strokes (0-1).
+            - overshoot (float): Fraction of stroke pixels outside glyph (0-1).
     """
     from PIL import Image, ImageDraw
 
@@ -61,12 +99,20 @@ def compute_stroke_coverage(strokes, mask, stroke_width=8):
 
 
 def compute_stroke_count_score(strokes, char):
-    """Check if stroke count matches template.
+    """Check if the generated stroke count matches the expected template.
+
+    Compares the number of generated strokes against the expected count
+    defined in NUMPAD_TEMPLATES for the given character.
+
+    Args:
+        strokes: List of generated strokes.
+        char: The character being tested (e.g., 'A', 'B').
 
     Returns:
-        score: 1.0 if count matches, 0.0 otherwise
-        expected: expected stroke count from template
-        actual: actual stroke count
+        tuple: A tuple containing:
+            - score (float): 1.0 if count matches, 0.0 otherwise.
+            - expected (int): Expected stroke count from template.
+            - actual (int): Actual stroke count generated.
     """
     template = NUMPAD_TEMPLATES.get(char)
     if template is None:
@@ -80,7 +126,25 @@ def compute_stroke_count_score(strokes, char):
 
 
 def _parse_waypoint(wp):
-    """Parse a waypoint into (region_int, kind)."""
+    """Parse a waypoint specification into a region and kind.
+
+    Waypoints can be specified in several formats:
+        - Integer: Terminal point at numpad region (e.g., 7 = top-left)
+        - 'v(N)': Vertex at numpad region N
+        - 'c(N)': Curve point at numpad region N
+        - Tuple: (position, hint) where position is any of the above
+
+    Args:
+        wp: Waypoint specification in any supported format.
+
+    Returns:
+        tuple: A tuple containing:
+            - region (int): Numpad region 1-9.
+            - kind (str): Type of waypoint ('terminal', 'vertex', or 'curve').
+
+    Raises:
+        ValueError: If waypoint format is not recognized.
+    """
     import re
 
     # Handle tuple format: (position, hint)
@@ -101,16 +165,19 @@ def _parse_waypoint(wp):
 
 
 def _point_in_region(point, region, bbox, tolerance=0.2):
-    """Check if a point is within a numpad region (with tolerance).
+    """Check if a point falls within a numpad region.
+
+    Uses a numpad-style 3x3 grid overlaid on the glyph bounding box.
+    Regions are numbered 1-9 like a phone keypad (7=top-left, 3=bottom-right).
 
     Args:
-        point: (x, y) pixel coordinates
-        region: numpad region 1-9
-        bbox: (x_min, y_min, x_max, y_max) glyph bounding box
-        tolerance: fraction of bbox size for region matching
+        point: Tuple of (x, y) pixel coordinates.
+        region: Numpad region number (1-9).
+        bbox: Tuple of (x_min, y_min, x_max, y_max) glyph bounding box.
+        tolerance: Fraction of bbox size for region matching. Defaults to 0.2.
 
     Returns:
-        True if point is within the region (with tolerance)
+        bool: True if point is within the region (with tolerance).
     """
     x, y = point
     x_min, y_min, x_max, y_max = bbox
@@ -133,17 +200,23 @@ def _point_in_region(point, region, bbox, tolerance=0.2):
 def compute_topology_score(strokes, char, bbox):
     """Check if strokes pass through expected waypoint regions.
 
-    For each stroke in the template, checks if the corresponding generated
-    stroke passes through the expected numpad regions.
+    For each stroke in the template, verifies that the corresponding
+    generated stroke passes through the expected numpad regions in
+    the correct order. This validates stroke topology beyond just
+    coverage metrics.
 
     Args:
-        strokes: list of strokes [[[x,y], ...], ...]
-        char: character being tested
-        bbox: (x_min, y_min, x_max, y_max) glyph bounding box
+        strokes: List of strokes, where each stroke is a list of (x, y) points.
+        char: Character being tested.
+        bbox: Tuple of (x_min, y_min, x_max, y_max) glyph bounding box.
 
     Returns:
-        score: fraction of waypoints hit (0-1)
-        details: dict with hit/miss info per stroke
+        tuple: A tuple containing:
+            - score (float): Fraction of waypoints hit (0-1).
+            - details (dict): Detailed hit/miss info per stroke, including:
+                - 'strokes': List of per-stroke details
+                - 'total': Total number of waypoints
+                - 'hits': Number of waypoints successfully hit
     """
     template = NUMPAD_TEMPLATES.get(char)
     if template is None or not strokes:
@@ -194,18 +267,22 @@ def compute_topology_score(strokes, char, bbox):
 
 def compute_combined_score(coverage, overshoot, stroke_count_score, topology_score,
                            weights=None):
-    """Compute weighted combined score.
+    """Compute a weighted combined quality score from individual metrics.
+
+    Combines the four quality metrics into a single score using configurable
+    weights. Higher scores indicate better stroke quality.
 
     Args:
-        coverage: glyph coverage (0-1)
-        overshoot: stroke overshoot (0-1, lower is better)
-        stroke_count_score: 1 if count matches, 0 otherwise
-        topology_score: fraction of waypoints hit (0-1)
-        weights: dict with keys 'coverage', 'overshoot', 'stroke_count', 'topology'
-                 default: equal weights
+        coverage: Glyph coverage fraction (0-1), higher is better.
+        overshoot: Stroke overshoot fraction (0-1), lower is better.
+        stroke_count_score: 1.0 if count matches template, 0.0 otherwise.
+        topology_score: Fraction of waypoints hit (0-1).
+        weights: Optional dict with keys 'coverage', 'overshoot', 'stroke_count',
+            'topology'. Values should sum to 1.0. Defaults to:
+            {'coverage': 0.35, 'overshoot': 0.15, 'stroke_count': 0.20, 'topology': 0.30}
 
     Returns:
-        Combined score (0-1)
+        float: Combined score between 0 and 1.
     """
     if weights is None:
         weights = {
@@ -226,9 +303,34 @@ def compute_combined_score(coverage, overshoot, stroke_count_score, topology_sco
 
 
 def test_letter(font_path, char, canvas_size=224, verbose=False):
-    """Test minimal strokes for a single letter.
+    """Test minimal stroke generation for a single letter.
 
-    Returns dict with test results including all four scoring metrics.
+    Generates strokes for the specified character and font, then evaluates
+    quality across all metrics (coverage, overshoot, stroke count, topology).
+
+    Args:
+        font_path: Path to the font file (.ttf or .otf).
+        char: Single character to test.
+        canvas_size: Size of the rendering canvas in pixels. Defaults to 224.
+        verbose: If True, print detailed progress. Defaults to False.
+
+    Returns:
+        dict: Test results containing:
+            - 'char': The tested character
+            - 'font': Font filename
+            - 'status': 'ok', 'no_template', 'no_glyph', or 'error'
+            - 'coverage': Glyph coverage score (0-1)
+            - 'overshoot': Stroke overshoot score (0-1)
+            - 'stroke_count_score': 1.0 if count matches, else 0.0
+            - 'topology_score': Waypoint hit fraction (0-1)
+            - 'score': Combined weighted score (0-1)
+            - 'num_strokes': Number of strokes generated
+            - 'expected_strokes': Expected stroke count from template
+            - 'total_points': Total points across all strokes
+            - 'topology_hits': Number of waypoints hit
+            - 'topology_total': Total waypoints in template
+            - 'error': Error message if status is 'error'
+            - 'strokes': Generated stroke data (if successful)
     """
     result = {
         'char': char,
@@ -321,15 +423,18 @@ def test_letter(font_path, char, canvas_size=224, verbose=False):
 
 
 def run_test_suite(font_path=None, chars=None, verbose=True):
-    """Run test suite on multiple characters.
+    """Run the full test suite on multiple characters.
+
+    Iterates through all specified characters, running test_letter on each,
+    and aggregates results with summary statistics.
 
     Args:
-        font_path: Path to font file (default: Engineer's Hand)
-        chars: List of characters to test (default: A-Z)
-        verbose: Print progress
+        font_path: Path to font file. Defaults to "fonts/dafont/003 Engineer_'s Hand.ttf".
+        chars: List of characters to test. Defaults to A-Z uppercase letters.
+        verbose: If True, print progress and summary. Defaults to True.
 
     Returns:
-        List of test result dicts
+        list: List of test result dicts from test_letter for each character.
     """
     if font_path is None:
         font_path = "fonts/dafont/003 Engineer_'s Hand.ttf"
@@ -373,22 +478,38 @@ def run_test_suite(font_path=None, chars=None, verbose=True):
 
 
 def save_baseline(results, path='test_baseline.json'):
-    """Save test results as baseline for regression testing."""
+    """Save test results as a baseline for future regression testing.
+
+    The baseline file can later be used with compare_to_baseline to detect
+    quality regressions.
+
+    Args:
+        results: List of test result dicts from run_test_suite.
+        path: Output file path for the JSON baseline. Defaults to 'test_baseline.json'.
+    """
     with open(path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"Saved baseline to {path}")
 
 
 def compare_to_baseline(results, baseline_path='test_baseline.json', threshold=0.05):
-    """Compare results to baseline and report regressions.
+    """Compare current test results to a baseline and report regressions.
+
+    Detects when any quality metric has dropped significantly compared to
+    the baseline, indicating a potential regression in stroke generation.
 
     Args:
-        results: Current test results
-        baseline_path: Path to baseline JSON
-        threshold: Score drop threshold to report as regression
+        results: Current test results from run_test_suite.
+        baseline_path: Path to the baseline JSON file. Defaults to 'test_baseline.json'.
+        threshold: Minimum score drop to report as regression. Defaults to 0.05.
 
     Returns:
-        List of regression dicts
+        list: List of regression dicts, each containing:
+            - 'char': The affected character
+            - 'type': Type of regression ('status_change' or '<metric>_regression')
+            - 'was': Previous value
+            - 'now': Current value
+            - 'change': Magnitude of change (for metric regressions)
     """
     try:
         with open(baseline_path) as f:

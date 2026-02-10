@@ -1,4 +1,33 @@
-"""Skeleton segment classification."""
+"""Skeleton segment classification.
+
+This module provides the SegmentClassifier class for analyzing and classifying
+skeleton segments. It traces segments through the skeleton graph, calculates
+their geometric properties (angle, length), and provides methods for filtering
+segments by direction (vertical, horizontal) and finding optimal segment chains.
+
+The classifier works with SkeletonInfo objects produced by the SkeletonAnalyzer
+and outputs Segment objects with calculated metadata.
+
+Example usage:
+    Basic segment classification::
+
+        from stroke_lib.analysis.segments import SegmentClassifier
+        from stroke_lib.analysis.skeleton import SkeletonAnalyzer
+
+        analyzer = SkeletonAnalyzer()
+        info = analyzer.analyze(mask)
+
+        classifier = SegmentClassifier()
+        segments = classifier.classify(info)
+
+        for seg in segments:
+            print(f"Angle: {seg.angle:.1f}, Length: {seg.length:.1f}")
+
+    Filter by direction::
+
+        vertical = classifier.find_vertical_segments(segments)
+        horizontal = classifier.find_horizontal_segments(segments)
+"""
 
 from __future__ import annotations
 import math
@@ -10,16 +39,47 @@ from ..domain.skeleton import SkeletonInfo
 
 
 class SegmentClassifier:
-    """Classifies skeleton segments by direction and properties."""
+    """Classifies skeleton segments by direction and properties.
+
+    This class traces skeleton segments from endpoints and junction pixels,
+    calculates their geometric properties, and provides methods for filtering
+    and finding optimal segment chains.
+
+    The classification process:
+        1. Starts from endpoints and junction pixels in the skeleton
+        2. Traces connected paths through the adjacency graph
+        3. Calculates angle, length, and junction connectivity for each segment
+        4. Creates Segment objects with all computed metadata
+
+    Attributes:
+        None (stateless classifier)
+
+    Example:
+        >>> classifier = SegmentClassifier()
+        >>> segments = classifier.classify(skeleton_info)
+        >>> vertical = classifier.find_vertical_segments(segments)
+    """
 
     def classify(self, info: SkeletonInfo) -> List[Segment]:
         """Find and classify all skeleton segments.
 
+        Traces segments starting from endpoints and junction pixels in the
+        skeleton graph. Each segment is traced until it reaches another
+        endpoint or junction pixel, and its geometric properties are calculated.
+
         Args:
-            info: SkeletonInfo from skeleton analysis
+            info: SkeletonInfo object containing the skeleton adjacency graph,
+                endpoints, junction pixels, and cluster assignments.
 
         Returns:
-            List of Segment objects with direction classification
+            List of Segment objects with the following properties calculated:
+                - start: Starting Point of the segment
+                - end: Ending Point of the segment
+                - angle: Direction angle in degrees (0 = horizontal right,
+                    90 = vertical down)
+                - length: Euclidean distance from start to end
+                - start_junction: Index of junction cluster at start (-1 if endpoint)
+                - end_junction: Index of junction cluster at end (-1 if endpoint)
         """
         segments = []
         visited_edges = set()
@@ -63,11 +123,31 @@ class SegmentClassifier:
         return segments
 
     def find_vertical_segments(self, segments: List[Segment]) -> List[Segment]:
-        """Filter to only vertical segments (60-120 degree angle)."""
+        """Filter to only vertical segments (60-120 degree angle).
+
+        Vertical segments are those where the absolute angle is between
+        60 and 120 degrees, indicating a primarily vertical orientation.
+
+        Args:
+            segments: List of Segment objects to filter.
+
+        Returns:
+            List of Segment objects that are classified as vertical.
+        """
         return [s for s in segments if s.is_vertical]
 
     def find_horizontal_segments(self, segments: List[Segment]) -> List[Segment]:
-        """Filter to only horizontal segments."""
+        """Filter to only horizontal segments.
+
+        Horizontal segments are those where the absolute angle is less than
+        30 degrees or greater than 150 degrees.
+
+        Args:
+            segments: List of Segment objects to filter.
+
+        Returns:
+            List of Segment objects that are classified as horizontal.
+        """
         return [s for s in segments if s.is_horizontal]
 
     def find_best_vertical_chain(
@@ -78,13 +158,27 @@ class SegmentClassifier:
     ) -> Tuple[Point, Point] | None:
         """Find vertical segment chain best matching template positions.
 
+        Searches for connected chains of vertical segments and scores them
+        based on their proximity to the template start and end positions.
+        The best-matching chain is returned as a pair of extreme points.
+
+        The algorithm:
+            1. Filters segments to those with angles between 75-105 degrees
+            2. Builds a connectivity graph based on shared junction clusters
+            3. Uses BFS to find connected chains of segments
+            4. Scores each chain by distance to template positions
+            5. Returns the top and bottom points of the best-scoring chain
+
         Args:
-            segments: List of segments to search
-            template_start: Target start position
-            template_end: Target end position
+            segments: List of Segment objects to search through.
+            template_start: Target start position to match against.
+            template_end: Target end position to match against.
 
         Returns:
-            (top_point, bottom_point) of best matching chain, or None
+            Tuple of (top_point, bottom_point) representing the endpoints
+            of the best matching vertical chain, with points ordered to
+            minimize total distance to template positions. Returns None
+            if no vertical segments are found.
         """
         vertical = [s for s in segments if 75 <= abs(s.angle) <= 105]
         if not vertical:
@@ -168,7 +262,24 @@ class SegmentClassifier:
         info: SkeletonInfo,
         visited_edges: Set[Tuple]
     ) -> List[Tuple[int, int]] | None:
-        """Trace a single segment from start through neighbor."""
+        """Trace a single segment from start through neighbor.
+
+        Follows the skeleton path from the start point through the initial
+        neighbor, continuing until reaching an endpoint or junction pixel.
+        Uses a straightness heuristic to choose the best continuation when
+        multiple paths are available.
+
+        Args:
+            start: Starting pixel coordinates as (x, y) tuple.
+            neighbor: Initial neighbor pixel to trace through.
+            info: SkeletonInfo containing the adjacency graph and stop points.
+            visited_edges: Set of already-visited edges to avoid retracing.
+                Edges are stored as tuples of (min_point, max_point).
+
+        Returns:
+            List of (x, y) tuples representing the traced path, or None if
+            the initial edge was already visited.
+        """
         edge = (min(start, neighbor), max(start, neighbor))
         if edge in visited_edges:
             return None

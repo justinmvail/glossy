@@ -1,7 +1,26 @@
-"""Stroke utility functions.
+"""Stroke utility functions for glyph processing.
 
-This module contains miscellaneous utility functions for stroke processing
-that don't fit neatly into other modules.
+This module provides miscellaneous utility functions for stroke processing
+operations including path smoothing, point snapping to glyph masks, waypoint
+parsing, coordinate transformations, and spline interpolation. These utilities
+support the stroke tracing and rendering pipeline.
+
+Key functionality:
+    - Gaussian smoothing of stroke paths
+    - Snapping points to stay within glyph boundaries
+    - Parsing numpad-style waypoint specifications
+    - Catmull-Rom spline interpolation for smooth curves
+    - Building guide paths from waypoint sequences
+    - Finding skeleton features for waypoint targeting
+
+Typical usage:
+    from stroke_utils import smooth_stroke, build_guide_path
+
+    # Smooth a noisy stroke path
+    smoothed = smooth_stroke(raw_points, sigma=2.0)
+
+    # Build a guide path through waypoints
+    path = build_guide_path([7, 'v(5)', 3], bbox, mask)
 """
 
 import os
@@ -17,7 +36,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def resolve_font_path(font_path: str) -> str:
     """Resolve a font path to an absolute path.
 
-    If path is relative, resolve it relative to BASE_DIR.
+    If the provided path is relative, it is resolved relative to the
+    module's base directory (BASE_DIR).
+
+    Args:
+        font_path: The font file path, either absolute or relative.
+
+    Returns:
+        The absolute path to the font file.
     """
     if os.path.isabs(font_path):
         return font_path
@@ -25,7 +51,24 @@ def resolve_font_path(font_path: str) -> str:
 
 
 def smooth_stroke(points: list[tuple], sigma: float = 2.0) -> list[tuple]:
-    """Gaussian smooth a stroke's x and y coordinates independently."""
+    """Apply Gaussian smoothing to a stroke's coordinates.
+
+    Smooths x and y coordinates independently using a 1D Gaussian filter
+    to reduce noise while preserving the overall stroke shape.
+
+    Args:
+        points: List of (x, y) coordinate tuples representing the stroke path.
+        sigma: Standard deviation for the Gaussian kernel. Higher values
+            produce smoother results. Defaults to 2.0.
+
+    Returns:
+        A new list of (x, y) tuples with smoothed coordinates.
+
+    Notes:
+        - Returns the original points unchanged if fewer than 3 points
+          are provided (insufficient for meaningful smoothing).
+        - Uses 'nearest' mode at boundaries to avoid edge artifacts.
+    """
     if len(points) < 3:
         return list(points)
 
@@ -41,7 +84,23 @@ def smooth_stroke(points: list[tuple], sigma: float = 2.0) -> list[tuple]:
 def constrain_to_mask(points: list[tuple], mask: np.ndarray) -> list[tuple]:
     """Constrain points to stay inside the glyph mask.
 
-    Uses distance transform to snap outside points to nearest inside pixel.
+    Points that fall outside the mask are snapped to the nearest pixel
+    that is inside the mask, using a distance transform for efficient
+    nearest-neighbor lookup.
+
+    Args:
+        points: List of (x, y) coordinate tuples to constrain.
+        mask: Binary numpy array where True indicates glyph pixels.
+            Shape should be (height, width).
+
+    Returns:
+        A new list of (x, y) tuples with all points inside the mask.
+        Points already inside remain unchanged; outside points are
+        moved to the nearest inside pixel.
+
+    Notes:
+        - Returns an empty list if no points are provided.
+        - Coordinates are clamped to valid array indices before lookup.
     """
     if len(points) == 0:
         return []
@@ -65,7 +124,21 @@ def constrain_to_mask(points: list[tuple], mask: np.ndarray) -> list[tuple]:
 
 
 def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
-    """Snap a position to the nearest mask pixel if outside."""
+    """Snap a position to the nearest mask pixel if outside.
+
+    Uses precomputed snap indices from a distance transform for efficient
+    nearest-neighbor lookup.
+
+    Args:
+        pos: The (x, y) position to potentially snap.
+        mask: Binary numpy array where True indicates glyph pixels.
+        snap_indices: Precomputed indices array from distance_transform_edt
+            with return_indices=True. Shape is (2, height, width).
+
+    Returns:
+        The original position if inside the mask, or the coordinates of
+        the nearest inside pixel if outside.
+    """
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
     iy = int(round(min(max(pos[1], 0), h - 1)))
@@ -80,8 +153,28 @@ def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
                      mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to be well inside the mask.
 
-    Cast ray from pos toward centroid, find the point with maximum
-    distance-from-edge (deepest inside the glyph).
+    Casts a ray from the given position toward the glyph centroid and finds
+    the point along the ray with maximum distance from the glyph edge. This
+    ensures waypoints are placed deep within the glyph rather than near edges.
+
+    Args:
+        pos: The (x, y) starting position.
+        centroid: The (x, y) centroid of the glyph to cast the ray toward.
+        dist_in: Distance transform of the mask (distance from each pixel
+            to the nearest edge). Larger values are deeper inside.
+        mask: Binary numpy array where True indicates glyph pixels.
+        snap_indices: Precomputed snap indices from distance_transform_edt.
+
+    Returns:
+        A position (x, y) that is well inside the glyph. If the original
+        position is already at least 5 pixels from the edge, it is returned
+        unchanged. Otherwise, the deepest point along the ray to the centroid
+        is returned.
+
+    Notes:
+        - The search stops early once it finds a point deeper than 5 pixels
+          and the depth starts decreasing, to avoid overshooting.
+        - Falls back to snap_inside if the ray length is less than 1 pixel.
     """
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
@@ -113,7 +206,24 @@ def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
 
 
 def snap_to_glyph_edge(pos: tuple, centroid: tuple, mask: np.ndarray) -> tuple | None:
-    """Snap a termination point to the nearest mask pixel."""
+    """Snap a termination point to the nearest glyph edge pixel.
+
+    Used for positioning stroke endpoints at the boundary of the glyph.
+
+    Args:
+        pos: The (x, y) position to snap.
+        centroid: The (x, y) centroid of the glyph (currently unused but
+            available for future direction-aware snapping).
+        mask: Binary numpy array where True indicates glyph pixels.
+
+    Returns:
+        The snapped (x, y) position on the glyph edge, or None if snapping
+        fails (e.g., the nearest pixel is outside the image bounds).
+
+    Notes:
+        - If the position is already inside the mask, it is returned unchanged.
+        - Uses distance transform for efficient nearest-neighbor lookup.
+    """
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
     iy = int(round(min(max(pos[1], 0), h - 1)))
@@ -129,10 +239,24 @@ def snap_to_glyph_edge(pos: tuple, centroid: tuple, mask: np.ndarray) -> tuple |
 
 
 def parse_waypoint(wp) -> tuple[int, str]:
-    """Parse a waypoint into (region_int, kind).
+    """Parse a waypoint specification into region and kind.
+
+    Waypoints can be specified as:
+        - Integer (1-9): Terminal point in that numpad region
+        - 'v(n)': Vertex point in region n
+        - 'c(n)': Curve point in region n
+
+    Args:
+        wp: The waypoint specification. Can be an integer or a string
+            matching 'v(digit)' or 'c(digit)'.
 
     Returns:
-        (region, kind) where region is 1-9 and kind is 'terminal', 'vertex', or 'curve'.
+        A tuple of (region, kind) where:
+            - region is an integer 1-9 indicating the numpad region
+            - kind is one of 'terminal', 'vertex', or 'curve'
+
+    Raises:
+        ValueError: If the waypoint format is not recognized.
     """
     if isinstance(wp, int):
         return (wp, 'terminal')
@@ -146,7 +270,25 @@ def parse_waypoint(wp) -> tuple[int, str]:
 
 
 def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
-    """Map a numpad region (1-9) to pixel coordinates within the glyph bounding box."""
+    """Map a numpad region (1-9) to pixel coordinates within a bounding box.
+
+    Uses the numpad layout where regions are arranged as:
+        7 8 9  (top)
+        4 5 6  (middle)
+        1 2 3  (bottom)
+
+    Args:
+        region: Integer 1-9 indicating the numpad region.
+        glyph_bbox: Bounding box as (x_min, y_min, x_max, y_max).
+
+    Returns:
+        The (x, y) pixel coordinates corresponding to the center of
+        the specified region within the bounding box.
+
+    Notes:
+        - Region positions are defined in stroke_templates.NUMPAD_POS
+          as fractional coordinates (0-1 range).
+    """
     from stroke_templates import NUMPAD_POS
     frac_x, frac_y = NUMPAD_POS[region]
     x_min, y_min, x_max, y_max = glyph_bbox
@@ -155,7 +297,22 @@ def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
 
 
 def linear_segment(p0: tuple, p1: tuple, step: float = 2.0) -> list[tuple]:
-    """Generate evenly-spaced points along a line from p0 to p1."""
+    """Generate evenly-spaced points along a line segment.
+
+    Args:
+        p0: Starting point as (x, y).
+        p1: Ending point as (x, y).
+        step: Approximate distance between consecutive points. Defaults to 2.0.
+
+    Returns:
+        A list of (x, y) tuples evenly distributed along the line from
+        p0 to p1, inclusive of both endpoints.
+
+    Notes:
+        - Always returns at least 2 points (the endpoints).
+        - The actual step size may be slightly adjusted to ensure even
+          distribution along the entire segment.
+    """
     dx = p1[0] - p0[0]
     dy = p1[1] - p0[1]
     dist = (dx * dx + dy * dy) ** 0.5
@@ -165,7 +322,28 @@ def linear_segment(p0: tuple, p1: tuple, step: float = 2.0) -> list[tuple]:
 
 def catmull_rom_point(p0: tuple, p1: tuple, p2: tuple, p3: tuple,
                       t: float, alpha: float = 0.5) -> tuple:
-    """Evaluate a single point on a Catmull-Rom spline segment."""
+    """Evaluate a single point on a Catmull-Rom spline segment.
+
+    Computes a point on the spline segment between p1 and p2, using p0 and p3
+    as control points for tangent computation.
+
+    Args:
+        p0: First control point (before the segment).
+        p1: Start of the spline segment.
+        p2: End of the spline segment.
+        p3: Last control point (after the segment).
+        t: Parameter value in [0, 1] where 0 = p1 and 1 = p2.
+        alpha: Tension parameter controlling spline type. Defaults to 0.5
+            (centripetal Catmull-Rom). Use 0.0 for uniform, 1.0 for chordal.
+
+    Returns:
+        The (x, y) coordinates of the interpolated point.
+
+    Notes:
+        - Uses the centripetal parameterization by default, which avoids
+          cusps and self-intersections that can occur with uniform splines.
+        - The alpha parameter controls the "tightness" of the curve.
+    """
     def tj(ti, pi, pj):
         dx = pj[0] - pi[0]
         dy = pj[1] - pi[1]
@@ -194,7 +372,25 @@ def catmull_rom_point(p0: tuple, p1: tuple, p2: tuple, p3: tuple,
 
 def catmull_rom_segment(p_prev: tuple, p0: tuple, p1: tuple, p_next: tuple,
                         step: float = 2.0) -> list[tuple]:
-    """Generate evenly-spaced points along a Catmull-Rom segment from p0 to p1."""
+    """Generate evenly-spaced points along a Catmull-Rom spline segment.
+
+    Samples the spline between p0 and p1 at regular intervals.
+
+    Args:
+        p_prev: Control point before the segment (for tangent at p0).
+        p0: Start of the spline segment.
+        p1: End of the spline segment.
+        p_next: Control point after the segment (for tangent at p1).
+        step: Approximate distance between consecutive points. Defaults to 2.0.
+
+    Returns:
+        A list of (x, y) tuples sampled along the spline from p0 to p1.
+
+    Notes:
+        - The number of samples is based on the straight-line distance
+          between p0 and p1, divided by the step size.
+        - Always returns at least 2 points.
+    """
     dx = p1[0] - p0[0]
     dy = p1[1] - p0[1]
     dist = (dx * dx + dy * dy) ** 0.5
@@ -206,10 +402,23 @@ def point_in_region(point: tuple[int, int], region: int,
                     bbox: tuple[int, int, int, int]) -> bool:
     """Check if a point falls within a numpad region.
 
-    Region 1-9 maps to a 3x3 grid:
-      7 8 9
-      4 5 6
-      1 2 3
+    The bounding box is divided into a 3x3 grid corresponding to numpad
+    regions arranged as:
+        7 8 9  (top)
+        4 5 6  (middle)
+        1 2 3  (bottom)
+
+    Args:
+        point: The (x, y) coordinates to check.
+        region: The numpad region (1-9) to test against.
+        bbox: The bounding box as (x0, y0, x1, y1).
+
+    Returns:
+        True if the point lies within the specified region, False otherwise.
+
+    Notes:
+        - Region boundaries are inclusive on all sides.
+        - Uses screen coordinates where y increases downward.
     """
     x, y = point
     x0, y0, x1, y1 = bbox
@@ -231,11 +440,34 @@ def point_in_region(point: tuple[int, int], region: int,
 
 def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
                      skel_features: dict | None = None) -> list[tuple]:
-    """Build a guide path from parsed waypoints.
+    """Build a guide path from a sequence of waypoints.
 
-    waypoints_raw: list of raw waypoint values (int, 'v(n)', 'c(n)')
-    skel_features: optional dict mapping region to list of skeleton feature positions.
-    Returns list of (x, y) points sampled along the guide path.
+    Creates a path of (x, y) points that passes through the specified
+    waypoints, constrained to stay within the glyph mask.
+
+    Args:
+        waypoints_raw: List of raw waypoint values. Each can be:
+            - Integer (1-9): Terminal point in that numpad region
+            - 'v(n)': Vertex point in region n
+            - 'c(n)': Curve point in region n
+        glyph_bbox: Bounding box as (x_min, y_min, x_max, y_max).
+        mask: Binary numpy array where True indicates glyph pixels.
+        skel_features: Optional dict mapping region numbers to lists of
+            skeleton feature positions (from find_skeleton_waypoints).
+            If provided, waypoints snap to skeleton features when available.
+
+    Returns:
+        A list of (x, y) points sampled along the guide path at regular
+        intervals. Returns an empty list if:
+            - Fewer than 2 waypoints are provided
+            - The mask is empty
+            - Any waypoint cannot be placed inside the mask
+
+    Notes:
+        - Terminal waypoints are placed at glyph edges.
+        - Vertex and curve waypoints are placed deep inside the glyph.
+        - Linear interpolation connects consecutive waypoints.
+        - All points are constrained to lie within the mask.
     """
     parsed = [parse_waypoint(wp) for wp in waypoints_raw]
     n_wp = len(parsed)
@@ -309,10 +541,27 @@ def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
 
 
 def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
-    """Find skeleton endpoints and junctions as candidate waypoint positions.
+    """Find skeleton features as candidate waypoint positions.
 
-    Returns dict mapping numpad region (1-9) to list of (x, y) skeleton
-    feature positions in that region.
+    Skeletonizes the glyph mask and identifies endpoints and junctions
+    that can serve as natural waypoint targets for stroke paths.
+
+    Args:
+        mask: Binary numpy array where True indicates glyph pixels.
+        glyph_bbox: Bounding box as (x_min, y_min, x_max, y_max).
+
+    Returns:
+        A dictionary with:
+            - Keys 1-9: Each maps to a list containing the best skeleton
+              position for that numpad region (based on proximity to region
+              center with a bonus for being deep inside the glyph).
+            - 'all_skel': List of all skeleton pixel positions.
+        Returns None if the skeleton is empty.
+
+    Notes:
+        - Uses scikit-image skeletonize for morphological skeletonization.
+        - The scoring function balances proximity to region center with
+          depth inside the glyph (distance from edge).
     """
     from collections import defaultdict
 

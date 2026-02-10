@@ -1,18 +1,59 @@
 #!/usr/bin/env python3
-"""Render Hello World! with all fonts that passed OCR prefilter."""
+"""Render sample text with all fonts that passed the OCR prefilter.
+
+This module creates a visual catalog of all fonts in the database that have
+passed OCR quality checks. Each font is rendered with sample text "Hello World!"
+along with its name and OCR confidence score, organized in a multi-column layout.
+
+The visualization is useful for:
+    - Reviewing the pool of fonts available for training
+    - Quick visual quality assessment of passing fonts
+    - Identifying fonts that may need manual review
+    - Comparing rendering quality across different fonts
+
+Output:
+    Saves a PNG image (all_passing_fonts.png) with all passing fonts
+    rendered in a two-column layout, showing font name, confidence score,
+    and sample text. Opens the result with xdg-open.
+
+Example:
+    Run as a script to generate the catalog::
+
+        $ python render_all_passing.py
+
+Note:
+    Requires a populated fonts.db database with font check results in the
+    font_checks table. Fonts with prefilter_passed=1 will be included.
+"""
 
 import sqlite3
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 
+# Configuration constants
 DB_PATH = 'fonts.db'
+"""str: Path to the SQLite database file."""
+
 OUTPUT_PATH = 'all_passing_fonts.png'
+"""str: Path for the output visualization image."""
+
 SAMPLE_TEXT = "Hello World!"
+"""str: Sample text to render for each font."""
+
 FONT_SIZE = 36
+"""int: Point size for rendering sample text."""
+
 ROW_HEIGHT = 60
+"""int: Pixel height allocated for each font row."""
+
 LABEL_WIDTH = 300
+"""int: Pixel width reserved for font name and confidence."""
+
 SAMPLE_WIDTH = 400
-COLS = 2  # Two columns to fit more on screen
+"""int: Pixel width reserved for sample text rendering."""
+
+COLS = 2
+"""int: Number of columns in the output layout."""
 
 # Get passing fonts
 conn = sqlite3.connect(DB_PATH)

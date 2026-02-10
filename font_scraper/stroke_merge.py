@@ -1,7 +1,47 @@
 """Stroke merging and absorption functions.
 
-This module contains functions for merging strokes at junctions,
-absorbing short stubs, and cleaning up stroke paths.
+This module provides functions for cleaning up and simplifying stroke paths by
+merging strokes at junctions and absorbing short stub segments. These operations
+are essential for producing clean, coherent strokes from raw tracing output.
+
+Algorithm Overview:
+    The stroke cleanup process typically follows this sequence:
+
+    1. Junction-Based Merging (run_merge_pass):
+        - Identifies strokes that meet at junction clusters
+        - Merges pairs of strokes that have aligned directions (continuation)
+        - Uses angle threshold to determine valid merges
+
+    2. T-Junction Handling (merge_t_junctions):
+        - Special case for 3+ strokes meeting at a junction
+        - Identifies the main through-stroke and cross-branch
+        - Merges main branches while potentially removing short cross-strokes
+
+    3. Stub Absorption (multiple functions):
+        - Convergence stubs: Short strokes ending at apex points (like top of 'A')
+        - Junction stubs: Short strokes at junction clusters
+        - Proximity stubs: Short strokes near longer stroke endpoints
+
+    4. Orphan Removal:
+        - Removes isolated short strokes with no neighboring strokes at their
+          junction clusters
+
+Key Concepts:
+    - Junction cluster: A set of pixel coordinates where multiple strokes meet.
+      Clusters are pre-computed from skeleton analysis.
+    - Assigned clusters: Junction clusters that have been assigned to specific
+      junction points during stroke tracing.
+    - Stroke direction: Computed from endpoint samples to determine alignment.
+    - Stub: A short stroke segment, typically a tracing artifact or minor branch.
+
+Typical usage:
+    # After initial stroke tracing
+    strokes = run_merge_pass(strokes, assigned_clusters, max_angle=np.pi/4)
+    strokes = merge_t_junctions(strokes, junction_clusters, assigned_clusters)
+    strokes = absorb_convergence_stubs(strokes, junction_clusters, assigned_clusters)
+    strokes = absorb_junction_stubs(strokes, assigned_clusters)
+    strokes = absorb_proximity_stubs(strokes)
+    strokes = remove_orphan_stubs(strokes, assigned_clusters)
 """
 
 from collections import defaultdict
@@ -10,7 +50,33 @@ import numpy as np
 
 
 def seg_dir(stroke: list[tuple], from_end: bool = False, n_samples: int = 5) -> tuple[float, float]:
-    """Get direction vector for end of stroke (averaged over last n_samples)."""
+    """Compute the direction vector at one end of a stroke.
+
+    The direction is averaged over multiple points near the endpoint to reduce
+    noise from local irregularities in the stroke path.
+
+    Args:
+        stroke: List of (x, y) coordinate tuples representing the stroke path.
+        from_end: If True, compute direction at the end of the stroke (pointing
+            outward from end). If False, compute at the start (pointing outward
+            from start). Defaults to False.
+        n_samples: Number of points to use for averaging the direction.
+            Defaults to 5.
+
+    Returns:
+        A normalized direction vector (dx, dy) with unit length.
+        Returns (1.0, 0.0) as a fallback if the stroke has fewer than 2 points
+        or the computed direction has zero length.
+
+    Note:
+        The direction always points "outward" from the endpoint, meaning:
+        - For from_end=True: direction points from interior toward the end
+        - For from_end=False: direction points from start toward interior
+
+        This convention makes it easy to check if two strokes meeting at a
+        junction are aligned (their outward directions should be opposite,
+        i.e., angle between them should be close to pi).
+    """
     if len(stroke) < 2:
         return (1.0, 0.0)
 
@@ -32,22 +98,48 @@ def seg_dir(stroke: list[tuple], from_end: bool = False, n_samples: int = 5) -> 
 
 
 def angle_between(v1: tuple[float, float], v2: tuple[float, float]) -> float:
-    """Compute angle between two direction vectors (in radians)."""
+    """Compute the angle between two direction vectors.
+
+    Args:
+        v1: First direction vector (dx, dy). Should be normalized for accurate
+            results, though non-normalized vectors will work.
+        v2: Second direction vector (dx, dy).
+
+    Returns:
+        Angle between the vectors in radians, in the range [0, pi].
+        Returns 0 for parallel vectors pointing the same direction,
+        pi for antiparallel vectors.
+
+    Note:
+        Uses the dot product formula: cos(angle) = v1 . v2 / (|v1| |v2|).
+        The dot product is clamped to [-1, 1] to handle floating-point errors
+        that might produce values slightly outside this range.
+    """
     dot = v1[0]*v2[0] + v1[1]*v2[1]
     dot = max(-1.0, min(1.0, dot))
     return np.arccos(dot)
 
 
 def endpoint_cluster(stroke: list[tuple], from_end: bool, assigned: list[set]) -> int:
-    """Find which junction cluster (if any) contains the stroke endpoint.
+    """Find which junction cluster contains a stroke endpoint.
+
+    Checks if the specified endpoint of a stroke lies within any of the
+    assigned junction clusters, with a small tolerance for nearby pixels.
 
     Args:
-        stroke: List of (x, y) points
-        from_end: True to check end, False to check start
-        assigned: List of junction cluster sets
+        stroke: List of (x, y) coordinate tuples.
+        from_end: If True, check the last point; if False, check the first.
+        assigned: List of sets, where each set contains (x, y) integer tuples
+            representing pixels in a junction cluster.
 
     Returns:
-        Cluster index, or -1 if not at a junction
+        The index of the cluster containing the endpoint (0-indexed), or -1
+        if the endpoint is not in any cluster.
+
+    Note:
+        The function checks the exact pixel position and all 8 neighboring
+        pixels (3x3 neighborhood) to handle slight misalignments between
+        stroke endpoints and cluster centers.
     """
     if not stroke:
         return -1
@@ -72,14 +164,43 @@ def endpoint_cluster(stroke: list[tuple], from_end: bool, assigned: list[set]) -
 def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
                    min_len: int = 0, max_angle: float = np.pi/4,
                    max_ratio: float = 0) -> list[list[tuple]]:
-    """Merge strokes through junction clusters by direction alignment.
+    """Merge strokes through junction clusters based on direction alignment.
+
+    This function iteratively merges pairs of strokes that meet at a junction
+    cluster and have aligned directions (i.e., one stroke appears to continue
+    into the other). It processes one merge at a time, always choosing the
+    best-aligned pair.
+
+    Algorithm:
+        1. Build a map of which stroke endpoints are at which clusters
+        2. For each cluster with 2+ stroke endpoints, evaluate all pairs
+        3. Compute the angle between outward directions of each pair
+        4. Select the pair with smallest angle (best alignment)
+        5. Merge the pair and repeat until no valid merges remain
 
     Args:
-        strokes: List of stroke paths
-        assigned: List of junction cluster sets
-        min_len: Minimum stroke length to consider
-        max_angle: Maximum angle difference for merging
-        max_ratio: If > 0, reject pairs where max(len)/min(len) > ratio
+        strokes: List of stroke paths, each a list of (x, y) tuples.
+            Modified in place.
+        assigned: List of junction cluster sets from skeleton analysis.
+        min_len: Minimum stroke length (in points) to consider for merging.
+            Strokes shorter than this are skipped. Defaults to 0.
+        max_angle: Maximum angle (radians) between directions for a valid merge.
+            Strokes with larger angle difference are not merged.
+            Defaults to pi/4 (45 degrees).
+        max_ratio: If > 0, reject merges where max(len1, len2) / min(len1, len2)
+            exceeds this ratio. Prevents merging very different length strokes.
+            Defaults to 0 (no ratio check).
+
+    Returns:
+        The modified strokes list (also modified in place).
+
+    Note:
+        The angle check uses `pi - angle_between(dir1, dir2)` because outward
+        directions of continuing strokes should point in opposite directions
+        (angle close to pi), so we measure deviation from perfect continuation.
+
+        Loop strokes (both endpoints in same cluster) are excluded from merging
+        to preserve intentional closed paths.
     """
     changed = True
     while changed:
@@ -140,11 +261,36 @@ def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
 
 def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
                       assigned: list[set]) -> list[list[tuple]]:
-    """Merge strokes at T-junctions.
+    """Merge strokes at T-junctions by connecting the main through-stroke.
 
-    At junctions with 3+ strokes, if the shortest stroke is a cross-branch
-    and much shorter than the main branches, merge the two longest with
-    a relaxed angle threshold.
+    T-junctions occur where three or more strokes meet, with two forming a
+    main "through" path and others being branches. This function identifies
+    the shortest stroke at such junctions and, if it's significantly shorter
+    than the main branches, merges the two longest strokes while optionally
+    removing the short cross-branch.
+
+    Algorithm:
+        1. Find junction clusters with 3+ stroke endpoints
+        2. Sort strokes at the junction by length
+        3. If shortest is < 40% of second-longest, treat as T-junction
+        4. Merge the two longest strokes if their angle is acceptable
+        5. Remove any remaining short cross-strokes at that junction
+
+    Args:
+        strokes: List of stroke paths. Modified in place.
+        junction_clusters: Original list of junction cluster sets.
+        assigned: List of assigned junction cluster sets.
+
+    Returns:
+        The modified strokes list.
+
+    Note:
+        The angle threshold for T-junction merges is relaxed to 2*pi/3 (120
+        degrees) compared to normal merges, because the main stroke may bend
+        at the junction.
+
+        Strokes that would create a loop (same cluster at both ends) are
+        excluded from merging.
     """
     changed = True
     while changed:
@@ -210,10 +356,29 @@ def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
 
 
 def get_stroke_tail(stroke: list[tuple], at_end: bool, cluster: set) -> tuple[list[tuple], tuple]:
-    """Get the tail points of a stroke before a junction cluster.
+    """Extract the tail portion of a stroke before entering a junction cluster.
+
+    The "tail" is the segment of the stroke leading up to (but not inside) the
+    junction cluster, used to determine the stroke's approach direction and
+    for extending strokes toward stub tips.
+
+    Args:
+        stroke: List of (x, y) coordinate tuples.
+        at_end: If True, get the tail at the end of the stroke; if False,
+            at the start.
+        cluster: Set of (x, y) integer tuples representing the junction cluster.
 
     Returns:
-        Tuple of (tail_points, leg_end_point)
+        A tuple of (tail_points, leg_end_point) where:
+            - tail_points: List of up to 8 points from the stroke leading to
+                the junction, ordered from interior toward the junction.
+            - leg_end_point: The endpoint of the stroke (inside or at the
+                cluster boundary).
+
+    Note:
+        Points inside the cluster are excluded from the tail (except the first
+        point, which establishes the connection). This ensures the tail
+        represents the stroke's approach direction without cluster noise.
     """
     if at_end:
         tail = []
@@ -237,7 +402,34 @@ def get_stroke_tail(stroke: list[tuple], at_end: bool, cluster: set) -> tuple[li
 
 def extend_stroke_to_tip(stroke: list[tuple], at_end: bool, tail: list[tuple],
                          leg_end: tuple, stub_tip: tuple) -> None:
-    """Extend a stroke from its junction end toward a stub tip (modifies in place)."""
+    """Extend a stroke from its junction end toward a stub tip point.
+
+    When absorbing a convergence stub, the neighboring strokes are extended
+    toward the stub's tip to preserve the overall stroke coverage. This
+    function adds interpolated points that curve from the stroke's natural
+    direction toward the target tip.
+
+    The extension uses a blending approach: early points follow the stroke's
+    existing direction, while later points curve toward the stub tip.
+
+    Args:
+        stroke: List of (x, y) tuples. Modified in place by appending or
+            prepending extension points.
+        at_end: If True, extend from the end of the stroke; if False, from
+            the start.
+        tail: Tail points from get_stroke_tail(), used to compute the stroke's
+            approach direction.
+        leg_end: The endpoint of the stroke being extended.
+        stub_tip: The target point to extend toward (tip of the absorbed stub).
+
+    Returns:
+        None. The stroke is modified in place.
+
+    Note:
+        The number of extension points is proportional to the distance from
+        leg_end to stub_tip. The blending parameter t interpolates between
+        continuing straight (t=0) and reaching the tip (t=1).
+    """
     if len(tail) >= 2:
         dx = tail[-1][0] - tail[0][0]
         dy = tail[-1][1] - tail[0][1]
@@ -278,8 +470,31 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
                              assigned: list[set], conv_threshold: int = 18) -> list[list[tuple]]:
     """Absorb short convergence stubs into longer strokes at junction clusters.
 
-    A convergence stub is a short stroke with one endpoint in a junction cluster
-    and the other end free (e.g. the pointed apex of letter A).
+    A convergence stub is a short stroke with one endpoint at a junction cluster
+    and the other end free (not at any junction). These often appear at apex
+    points of letters like 'A', 'V', 'W' where multiple strokes converge.
+
+    When a convergence stub is absorbed, neighboring strokes at the same junction
+    are extended toward the stub's free tip, and the stub itself is removed.
+
+    Args:
+        strokes: List of stroke paths. Modified in place.
+        junction_clusters: List of original junction cluster sets.
+        assigned: List of assigned junction cluster sets.
+        conv_threshold: Maximum length (in points) for a stroke to be considered
+            a convergence stub. Defaults to 18.
+
+    Returns:
+        The modified strokes list.
+
+    Note:
+        The function requires at least 2 other strokes at the junction cluster
+        to perform absorption. This prevents removing stubs that are actually
+        the only stroke coverage in a region.
+
+        Special handling exists for "loop stubs" where both endpoints are in
+        the same cluster - in this case, the stub tip is determined by which
+        endpoint is farther from the cluster center.
     """
     changed = True
     while changed:
@@ -341,7 +556,26 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
 
 def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
                           stub_threshold: int = 20) -> list[list[tuple]]:
-    """Absorb short stubs into neighboring strokes at junction clusters."""
+    """Absorb short stubs into neighboring strokes at junction clusters.
+
+    Unlike convergence stubs, junction stubs may have both endpoints at
+    junction clusters. This function merges such stubs into the longest
+    neighboring stroke at one of their junction clusters.
+
+    Args:
+        strokes: List of stroke paths. Modified in place.
+        assigned: List of assigned junction cluster sets.
+        stub_threshold: Maximum length (in points) for a stroke to be
+            considered a stub. Defaults to 20.
+
+    Returns:
+        The modified strokes list.
+
+    Note:
+        The stub is appended to or prepended from the target stroke's endpoint
+        that shares the junction cluster. The merging preserves point order
+        to maintain a continuous path.
+    """
     changed = True
     while changed:
         changed = False
@@ -396,7 +630,26 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
 
 def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
                            prox_threshold: int = 20) -> list[list[tuple]]:
-    """Absorb short stubs by proximity to longer stroke endpoints."""
+    """Absorb short stubs by proximity to longer stroke endpoints.
+
+    This function handles stubs that may not be at recognized junction clusters
+    but are close to endpoints of longer strokes. It's a fallback for cleanup
+    after junction-based merging.
+
+    Args:
+        strokes: List of stroke paths. Modified in place.
+        stub_threshold: Maximum length for a stroke to be considered a stub.
+            Defaults to 20.
+        prox_threshold: Maximum distance (in pixels) between stub endpoint and
+            target endpoint for proximity merging. Defaults to 20.
+
+    Returns:
+        The modified strokes list.
+
+    Note:
+        Only considers merging with strokes that are at least stub_threshold
+        in length, preventing chain reactions of small strokes merging.
+    """
     changed = True
     while changed:
         changed = False
@@ -436,7 +689,26 @@ def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
 
 def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
                         stub_threshold: int = 20) -> list[list[tuple]]:
-    """Remove orphaned short stubs that have no neighbors at their junction clusters."""
+    """Remove orphaned short stubs with no neighbors at their junction clusters.
+
+    An orphan stub is a short stroke at a junction cluster where no other
+    strokes have endpoints. These are typically tracing artifacts that should
+    be removed.
+
+    Args:
+        strokes: List of stroke paths. Modified in place.
+        assigned: List of assigned junction cluster sets.
+        stub_threshold: Maximum length for a stroke to be considered for
+            removal. Defaults to 20.
+
+    Returns:
+        The modified strokes list.
+
+    Note:
+        A stub is only removed if at least one of its junction clusters has
+        no other stroke endpoints. This preserves stubs that may be bridges
+        between otherwise disconnected regions.
+    """
     changed = True
     while changed:
         changed = False

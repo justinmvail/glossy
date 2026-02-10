@@ -1,10 +1,35 @@
 #!/usr/bin/env python3
-"""Visualize all stroke data for one font."""
+"""Visualize all stroke data for characters from a single font.
+
+This module creates a grid visualization of all characters from the first font
+in the database that has stroke data. Each character is rendered in a cell
+showing its stroke paths with color-coded strokes for easy visual inspection.
+
+The visualization is useful for:
+    - Quality checking extracted stroke data
+    - Verifying stroke ordering and connectivity
+    - Debugging stroke extraction algorithms
+    - Visual comparison of different fonts
+
+Output:
+    Saves a PNG image grid (all_chars_preview.png) and opens it with the
+    system default image viewer via xdg-open.
+
+Example:
+    Run as a script to generate the visualization::
+
+        $ python visualize_all_chars.py
+
+Note:
+    Requires a populated fonts.db database with stroke data in the
+    characters.strokes_raw column.
+"""
 
 import sqlite3
 import json
 from PIL import Image, ImageDraw, ImageFont
 
+# Database connection with Row factory for dict-like access
 conn = sqlite3.connect('fonts.db')
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()

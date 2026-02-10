@@ -1,13 +1,35 @@
 #!/usr/bin/env python3
-"""
-Filter fonts by checking if rendered text has connected letters.
+"""Filter fonts by checking if rendered text has connected letters.
 
-"Hello World!" should have ~11 separate components (10 letters + !)
-Cursive fonts will have far fewer (connected letters form single components)
+This script identifies cursive or connected fonts by rendering sample text and
+counting the number of connected components in the resulting image. Print fonts
+will have many separate components (one per letter), while cursive fonts will
+have fewer components because letters connect together.
 
-Usage:
-    python3 run_connectivity_filter.py          # Preview only
-    python3 run_connectivity_filter.py --update # Update database
+The script uses "Hello World!" as sample text, which should produce approximately
+11 separate components for print fonts (10 letters + exclamation mark). Fonts
+with fewer than a threshold number of components (default: 6) are flagged as
+cursive/connected and can optionally be marked as failed in the database.
+
+Example:
+    Preview mode (no database changes)::
+
+        $ python3 run_connectivity_filter.py
+
+    Update database with results::
+
+        $ python3 run_connectivity_filter.py --update
+
+    Custom threshold::
+
+        $ python3 run_connectivity_filter.py --update --threshold 5
+
+Attributes:
+    DB_PATH (str): Default path to the SQLite fonts database.
+    SAMPLE_TEXT (str): Text rendered for connectivity analysis.
+    FONT_SIZE (int): Font size in points for rendering.
+    MIN_COMPONENTS (int): Minimum number of components for a font to pass.
+        Fonts with fewer components are considered cursive.
 """
 
 import argparse
@@ -28,7 +50,30 @@ MIN_COMPONENTS = 6
 
 
 def count_components(font_path: str) -> tuple:
-    """Render text and count connected components."""
+    """Render text with a font and count connected components.
+
+    Renders the sample text using the specified font file and performs
+    connected component analysis to count the number of separate ink
+    regions. Print fonts will have many components (one per letter),
+    while cursive fonts will have fewer (connected letters merge).
+
+    Args:
+        font_path: Absolute path to the font file (.ttf, .otf, etc.).
+
+    Returns:
+        A tuple of (num_components, error_message) where:
+            - num_components (int or None): Number of connected components
+              in the rendered text, or None if an error occurred.
+            - error_message (str or None): Error description if the font
+              could not be loaded, or None on success.
+
+    Example:
+        >>> components, error = count_components('/path/to/font.ttf')
+        >>> if error:
+        ...     print(f"Failed: {error}")
+        ... else:
+        ...     print(f"Found {components} components")
+    """
     try:
         font = ImageFont.truetype(font_path, FONT_SIZE)
     except Exception as e:
@@ -56,6 +101,26 @@ def count_components(font_path: str) -> tuple:
 
 
 def main(update_db=False):
+    """Run the connectivity filter on all fonts that passed OCR prefilter.
+
+    Queries the database for fonts that passed the prefilter stage, renders
+    sample text with each font, counts connected components, and identifies
+    fonts that appear to be cursive based on low component counts.
+
+    Results are displayed showing the most and least connected fonts, along
+    with pass/fail status. If update_db is True, fonts identified as
+    cursive are marked as failed in the database with an appropriate
+    removal reason.
+
+    Args:
+        update_db: If True, update the database to mark cursive fonts as
+            failed. If False (default), only preview results without
+            making any database changes.
+
+    Returns:
+        None. Results are printed to stdout and optionally written to
+        the database.
+    """
     print("=" * 60)
     print("CONNECTIVITY FILTER")
     print("=" * 60)

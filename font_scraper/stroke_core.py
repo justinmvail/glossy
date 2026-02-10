@@ -1,7 +1,39 @@
-"""Core stroke processing functions.
+"""Core stroke processing functions for font glyph analysis.
 
-This module contains the main stroke generation and processing functions
-used by the Flask routes and other modules.
+This module provides the primary API for extracting stroke representations
+from font glyphs. It integrates skeleton analysis, stroke tracing, and
+template-based optimization to produce clean stroke paths suitable for
+rendering or further processing.
+
+The module serves as the central orchestration layer that combines:
+    - Skeleton extraction via SkeletonAnalyzer
+    - Stroke path tracing and merging
+    - Template-based stroke optimization (MinimalStrokePipeline)
+    - Affine transformation optimization (auto_fit)
+
+Key Functions:
+    - skel_markers: Detect structural markers (endpoints, junctions) in glyphs
+    - skel_strokes: Extract raw stroke paths from skeleton analysis
+    - min_strokes: Generate optimized strokes using template matching
+    - auto_fit: Apply affine optimization for best stroke fit
+
+Example:
+    >>> from stroke_core import min_strokes, skel_strokes
+    >>> # Get minimal strokes for letter 'A' in a font
+    >>> strokes = min_strokes('/path/to/font.ttf', 'A', canvas_size=224)
+    >>> # Or get raw skeleton-based strokes
+    >>> mask = render_glyph_mask('/path/to/font.ttf', 'A', 224)
+    >>> raw_strokes = skel_strokes(mask)
+
+Notes:
+    This module depends on several specialized submodules:
+    - stroke_flask: Font path resolution
+    - stroke_lib.analysis.skeleton: Skeleton extraction and analysis
+    - stroke_merge: Stroke path merging algorithms
+    - stroke_pipeline: Template-based stroke generation
+    - stroke_rendering: Glyph mask rendering
+    - stroke_skeleton: Path tracing utilities
+    - stroke_templates: Template definitions for characters
 """
 
 from stroke_flask import resolve_font_path
@@ -29,7 +61,32 @@ from stroke_utils import point_in_region
 
 
 def _skel(mask):
-    """Analyze skeleton and return info dict compatible with legacy format."""
+    """Analyze skeleton and return info dict compatible with legacy format.
+
+    Performs skeleton extraction on a binary mask and returns structural
+    information including the skeleton pixel set, adjacency graph, and
+    junction/endpoint classifications.
+
+    Args:
+        mask: A 2D numpy array representing a binary glyph mask where
+            non-zero values indicate foreground pixels.
+
+    Returns:
+        A dictionary containing skeleton analysis results with the following keys:
+            - 'skel_set': Set of (x, y) tuples representing skeleton pixels
+            - 'adj': Dictionary mapping each skeleton pixel to its neighbors
+            - 'junction_pixels': Set of pixels with degree >= 3
+            - 'junction_clusters': List of clustered junction pixel groups
+            - 'assigned': Mapping of pixels to their assigned clusters
+            - 'endpoints': Set of pixels with degree == 1
+
+        Returns None if skeleton analysis fails (empty mask, no skeleton).
+
+    Notes:
+        Uses a merge_distance of 12 pixels for clustering nearby junction
+        points. This helps consolidate complex junction regions into single
+        logical junction points.
+    """
     info = SkeletonAnalyzer(merge_distance=12).analyze(mask)
     if not info:
         return None
@@ -48,13 +105,67 @@ def _skel(mask):
 
 
 def skel_markers(mask):
-    """Detect skeleton markers from mask."""
+    """Detect skeleton markers from a binary glyph mask.
+
+    Extracts structural markers from the skeleton of a glyph, identifying
+    key topological features like endpoints, junctions, and curvature points.
+
+    Args:
+        mask: A 2D numpy array representing a binary glyph mask where
+            non-zero values indicate foreground pixels.
+
+    Returns:
+        A list of marker dictionaries, where each dictionary contains:
+            - 'x': X coordinate of the marker
+            - 'y': Y coordinate of the marker
+            - 'type': Marker type string (e.g., 'endpoint', 'junction')
+
+        Returns an empty list if no markers are detected.
+
+    Notes:
+        This function is useful for visualizing glyph structure or for
+        providing anchor points in interactive stroke editing interfaces.
+    """
     markers = SkeletonAnalyzer(merge_distance=12).detect_markers(mask)
     return [m.to_dict() for m in markers]
 
 
 def skel_strokes(mask, min_len=5, min_stroke_len=None):
-    """Extract stroke paths from skeleton."""
+    """Extract stroke paths from skeleton analysis with merging.
+
+    Performs complete stroke extraction from a glyph mask by:
+    1. Analyzing the skeleton structure
+    2. Tracing paths between endpoints and junctions
+    3. Applying multiple merge passes to consolidate fragments
+    4. Filtering by minimum length
+
+    Args:
+        mask: A 2D numpy array representing a binary glyph mask where
+            non-zero values indicate foreground pixels.
+        min_len: Minimum number of points required for a valid stroke.
+            Strokes shorter than this are filtered out. Defaults to 5.
+        min_stroke_len: Deprecated alias for min_len. If provided, overrides
+            min_len for backward compatibility.
+
+    Returns:
+        A list of strokes, where each stroke is a list of [x, y] coordinate
+        pairs as floats. Example: [[[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]], ...]
+
+        Returns an empty list if skeleton analysis fails or no valid strokes
+        are found.
+
+    Notes:
+        The merging pipeline includes:
+        - T-junction merging for strokes meeting at perpendicular intersections
+        - General run merge pass for nearby endpoints
+        - Convergence stub absorption for short branches at junctions
+        - Junction stub cleanup for isolated fragments
+        - Proximity-based stub absorption
+        - Orphan stub removal for disconnected short strokes
+
+        Strokes are traced starting from endpoints first, then from junction
+        pixels, ensuring complete coverage of the skeleton graph.
+    """
     if min_stroke_len is not None:
         min_len = min_stroke_len
     info = _skel(mask)
@@ -106,11 +217,40 @@ def skel_strokes(mask, min_len=5, min_stroke_len=None):
 
 
 def _merge_to_expected_count(strokes, char):
-    """Merge strokes to match expected count from template."""
+    """Merge strokes to match expected count from character template.
+
+    Applies greedy endpoint-based merging to reduce the number of strokes
+    to match the expected count defined in the character's template variants.
+
+    Args:
+        strokes: A list of strokes, where each stroke is a list of [x, y]
+            coordinate pairs.
+        char: The character being processed (e.g., 'A', '3'). Used to look
+            up expected stroke counts from NUMPAD_TEMPLATE_VARIANTS.
+
+    Returns:
+        The merged list of strokes. If no template exists for the character,
+        or if the current stroke count already matches a template variant,
+        the original strokes are returned unchanged.
+
+    Notes:
+        The merging algorithm:
+        1. Looks up all template variants for the character
+        2. If current count matches any variant, returns unchanged
+        3. Otherwise, targets the minimum expected count
+        4. Greedily merges strokes by finding the closest endpoint pairs
+        5. Considers all four endpoint combinations (start-start, start-end,
+           end-start, end-end) when computing distances
+        6. Reverses stroke direction as needed when merging
+    """
     variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
     if not variants or not strokes:
         return strokes
-    expected = min(len(t) for t in variants.values())
+    expected_counts = [len(t) for t in variants.values()]
+    # If current stroke count already matches any template variant, don't merge
+    if len(strokes) in expected_counts:
+        return strokes
+    expected = min(expected_counts)
     if len(strokes) <= expected:
         return strokes
     # Greedy merge: find closest endpoints and merge
@@ -136,7 +276,45 @@ def _merge_to_expected_count(strokes, char):
 
 
 def min_strokes(fp, c, cs=224, tpl=None, ret_var=False):
-    """Generate minimal strokes using the pipeline."""
+    """Generate minimal strokes using the template-based pipeline.
+
+    Produces optimized stroke paths for a character by evaluating multiple
+    template variants and selecting the best match based on scoring.
+
+    Args:
+        fp: Font path string. Can be an absolute path or a font name that
+            will be resolved via resolve_font_path.
+        c: The character to generate strokes for (single character string).
+        cs: Canvas size in pixels for rendering the glyph. Larger values
+            provide more detail but increase processing time. Defaults to 224.
+        tpl: Optional custom template string to use instead of evaluating
+            all variants. When provided, only this template is traced.
+        ret_var: If True, returns a tuple of (strokes, variant_name) instead
+            of just strokes. Useful for debugging which template was selected.
+            Defaults to False.
+
+    Returns:
+        If ret_var is False:
+            A list of strokes, where each stroke is a list of [x, y]
+            coordinate pairs as floats.
+
+        If ret_var is True:
+            A tuple of (strokes, variant_name) where variant_name is
+            'custom' for custom templates or the name of the best-matching
+            template variant.
+
+    Notes:
+        The pipeline stages are:
+        1. Render glyph mask at specified canvas size
+        2. Analyze skeleton structure
+        3. Either trace custom template or evaluate all template variants
+        4. Score each result based on coverage and path quality
+        5. Return the best-scoring variant
+
+        When no custom template is provided, the function evaluates all
+        variants defined in NUMPAD_TEMPLATE_VARIANTS for the character
+        and returns the one with the best score.
+    """
     pipe = MinimalStrokePipeline(
         fp, c, cs,
         resolve_font_path_fn=resolve_font_path,
@@ -165,7 +343,47 @@ def min_strokes(fp, c, cs=224, tpl=None, ret_var=False):
 
 
 def auto_fit(fp, c, cs=224, ret_mark=False):
-    """Auto-fit strokes using affine optimization."""
+    """Auto-fit strokes using affine transformation optimization.
+
+    Generates strokes and optimizes their positions using affine
+    transformations (translation, rotation, scaling, shear) to best
+    fit the glyph mask.
+
+    Args:
+        fp: Font path string. Can be an absolute path or a font name that
+            will be resolved via resolve_font_path.
+        c: The character to generate strokes for (single character string).
+        cs: Canvas size in pixels for rendering the glyph. Defaults to 224.
+        ret_mark: If True, returns a tuple of (strokes, markers) where
+            markers are the start/stop points of each stroke. Useful for
+            visualization or interactive editing. Defaults to False.
+
+    Returns:
+        If ret_mark is False:
+            A list of strokes, where each stroke is a list of [x, y]
+            coordinate pairs as floats. Returns None if optimization fails.
+
+        If ret_mark is True:
+            A tuple of (strokes, markers) where:
+            - strokes: List of stroke paths (or None if failed)
+            - markers: List of marker dictionaries with keys:
+                - 'x': X coordinate
+                - 'y': Y coordinate
+                - 'type': Either 'start' or 'stop'
+                - 'stroke_id': Index of the stroke this marker belongs to
+
+    Notes:
+        The affine optimization adjusts six parameters:
+        - Translation (tx, ty)
+        - Scale (sx, sy)
+        - Rotation (theta)
+        - Shear
+
+        This produces better-fitted strokes than raw skeleton extraction,
+        especially for fonts with unusual proportions or stylization.
+
+        Strokes with fewer than 2 points are filtered from the output.
+    """
     from stroke_affine import optimize_affine
 
     result = optimize_affine(fp, c, cs)

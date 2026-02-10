@@ -1,9 +1,37 @@
 #!/usr/bin/env python3
-"""
-Run OCR prefilter on all passing fonts using batch Docker processing.
+"""Run OCR prefilter on all passing fonts using batch Docker processing.
 
-Usage:
-    python3 run_ocr_prefilter.py [--db fonts.db] [--threshold 0.7]
+This script filters fonts by rendering sample text and using TrOCR (Transformer
+OCR) to verify that the text is readable. Fonts that produce unreadable or
+heavily distorted text are filtered out, as they are likely decorative,
+symbol-based, or otherwise unsuitable for standard text rendering.
+
+The process involves:
+    1. Query database for fonts that passed previous checks (completeness,
+       non-cursive, non-duplicate)
+    2. Render sample text with each font to a temporary image
+    3. Run TrOCR in batch mode via Docker with GPU acceleration
+    4. Calculate confidence scores using Levenshtein distance
+    5. Update database with pass/fail status and confidence scores
+
+The TrOCR model is loaded once and reused for all images, making batch
+processing significantly faster than per-font processing.
+
+Example:
+    Default settings::
+
+        $ python3 run_ocr_prefilter.py
+
+    Custom database and threshold::
+
+        $ python3 run_ocr_prefilter.py --db custom.db --threshold 0.8
+
+Attributes:
+    SAMPLE_TEXT (str): The text rendered and verified via OCR.
+
+Note:
+    Requires Docker with GPU support and the 'trocr:latest' image.
+    The HuggingFace cache is mounted to avoid re-downloading the model.
 """
 
 import argparse
@@ -25,7 +53,19 @@ SAMPLE_TEXT = "Hello World 123"
 
 
 def render_sample(font_path: str, output_path: str) -> bool:
-    """Render sample text with the font."""
+    """Render sample text with a font and save as an image.
+
+    Creates a white background image with black text rendered using the
+    specified font. The image is sized to fit the text with padding.
+
+    Args:
+        font_path: Absolute path to the font file (.ttf, .otf, etc.).
+        output_path: Path where the rendered PNG image will be saved.
+
+    Returns:
+        True if the image was successfully rendered and saved, False if
+        the font could not be loaded or any error occurred.
+    """
     font_size = 48
     padding = 20
 
@@ -52,7 +92,25 @@ def render_sample(font_path: str, output_path: str) -> bool:
 
 
 def levenshtein_distance(s1: str, s2: str) -> int:
-    """Calculate Levenshtein edit distance between two strings."""
+    """Calculate the Levenshtein edit distance between two strings.
+
+    The Levenshtein distance is the minimum number of single-character
+    edits (insertions, deletions, or substitutions) required to change
+    one string into the other.
+
+    Args:
+        s1: First string for comparison.
+        s2: Second string for comparison.
+
+    Returns:
+        The minimum number of edits needed to transform s1 into s2.
+
+    Example:
+        >>> levenshtein_distance("hello", "hallo")
+        1
+        >>> levenshtein_distance("cat", "dog")
+        3
+    """
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)
 
@@ -73,7 +131,29 @@ def levenshtein_distance(s1: str, s2: str) -> int:
 
 
 def calculate_confidence(expected: str, actual: str) -> float:
-    """Calculate confidence using normalized edit distance."""
+    """Calculate OCR confidence using normalized edit distance.
+
+    Computes a confidence score between 0.0 and 1.0 based on how closely
+    the OCR result matches the expected text. Uses case-insensitive
+    comparison with leading/trailing whitespace stripped.
+
+    Args:
+        expected: The text that was rendered (ground truth).
+        actual: The text recognized by OCR.
+
+    Returns:
+        A float between 0.0 and 1.0 where:
+            - 1.0 means exact match (zero edits needed)
+            - 0.0 means completely different (all characters wrong)
+
+    Example:
+        >>> calculate_confidence("Hello World", "Hello World")
+        1.0
+        >>> calculate_confidence("Hello World", "hello world")
+        1.0
+        >>> calculate_confidence("Hello World", "Hell World")
+        0.909...
+    """
     if not actual:
         return 0.0
 
@@ -92,7 +172,23 @@ def calculate_confidence(expected: str, actual: str) -> float:
 
 
 def get_passing_fonts(db_path: str) -> list:
-    """Get all fonts that passed pre-AI checks."""
+    """Get all fonts that passed pre-AI checks and need OCR prefiltering.
+
+    Queries the database for fonts that meet the following criteria:
+        - Completeness score >= 90%
+        - Not flagged as cursive
+        - Not flagged as duplicate (or duplicate status is NULL)
+        - Prefilter has not yet been run (prefilter_passed is NULL)
+
+    Args:
+        db_path: Path to the SQLite fonts database.
+
+    Returns:
+        A list of dictionaries, each containing:
+            - id (int): Font ID in the database
+            - name (str): Font name
+            - file_path (str): Absolute path to the font file
+    """
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -114,7 +210,29 @@ def get_passing_fonts(db_path: str) -> list:
 
 
 def run_batch_ocr(image_dir: str, image_files: list) -> dict:
-    """Run TrOCR on all images in batch mode via Docker."""
+    """Run TrOCR on all images in batch mode via Docker.
+
+    Executes TrOCR model inside a Docker container with GPU support.
+    The model is loaded once and reused for all images, making this
+    significantly faster than processing images individually.
+
+    Args:
+        image_dir: Absolute path to directory containing the images.
+        image_files: List of image filenames (not full paths) to process.
+
+    Returns:
+        A dictionary mapping filename to result, where each result is a
+        dict containing:
+            - text (str or None): Recognized text, or None on error
+            - error (str or None): Error message, or None on success
+
+        Returns None if Docker execution failed entirely.
+
+    Note:
+        Requires Docker with GPU support (--gpus all) and the
+        'trocr:latest' image. The HuggingFace model cache is mounted
+        from ~/.cache/huggingface to avoid re-downloading.
+    """
 
     # Create batch processing script
     batch_script = '''
@@ -234,7 +352,29 @@ print("RESULTS_END", flush=True)
 
 
 def run_prefilter(db_path: str, threshold: float = 0.7):
-    """Run OCR prefilter on all passing fonts."""
+    """Run OCR prefilter on all passing fonts.
+
+    This is the main orchestration function that:
+        1. Queries the database for fonts to process
+        2. Renders sample images for each font
+        3. Runs batch OCR via Docker
+        4. Calculates confidence scores
+        5. Updates the database with results
+        6. Prints summary statistics
+
+    Args:
+        db_path: Path to the SQLite fonts database.
+        threshold: Minimum confidence score (0.0-1.0) for a font to pass.
+            Defaults to 0.7 (70% match required).
+
+    Returns:
+        None. Results are printed to stdout and written to the database.
+
+    Note:
+        Fonts that fail the prefilter are recorded in the font_removals
+        table with reason 'ocr_prefilter' and details including the
+        expected text, recognized text, and confidence score.
+    """
     print("=" * 60)
     print("OCR PREFILTER - BATCH MODE")
     print("=" * 60)
@@ -411,6 +551,16 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
 
 
 def main():
+    """Parse command-line arguments and run the OCR prefilter.
+
+    Command-line Arguments:
+        --db: Path to the SQLite fonts database. Defaults to 'fonts.db'.
+        --threshold: Minimum confidence score (0.0-1.0) for a font to pass.
+            Defaults to 0.7.
+
+    Returns:
+        None. Exits after running the prefilter.
+    """
     parser = argparse.ArgumentParser(description='Run OCR prefilter on all passing fonts')
     parser.add_argument('--db', default='fonts.db', help='Database path')
     parser.add_argument('--threshold', type=float, default=0.7, help='Confidence threshold (default: 0.7)')

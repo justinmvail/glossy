@@ -1,4 +1,42 @@
-"""Skeleton analysis facade."""
+"""Skeleton analysis facade.
+
+This module provides the SkeletonAnalyzer class, which serves as the main
+interface for skeleton analysis operations. It encapsulates the complexity
+of skeleton extraction, marker detection, and stroke tracing into a clean,
+high-level API.
+
+The analyzer uses scikit-image for skeletonization and provides methods for:
+    - Extracting and analyzing skeleton structure from binary masks
+    - Detecting vertex, intersection, and termination markers
+    - Tracing and extracting stroke paths from the skeleton
+
+Example usage:
+    Analyze a glyph skeleton::
+
+        from stroke_lib.analysis.skeleton import SkeletonAnalyzer
+        import numpy as np
+
+        # mask is a binary numpy array where True = glyph pixels
+        analyzer = SkeletonAnalyzer(merge_distance=12)
+        info = analyzer.analyze(mask)
+
+        if info:
+            print(f"Skeleton has {len(info.skel_set)} pixels")
+            print(f"Found {len(info.endpoints)} endpoints")
+            print(f"Found {len(info.junction_clusters)} junction clusters")
+
+    Detect markers::
+
+        markers = analyzer.detect_markers(mask)
+        for m in markers:
+            print(f"{m.marker_type.value} at ({m.position.x}, {m.position.y})")
+
+    Extract strokes::
+
+        strokes = analyzer.to_strokes(mask, min_stroke_len=5)
+        for stroke in strokes:
+            print(f"Stroke with {len(stroke)} points")
+"""
 
 from __future__ import annotations
 import numpy as np
@@ -14,25 +52,70 @@ class SkeletonAnalyzer:
     """Facade for skeleton analysis operations.
 
     Provides a clean interface to skeleton extraction, marker detection,
-    and stroke tracing without exposing internal complexity.
+    and stroke tracing without exposing internal complexity. This class
+    coordinates multiple analysis steps and maintains consistent parameters
+    across operations.
+
+    The analyzer performs the following types of analysis:
+        - Skeleton extraction using morphological skeletonization
+        - Adjacency graph construction for 8-connected skeleton pixels
+        - Endpoint and junction pixel detection based on pixel degree
+        - Junction pixel clustering and merging
+        - Marker detection for vertices, intersections, and terminations
+        - Stroke path tracing and cleanup
+
+    Attributes:
+        merge_distance: Distance threshold in pixels for merging nearby
+            junction clusters. Clusters closer than this distance are
+            combined into a single junction.
+
+    Example:
+        >>> analyzer = SkeletonAnalyzer(merge_distance=12)
+        >>> info = analyzer.analyze(binary_mask)
+        >>> markers = analyzer.detect_markers(binary_mask)
+        >>> strokes = analyzer.to_strokes(binary_mask)
     """
 
     def __init__(self, merge_distance: int = 12):
         """Initialize analyzer.
 
         Args:
-            merge_distance: Distance threshold for merging nearby junction clusters
+            merge_distance: Distance threshold for merging nearby junction
+                clusters. Junction clusters with centroids closer than this
+                distance will be merged into a single cluster. Default is 12
+                pixels.
         """
         self.merge_distance = merge_distance
 
     def analyze(self, mask: np.ndarray) -> Optional[SkeletonInfo]:
         """Analyze skeleton of a binary mask.
 
+        Extracts the morphological skeleton from the mask and builds a
+        complete analysis including the adjacency graph, endpoints,
+        junction pixels, and clustered junctions.
+
+        The analysis process:
+            1. Skeletonize the binary mask using scikit-image
+            2. Build an 8-connected adjacency graph
+            3. Identify endpoints (degree 1) and junctions (degree 3+)
+            4. Cluster nearby junction pixels
+            5. Merge clusters that are closer than merge_distance
+
         Args:
-            mask: Binary numpy array (H, W)
+            mask: Binary numpy array of shape (H, W) where non-zero values
+                represent the glyph pixels. The mask should have the glyph
+                as foreground (True/non-zero) and background as False/zero.
 
         Returns:
-            SkeletonInfo with adjacency graph and junction clusters, or None
+            SkeletonInfo object containing:
+                - skel_set: Set of (x, y) tuples for skeleton pixels
+                - adj: Adjacency dictionary mapping pixels to neighbors
+                - endpoints: Set of endpoint pixels (degree 1)
+                - junction_pixels: Set of junction pixels (degree 3+)
+                - junction_clusters: List of clustered junction pixel sets
+                - assigned: Dict mapping pixels to their cluster index
+            Returns None if mask is empty, has no foreground pixels, or
+            if skeletonization fails (e.g., scikit-image not installed).
         """
         try:
             from skimage.morphology import skeletonize
@@ -80,11 +163,28 @@ class SkeletonAnalyzer:
     def detect_markers(self, mask: np.ndarray) -> List[Marker]:
         """Detect vertex and termination markers from skeleton.
 
+        Analyzes the skeleton to identify three types of markers:
+            - VERTEX: Junction points where strokes meet at sharp corners
+            - INTERSECTION: Junction points where strokes cross
+            - TERMINATION: Endpoints of strokes (not at junctions)
+
+        The detection algorithm:
+            1. Extracts skeleton and identifies junction clusters
+            2. Computes centroids for each junction cluster
+            3. Merges nearby centroids
+            4. Classifies junctions as vertex vs intersection based on
+               endpoint connectivity patterns
+            5. Identifies termination points from skeleton endpoints
+
         Args:
-            mask: Binary numpy array
+            mask: Binary numpy array of shape (H, W) representing the glyph.
 
         Returns:
-            List of Marker objects
+            List of Marker objects, each containing:
+                - position: Point with x, y coordinates
+                - marker_type: MarkerType enum (VERTEX, INTERSECTION, or
+                    TERMINATION)
+            Returns empty list if analysis fails.
         """
         info = self.analyze(mask)
         if not info:
@@ -141,12 +241,26 @@ class SkeletonAnalyzer:
     def to_strokes(self, mask: np.ndarray, min_stroke_len: int = 5) -> List[Stroke]:
         """Extract stroke paths from skeleton.
 
+        Traces connected paths through the skeleton graph and converts them
+        to Stroke objects. Includes post-processing to merge connected
+        strokes and absorb short stubs.
+
+        The extraction process:
+            1. Trace all paths from endpoints and junction pixels
+            2. Filter out strokes shorter than min_stroke_len
+            3. Merge strokes that pass through the same junction cluster
+            4. Absorb short stub strokes into longer neighbors
+
         Args:
-            mask: Binary numpy array
-            min_stroke_len: Minimum number of points for a valid stroke
+            mask: Binary numpy array of shape (H, W) representing the glyph.
+            min_stroke_len: Minimum number of points required for a valid
+                stroke. Strokes with fewer points are filtered out.
+                Default is 5.
 
         Returns:
-            List of Stroke objects
+            List of Stroke objects, each containing a sequence of Point
+            objects representing the stroke path. Returns empty list if
+            analysis fails.
         """
         info = self.analyze(mask)
         if not info:
@@ -169,7 +283,18 @@ class SkeletonAnalyzer:
         ]
 
     def _build_adjacency(self, skel_set: Set[Tuple[int, int]]) -> Dict[Tuple[int, int], Set[Tuple[int, int]]]:
-        """Build 8-connected adjacency graph."""
+        """Build 8-connected adjacency graph.
+
+        Creates a dictionary mapping each skeleton pixel to its set of
+        8-connected neighbors (including diagonals).
+
+        Args:
+            skel_set: Set of (x, y) tuples representing skeleton pixels.
+
+        Returns:
+            Dictionary mapping each pixel to a set of its neighboring
+            pixels that are also in the skeleton.
+        """
         adj = defaultdict(set)
         for x, y in skel_set:
             for dx in (-1, 0, 1):
@@ -187,7 +312,23 @@ class SkeletonAnalyzer:
         adj: Dict,
         skel_set: Set[Tuple[int, int]]
     ) -> Tuple[List[Set[Tuple[int, int]]], Dict[Tuple[int, int], int]]:
-        """Cluster nearby junction pixels and merge close clusters."""
+        """Cluster nearby junction pixels and merge close clusters.
+
+        Groups connected junction pixels into clusters using BFS, then
+        merges clusters whose centroids are closer than merge_distance.
+
+        Args:
+            junction_pixels: Set of (x, y) tuples for junction pixels.
+            adj: Adjacency dictionary from _build_adjacency.
+            skel_set: Set of all skeleton pixels (unused but kept for
+                API consistency).
+
+        Returns:
+            Tuple containing:
+                - List of sets, where each set contains the (x, y) tuples
+                  of pixels belonging to that cluster
+                - Dictionary mapping each junction pixel to its cluster index
+        """
         if not junction_pixels:
             return [], {}
 
@@ -257,7 +398,17 @@ class SkeletonAnalyzer:
         return final_clusters, final_assigned
 
     def _merge_nearby_points(self, points: List[List[float]], threshold: float) -> None:
-        """Merge points that are closer than threshold (modifies in place)."""
+        """Merge points that are closer than threshold (modifies in place).
+
+        Iteratively merges the closest pair of points until no pairs are
+        closer than the threshold. Merged points are replaced by their
+        midpoint.
+
+        Args:
+            points: List of [x, y] coordinate lists. Modified in place.
+            threshold: Distance threshold for merging. Points closer than
+                this distance will be merged.
+        """
         merged = True
         while merged:
             merged = False
@@ -290,7 +441,24 @@ class SkeletonAnalyzer:
         assigned: Dict,
         vertices: List[List[float]]
     ) -> List[bool]:
-        """Classify junction clusters as vertex (True) or intersection (False)."""
+        """Classify junction clusters as vertex (True) or intersection (False).
+
+        A junction is classified as a vertex if it has short paths leading
+        to endpoints, suggesting stroke terminations converging at the
+        junction. Intersections are crossing points without such convergence.
+
+        Args:
+            endpoints: Set of endpoint pixel coordinates.
+            junction_clusters: List of junction cluster pixel sets.
+            junction_pixels: Set of all junction pixels.
+            adj: Adjacency dictionary.
+            assigned: Pixel to cluster index mapping.
+            vertices: List of vertex centroid coordinates.
+
+        Returns:
+            List of booleans, one per junction cluster. True indicates
+            the cluster is a vertex, False indicates an intersection.
+        """
         is_vertex = [False] * len(junction_clusters)
 
         # Check for convergence patterns
@@ -327,7 +495,21 @@ class SkeletonAnalyzer:
         adj: Dict,
         assigned: Dict
     ) -> Set[Tuple[int, int]]:
-        """Find endpoints that should be absorbed into junction clusters."""
+        """Find endpoints that should be absorbed into junction clusters.
+
+        Identifies endpoints that are very close to junction clusters and
+        should not be reported as separate termination markers.
+
+        Args:
+            endpoints: Set of endpoint pixel coordinates.
+            junction_clusters: List of junction cluster pixel sets.
+            adj: Adjacency dictionary.
+            assigned: Pixel to cluster index mapping.
+
+        Returns:
+            Set of endpoint pixel coordinates that should be absorbed
+            (not reported as termination markers).
+        """
         absorbed = set()
 
         for endpoint in endpoints:
@@ -351,7 +533,18 @@ class SkeletonAnalyzer:
         return absorbed
 
     def _trace_all_strokes(self, info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
-        """Trace all stroke paths from the skeleton."""
+        """Trace all stroke paths from the skeleton.
+
+        Traces paths starting from endpoints first, then from junction
+        pixels, to extract all stroke segments from the skeleton graph.
+
+        Args:
+            info: SkeletonInfo object with skeleton analysis data.
+
+        Returns:
+            List of stroke paths, where each path is a list of (x, y)
+            pixel coordinate tuples.
+        """
         stop_set = info.endpoints | info.junction_pixels
         visited_edges = set()
         strokes = []
@@ -428,7 +621,19 @@ class SkeletonAnalyzer:
         return strokes
 
     def _merge_strokes(self, strokes: List[List[Tuple[int, int]]], info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
-        """Merge strokes that pass through junction clusters."""
+        """Merge strokes that pass through junction clusters.
+
+        Combines strokes that share a junction cluster endpoint and have
+        compatible directions (nearly collinear). Uses direction-based
+        scoring to find the best merge candidates.
+
+        Args:
+            strokes: List of stroke paths to merge.
+            info: SkeletonInfo object with cluster assignments.
+
+        Returns:
+            List of merged stroke paths.
+        """
         import math
 
         def endpoint_cluster(stroke, from_end):
@@ -495,7 +700,18 @@ class SkeletonAnalyzer:
         return strokes
 
     def _absorb_stubs(self, strokes: List[List[Tuple[int, int]]], info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
-        """Absorb short stub strokes into longer neighbors."""
+        """Absorb short stub strokes into longer neighbors.
+
+        Identifies short strokes (stubs) that connect to junction clusters
+        and merges them into longer strokes touching the same cluster.
+
+        Args:
+            strokes: List of stroke paths to process.
+            info: SkeletonInfo object with cluster assignments.
+
+        Returns:
+            List of stroke paths with stubs absorbed.
+        """
         stub_threshold = 20
 
         def endpoint_cluster(stroke, from_end):

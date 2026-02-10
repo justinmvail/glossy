@@ -1,8 +1,39 @@
-"""
-FontSpace Scraper - Download handwriting fonts from FontSpace.com
+"""FontSpace Scraper - Download handwriting fonts from FontSpace.com.
 
-Usage:
-    python fontspace_scraper.py --output ./fonts --pages 10
+This module provides a web scraper for downloading fonts from FontSpace.com.
+It supports both search-based and category-based font discovery, handles
+pagination, and extracts TTF/OTF font files from ZIP downloads or direct
+font file links.
+
+The scraper fetches download URLs from individual font pages since FontSpace
+requires visiting each font's page to obtain the actual download link.
+
+Example:
+    Basic usage with search query::
+
+        $ python fontspace_scraper.py --output ./fonts --pages 10
+
+    Using category-based scraping::
+
+        $ python fontspace_scraper.py --output ./fonts --category --query handwriting
+
+    Programmatic usage::
+
+        scraper = FontSpaceScraper('./output', rate_limit=1.0)
+        metadata = scraper.scrape_and_download(
+            query='handwritten',
+            max_pages=10,
+            max_fonts=100,
+            use_category=False
+        )
+
+Command-line Arguments:
+    --output, -o: Output directory for downloaded fonts (default: ./fontspace_fonts)
+    --query, -q: Search query or category name (default: handwritten)
+    --pages, -p: Maximum pages to scrape (default: 10)
+    --max-fonts, -m: Maximum fonts to download (default: unlimited)
+    --category, -c: Use category browsing instead of search
+    --rate-limit, -r: Seconds to wait between requests (default: 1.0)
 """
 
 import argparse
@@ -22,12 +53,26 @@ import json
 
 @dataclass
 class FontInfo:
+    """Information about a font from FontSpace.
+
+    Attributes:
+        name: The display name of the font.
+        url: The URL to the font's detail page on FontSpace.
+        download_url: The direct download URL for the font file or ZIP.
+            May be empty initially and populated when visiting the font page.
+        downloads: The number of downloads (may be 0 if not parsed).
+    """
     name: str
     url: str
     download_url: str
     downloads: int = 0
 
     def to_dict(self):
+        """Convert the FontInfo to a dictionary for JSON serialization.
+
+        Returns:
+            dict: A dictionary containing all font information fields.
+        """
         return {
             'name': self.name,
             'url': self.url,
@@ -37,11 +82,33 @@ class FontInfo:
 
 
 class FontSpaceScraper:
-    """Scrape handwriting fonts from FontSpace.com."""
+    """Scrape handwriting fonts from FontSpace.com.
+
+    This class handles the complete workflow of discovering fonts from FontSpace
+    search results or category pages, fetching download URLs from individual
+    font pages, and downloading font files.
+
+    Attributes:
+        BASE_URL (str): The base URL for FontSpace.com.
+        output_dir (Path): Directory where downloaded fonts are saved.
+        rate_limit (float): Delay in seconds between HTTP requests.
+        session (requests.Session): HTTP session for making requests.
+        fonts_found (List[FontInfo]): List of all fonts discovered during scraping.
+        downloaded (Set[str]): Set of font names that were successfully downloaded.
+        failed (List[str]): List of font names that failed to download.
+    """
 
     BASE_URL = "https://www.fontspace.com"
 
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
+        """Initialize the FontSpace scraper.
+
+        Args:
+            output_dir: Directory path where downloaded fonts will be saved.
+                The directory will be created if it does not exist.
+            rate_limit: Minimum seconds to wait between HTTP requests to avoid
+                overwhelming the server. Defaults to 1.0 second.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.rate_limit = rate_limit
@@ -57,7 +124,19 @@ class FontSpaceScraper:
         self.failed: List[str] = []
 
     def scrape_search(self, query: str = "handwritten", max_pages: int = 10) -> List[FontInfo]:
-        """Scrape fonts from search results."""
+        """Scrape fonts from FontSpace search results.
+
+        Performs a search query and iterates through paginated results,
+        extracting font information from each page.
+
+        Args:
+            query: The search query string to find fonts. Defaults to "handwritten".
+            max_pages: Maximum number of result pages to scrape. Defaults to 10.
+
+        Returns:
+            A list of FontInfo objects representing all fonts found in the
+            search results across all scraped pages.
+        """
         print(f"\nSearching FontSpace for: {query}")
 
         fonts = []
@@ -90,7 +169,20 @@ class FontSpaceScraper:
         return fonts
 
     def scrape_category(self, category: str = "handwriting", max_pages: int = 10) -> List[FontInfo]:
-        """Scrape fonts from a category."""
+        """Scrape fonts from a FontSpace category.
+
+        Browses a specific category and iterates through paginated results,
+        extracting font information from each page.
+
+        Args:
+            category: The category slug to browse (e.g., "handwriting", "script").
+                Defaults to "handwriting".
+            max_pages: Maximum number of category pages to scrape. Defaults to 10.
+
+        Returns:
+            A list of FontInfo objects representing all fonts found in the
+            category across all scraped pages.
+        """
         print(f"\nScraping FontSpace category: {category}")
 
         fonts = []
@@ -123,7 +215,18 @@ class FontSpaceScraper:
         return fonts
 
     def _parse_search_results(self, html: str) -> List[FontInfo]:
-        """Parse font list from search/category page."""
+        """Parse font list from search or category page HTML.
+
+        Extracts font information by finding links to font pages in the HTML.
+        Automatically deduplicates fonts by URL.
+
+        Args:
+            html: The raw HTML content of the search/category page.
+
+        Returns:
+            A list of unique FontInfo objects parsed from the page.
+            Download URLs are left empty and fetched later per-font.
+        """
         soup = BeautifulSoup(html, 'html.parser')
         fonts = []
 
@@ -170,7 +273,18 @@ class FontSpaceScraper:
         return unique_fonts
 
     def _get_download_url(self, font_url: str) -> str:
-        """Fetch the actual download URL from a font's page."""
+        """Fetch the actual download URL from a font's detail page.
+
+        Visits the font's page on FontSpace and extracts the download link
+        from the page HTML.
+
+        Args:
+            font_url: The URL to the font's detail page on FontSpace.
+
+        Returns:
+            The direct download URL for the font file or ZIP, or an empty
+            string if the download URL could not be found.
+        """
         try:
             resp = self.session.get(font_url, timeout=30)
             resp.raise_for_status()
@@ -199,7 +313,19 @@ class FontSpaceScraper:
         return ''
 
     def download_font(self, font: FontInfo) -> bool:
-        """Download a font and extract TTF/OTF files."""
+        """Download a font and extract TTF/OTF files.
+
+        Fetches the download URL if not already known, downloads the font
+        file (either a ZIP or direct font file), and saves it to the output
+        directory.
+
+        Args:
+            font: FontInfo object containing the font's URL and metadata.
+                The download_url may be empty and will be fetched if needed.
+
+        Returns:
+            True if the font was successfully downloaded, False otherwise.
+        """
         if font.name in self.downloaded:
             return True
 
@@ -250,7 +376,17 @@ class FontSpaceScraper:
             return False
 
     def _extract_zip(self, content: bytes) -> int:
-        """Extract font files from ZIP content."""
+        """Extract font files from ZIP content.
+
+        Extracts TTF and OTF files from a ZIP archive, saving them to the
+        output directory with sanitized filenames.
+
+        Args:
+            content: The raw bytes of the ZIP file.
+
+        Returns:
+            The number of font files successfully extracted.
+        """
         extracted = 0
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -268,7 +404,15 @@ class FontSpaceScraper:
         return extracted
 
     def _safe_filename(self, name: str) -> str:
-        """Create a safe filename."""
+        """Create a safe filename by removing problematic characters.
+
+        Args:
+            name: The original filename that may contain unsafe characters.
+
+        Returns:
+            A sanitized filename safe for use on most filesystems.
+            Returns 'unnamed_font' if the result would be empty.
+        """
         safe = re.sub(r'[<>:"/\\|?*]', '_', name)
         safe = safe.strip('. ')
         return safe or 'unnamed_font'
@@ -280,7 +424,31 @@ class FontSpaceScraper:
         max_fonts: int = None,
         use_category: bool = False
     ) -> dict:
-        """Scrape and download fonts."""
+        """Scrape and download fonts from FontSpace.
+
+        This is the main entry point for the scraper. It coordinates the
+        complete workflow of discovering fonts via search or category,
+        and downloading font files.
+
+        Args:
+            query: The search query or category name to use for finding fonts.
+                Defaults to "handwritten".
+            max_pages: Maximum number of pages to scrape. Defaults to 10.
+            max_fonts: Maximum number of fonts to download. If None, downloads
+                all discovered fonts.
+            use_category: If True, browse by category instead of searching.
+                The query parameter is then interpreted as a category slug.
+                Defaults to False.
+
+        Returns:
+            A dictionary containing scraping statistics and metadata:
+                - source (str): Always "fontspace".
+                - query (str): The search query or category used.
+                - fonts_found (int): Total number of fonts discovered.
+                - fonts_downloaded (int): Number of fonts successfully downloaded.
+                - fonts_failed (int): Number of fonts that failed to download.
+                - font_list (list): List of font dictionaries with metadata.
+        """
         print("=" * 60)
         print("FontSpace Scraper")
         print("=" * 60)
@@ -336,6 +504,11 @@ class FontSpaceScraper:
 
 
 def main():
+    """Parse command-line arguments and run the FontSpace scraper.
+
+    This function serves as the entry point when the module is run as a script.
+    It configures argument parsing and initiates the scraping process.
+    """
     parser = argparse.ArgumentParser(description='Scrape fonts from FontSpace')
     parser.add_argument('--output', '-o', type=str, default='./fontspace_fonts',
                         help='Output directory')

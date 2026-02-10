@@ -1,15 +1,47 @@
 #!/usr/bin/env python3
-"""
-Run all pre-AI pipeline steps on downloaded fonts.
+"""Run all pre-AI pipeline steps on downloaded fonts.
 
-Steps:
-1. Load fonts into database
-2. Completeness check
-3. Deduplication (perceptual hash)
-4. Cursive detection (connectivity + contextual)
+This script processes a directory of font files through a series of filtering
+and analysis steps to identify high-quality, usable fonts. It prepares fonts
+for downstream AI-based evaluation by eliminating fonts that fail basic
+quality checks.
 
-Usage:
-    python run_prefilters.py [--db fonts.db] [--fonts-dir fonts/]
+Pipeline Steps:
+    1. **Load fonts into database**: Scans the fonts directory, detects the
+       source (dafont, fontspace, google), and adds each font to the SQLite
+       database.
+
+    2. **Completeness check**: Verifies that fonts contain all required
+       glyphs (A-Z, a-z, 0-9, common punctuation). Fonts with less than
+       90% completeness are flagged for removal.
+
+    3. **Deduplication**: Uses perceptual hashing (pHash) to identify
+       visually similar fonts. When duplicates are found, the highest
+       scoring font is kept and others are marked as duplicates.
+
+    4. **Cursive detection**: Identifies cursive/script fonts using two
+       methods:
+       - Connectivity analysis: Measures how connected letters are
+       - Contextual analysis: Examines OpenType features and glyph shapes
+
+Example:
+    Process fonts in the default directory::
+
+        $ python run_prefilters.py
+
+    Specify custom database and fonts directory::
+
+        $ python run_prefilters.py --db custom.db --fonts-dir /path/to/fonts/
+
+Attributes:
+    This script uses utilities from:
+        - db_schema: Database initialization and FontDB context manager
+        - font_utils: CompletenessChecker, FontDeduplicator, FontScorer,
+          CursiveDetector
+
+Note:
+    This script should be run before run_ocr_prefilter.py, which performs
+    OCR-based filtering on fonts that pass these initial checks.
 """
 
 import argparse
@@ -28,7 +60,18 @@ from font_utils import (
 
 
 def find_fonts(fonts_dir: Path) -> list:
-    """Find all font files in directory."""
+    """Find all font files in a directory recursively.
+
+    Searches for font files with common extensions (.ttf, .otf, .woff,
+    .woff2) in the specified directory and all subdirectories.
+
+    Args:
+        fonts_dir: Path object pointing to the root fonts directory.
+
+    Returns:
+        A sorted list of Path objects for each font file found.
+        The list is sorted alphabetically by full path.
+    """
     extensions = ['.ttf', '.otf', '.woff', '.woff2']
     fonts = []
     for ext in extensions:
@@ -37,7 +80,27 @@ def find_fonts(fonts_dir: Path) -> list:
 
 
 def detect_source(font_path: Path) -> tuple:
-    """Detect font source from path."""
+    """Detect the font source based on its file path.
+
+    Examines the font's directory path to determine which font repository
+    or source it came from. This information is stored in the database
+    for tracking and filtering purposes.
+
+    Args:
+        font_path: Path object for the font file.
+
+    Returns:
+        A tuple of (source_name, url) where:
+            - source_name (str): One of 'dafont', 'fontspace', 'google',
+              or 'unknown'
+            - url (str or None): The source URL if available, otherwise None
+
+    Example:
+        >>> detect_source(Path('/fonts/dafont/Arial.ttf'))
+        ('dafont', None)
+        >>> detect_source(Path('/fonts/random/CustomFont.otf'))
+        ('unknown', None)
+    """
     path_str = str(font_path).lower()
     if '/dafont/' in path_str:
         return 'dafont', None
@@ -49,7 +112,36 @@ def detect_source(font_path: Path) -> tuple:
 
 
 def run_pipeline(db_path: str, fonts_dir: str):
-    """Run all pre-AI pipeline steps."""
+    """Run all pre-AI pipeline steps on fonts.
+
+    This is the main orchestration function that executes the complete
+    pre-filtering pipeline:
+
+    1. Initializes the database schema
+    2. Scans for font files in the specified directory
+    3. For each font:
+       - Adds to database with source detection
+       - Runs completeness check
+       - Runs cursive detection (connectivity + contextual)
+       - Calculates font scoring for deduplication
+    4. Performs deduplication across all fonts
+    5. Updates database with all results
+    6. Prints detailed statistics and reports
+
+    Args:
+        db_path: Path to the SQLite database file. Will be created if it
+            doesn't exist.
+        fonts_dir: Path to the directory containing font files. Will be
+            searched recursively.
+
+    Returns:
+        None. Results are printed to stdout and written to the database.
+
+    Note:
+        Fonts failing any check are recorded in the font_removals table
+        with appropriate reason codes ('incomplete', 'cursive',
+        'contextual', 'duplicate').
+    """
     fonts_dir = Path(fonts_dir)
 
     # Initialize database
@@ -297,6 +389,17 @@ def run_pipeline(db_path: str, fonts_dir: str):
 
 
 def main():
+    """Parse command-line arguments and run the pre-filter pipeline.
+
+    Command-line Arguments:
+        --db: Path to the SQLite database file. Defaults to 'fonts.db'.
+            The database will be created if it doesn't exist.
+        --fonts-dir: Path to the directory containing font files.
+            Defaults to 'fonts/'. Will be searched recursively.
+
+    Returns:
+        None. Exits after running the pipeline.
+    """
     parser = argparse.ArgumentParser(description='Run pre-AI pipeline steps')
     parser.add_argument('--db', default='fonts.db', help='Database path')
     parser.add_argument('--fonts-dir', default='fonts/', help='Fonts directory')

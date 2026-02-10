@@ -1,10 +1,36 @@
 #!/usr/bin/env python3
-"""Visualize stroke data from database."""
+"""Visualize stroke data from the font database.
+
+This module creates a grid visualization of selected characters showing their
+stroke paths. It displays a 2x5 grid of common letters (A, B, C, a, b, c, H, e, l, o)
+from the first font in the database, with each stroke rendered in a different color.
+
+The visualization is useful for:
+    - Quick visual inspection of stroke extraction quality
+    - Verifying stroke segmentation and ordering
+    - Debugging stroke path generation
+    - Comparing stroke styles across different characters
+
+Output:
+    Saves a PNG image grid (stroke_preview.png) with 10 character cells
+    and opens it with the system default image viewer via xdg-open.
+
+Example:
+    Run as a script to generate the preview::
+
+        $ python visualize_strokes.py
+
+Note:
+    Requires a populated fonts.db database with stroke data in the
+    characters.strokes_raw column. Characters without sufficient points
+    (fewer than 2) are skipped during rendering.
+"""
 
 import sqlite3
 import json
 from PIL import Image, ImageDraw
 
+# Database connection with Row factory for dict-like access
 conn = sqlite3.connect('fonts.db')
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()

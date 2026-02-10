@@ -1,6 +1,42 @@
 #!/usr/bin/env python3
 """Template-based stroke generation for font characters.
-Each letter has predefined vertices and strokes. Strokes are morphed to fit the actual font."""
+
+This module provides a template morphing approach to generate stroke paths
+for font characters. Each letter has predefined vertices and stroke paths
+that are morphed to fit the actual rendered font outline.
+
+The morphing process:
+    1. Render the character and extract its outline
+    2. Find letter-specific vertices (corners, endpoints) on the outline
+    3. Interpolate stroke paths between vertices
+    4. Iteratively refine strokes to stay inside the font shape
+
+This approach produces more consistent and semantically meaningful stroke
+paths compared to pure skeletonization, as it uses knowledge of how letters
+are typically written.
+
+Supported Characters:
+    Currently supports A-Z uppercase letters. Each letter has a template
+    defining its stroke paths and vertex positions.
+
+Example:
+    Generate strokes for a single character::
+
+        from template_morph import morph_to_font, visualize_letter
+
+        mask, vertices, strokes = morph_to_font('A', '/path/to/font.ttf')
+        for i, stroke in enumerate(strokes):
+            print(f"Stroke {i}: {len(stroke)} points")
+
+    Create visualization of all letters::
+
+        from template_morph import visualize_alphabet
+        visualize_alphabet('/path/to/font.ttf', output_path='/tmp/strokes.png')
+
+Attributes:
+    TEMPLATES: Dict mapping characters to their stroke templates.
+    VERTEX_POS: Dict mapping vertex names to relative positions.
+"""
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -35,6 +71,18 @@ TEMPLATES = {
     'Y': {'strokes': [['TL', 'MC'], ['TR', 'MC'], ['MC', 'BC']]},
     'Z': {'strokes': [['TL', 'TR', 'BL', 'BR']]},
 }
+"""dict: Letter templates defining stroke paths.
+
+Each entry maps a character to a dict with:
+    - 'strokes': List of stroke paths, where each path is a list of vertex names
+    - 'no_morph': Optional list of stroke indices that should not be morphed
+      (useful for crossbars that intentionally cross the letter shape)
+
+Vertex names use a grid convention:
+    - T/M/B = Top/Middle/Bottom row
+    - L/C/R = Left/Center/Right column
+    - Special names like TR_TOP, TR_BOT for letters with multiple bumps
+"""
 
 # Default vertex positions (relative to bounding box, 0-1)
 VERTEX_POS = {
@@ -42,10 +90,40 @@ VERTEX_POS = {
     'ML': (0.0, 0.5), 'MC': (0.5, 0.5), 'MR': (1.0, 0.5),
     'BL': (0.0, 1.0), 'BC': (0.5, 1.0), 'BR': (1.0, 1.0),
 }
+"""dict: Default vertex positions as (x, y) fractions of bounding box.
+
+Standard 9-point grid positions used as starting points for vertex
+detection. Actual vertex positions are refined by snapping to the
+font outline.
+
+Grid layout::
+
+    TL --- TC --- TR
+    |      |      |
+    ML --- MC --- MR
+    |      |      |
+    BL --- BC --- BR
+"""
 
 
 def render_font_mask(font_path, char, font_size=200, canvas_size=512):
-    """Render a character and return binary mask + bounding box."""
+    """Render a character and return binary mask plus bounding box.
+
+    Creates a binary image of the character and computes its tight
+    bounding box.
+
+    Args:
+        font_path: Path to the font file.
+        char: Single character to render.
+        font_size: Font size in points for rendering.
+        canvas_size: Size of the square canvas in pixels.
+
+    Returns:
+        Tuple of (mask, bbox):
+            - mask: Boolean numpy array where True = ink pixels
+            - bbox: Tuple (cmin, rmin, cmax, rmax) of tight bounding box
+        Returns (None, None) if character cannot be rendered.
+    """
     img = Image.new('L', (canvas_size, canvas_size), 0)
     draw = ImageDraw.Draw(img)
     font = ImageFont.truetype(font_path, font_size)
@@ -69,7 +147,17 @@ def render_font_mask(font_path, char, font_size=200, canvas_size=512):
 
 
 def get_outline(font_mask):
-    """Get font outline pixels (edge between filled and empty)."""
+    """Get font outline pixels (edge between filled and empty).
+
+    Extracts the 1-pixel-wide outline of the font by subtracting
+    an eroded version from the original.
+
+    Args:
+        font_mask: Boolean numpy array of font pixels.
+
+    Returns:
+        Boolean numpy array where True = outline pixels.
+    """
     eroded = ndimage.binary_erosion(font_mask)
     outline = font_mask & ~eroded
     return outline
@@ -77,7 +165,20 @@ def get_outline(font_mask):
 
 def snap_to_outline(x, y, outline_points, y_tolerance=None):
     """Snap a point to nearest outline pixel.
-    If y_tolerance is set, only consider outline points within that Y range."""
+
+    Finds the closest outline point to the given coordinates,
+    optionally restricting the search to a Y range.
+
+    Args:
+        x: X coordinate to snap.
+        y: Y coordinate to snap.
+        outline_points: Numpy array of shape (N, 2) with (x, y) points.
+        y_tolerance: If set, only consider outline points within this
+            Y distance from the target Y.
+
+    Returns:
+        Tuple (x, y) of the nearest outline point.
+    """
     if len(outline_points) == 0:
         return x, y
     if y_tolerance is not None:
@@ -93,7 +194,20 @@ def snap_to_outline(x, y, outline_points, y_tolerance=None):
 
 
 def find_vertices(char, font_mask, bbox):
-    """Find letter-specific vertex positions on the font outline."""
+    """Find letter-specific vertex positions on the font outline.
+
+    Uses character-specific heuristics to locate key vertices like
+    corners, endpoints, and junction points on the font outline.
+
+    Args:
+        char: The character being processed.
+        font_mask: Boolean numpy array of font pixels.
+        bbox: Tuple (cmin, rmin, cmax, rmax) of bounding box.
+
+    Returns:
+        Dict mapping vertex names (e.g., 'TL', 'TC', 'BR') to (x, y)
+        pixel coordinates on the outline.
+    """
     cmin, rmin, cmax, rmax = bbox
     w = cmax - cmin
     h = rmax - rmin
@@ -307,7 +421,18 @@ def find_vertices(char, font_mask, bbox):
 
 
 def interpolate_stroke(vertices_list, n_points=50):
-    """Create smooth curve through vertex points."""
+    """Create smooth curve through vertex points.
+
+    Generates evenly-spaced points along straight line segments
+    connecting the vertices.
+
+    Args:
+        vertices_list: List of (x, y) vertex coordinates.
+        n_points: Target total number of points to generate.
+
+    Returns:
+        Numpy array of shape (N, 2) with interpolated points.
+    """
     if len(vertices_list) < 2:
         return np.array(vertices_list)
 
@@ -341,7 +466,21 @@ def interpolate_stroke(vertices_list, n_points=50):
 
 
 def refine_stroke(points, font_mask, max_iterations=100):
-    """Iteratively morph stroke points to be 100% inside the font."""
+    """Iteratively morph stroke points to be inside the font.
+
+    Adjusts points that fall outside the font shape by snapping them
+    to the nearest font pixel, with smoothing to maintain stroke
+    continuity.
+
+    Args:
+        points: Numpy array of shape (N, 2) with stroke points.
+        font_mask: Boolean numpy array of font pixels.
+        max_iterations: Maximum refinement iterations.
+
+    Returns:
+        Numpy array of shape (N, 2) with refined points, all
+        guaranteed to be inside the font mask.
+    """
     h, w = font_mask.shape
     outline = get_outline(font_mask)
     outline_pts = np.argwhere(outline)[:, ::-1]  # (x, y)
@@ -388,7 +527,26 @@ def refine_stroke(points, font_mask, max_iterations=100):
 
 
 def morph_to_font(char, font_path, font_size=200, canvas_size=512):
-    """Full pipeline: render font, find vertices, generate strokes, morph."""
+    """Full pipeline: render font, find vertices, generate and morph strokes.
+
+    Main entry point for stroke generation. Renders the character,
+    locates vertices on the outline, interpolates stroke paths, and
+    morphs them to stay inside the font shape.
+
+    Args:
+        char: Single uppercase character to process.
+        font_path: Path to the font file.
+        font_size: Font size in points for rendering.
+        canvas_size: Size of the square canvas in pixels.
+
+    Returns:
+        Tuple of (mask, vertices, strokes):
+            - mask: Boolean numpy array of font pixels
+            - vertices: Dict mapping vertex names to (x, y) coordinates
+            - strokes: List of numpy arrays, each shape (N, 2) with stroke points
+        Returns (None, None, None) if character is not supported or
+        cannot be rendered.
+    """
     if char not in TEMPLATES:
         return None, None, None
 
@@ -434,7 +592,21 @@ def morph_to_font(char, font_path, font_size=200, canvas_size=512):
 
 
 def visualize_letter(char, font_path, font_size=200, canvas_size=512):
-    """Create visualization of template morph for a single letter."""
+    """Create visualization of template morph for a single letter.
+
+    Renders the font in dark gray with colored stroke paths overlaid
+    and white dots marking the detected vertices.
+
+    Args:
+        char: Single uppercase character to visualize.
+        font_path: Path to the font file.
+        font_size: Font size in points for rendering.
+        canvas_size: Size of the square output image in pixels.
+
+    Returns:
+        RGB numpy array of shape (canvas_size, canvas_size, 3), or
+        None if the character cannot be processed.
+    """
     mask, vertices, strokes = morph_to_font(char, font_path, font_size, canvas_size)
     if mask is None:
         return None
@@ -478,7 +650,19 @@ def visualize_letter(char, font_path, font_size=200, canvas_size=512):
 
 
 def visualize_alphabet(font_path, font_size=200, output_path='/tmp/template_morph_AZ.png'):
-    """Create grid visualization of A-Z."""
+    """Create grid visualization of A-Z stroke templates.
+
+    Generates a 6x5 grid showing all 26 uppercase letters with their
+    detected vertices and morphed stroke paths.
+
+    Args:
+        font_path: Path to the font file.
+        font_size: Font size in points for rendering.
+        output_path: Path to save the output image.
+
+    Returns:
+        The output_path where the image was saved.
+    """
     cols = 6
     rows = 5  # 26 letters, 6 per row = 5 rows (last has 2)
     cell = 300

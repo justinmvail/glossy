@@ -1,7 +1,27 @@
 """Skeleton analysis and stroke tracing functions.
 
-This module contains functions for analyzing glyph skeletons and
-tracing stroke paths through them.
+This module provides functions for analyzing glyph skeletons and tracing
+stroke paths through them. It supports the stroke extraction pipeline by
+identifying skeleton topology (endpoints, junctions, segments) and providing
+path-finding algorithms for connecting waypoints along skeleton pixels.
+
+Key functionality:
+    - Skeleton analysis: Extract endpoints, junctions, and segments from
+      morphological skeletons
+    - Junction clustering: Merge nearby junction pixels into logical nodes
+    - Path tracing: BFS-based path finding along skeleton pixels with
+      directional bias and avoidance constraints
+    - Path utilities: Straight line generation, path resampling
+
+Typical usage:
+    from stroke_skeleton import analyze_skeleton, trace_skeleton_path
+
+    # Analyze a glyph skeleton
+    info = analyze_skeleton(mask)
+    segments = find_skeleton_segments(info)
+
+    # Trace a path between two points
+    path = trace_skeleton_path(start, end, info['adj'], info['skel_set'])
 """
 
 from collections import defaultdict, deque
@@ -15,15 +35,33 @@ MIN_STROKE_LENGTH = 5
 
 
 def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE) -> dict | None:
-    """Analyze skeleton to find endpoints and junction clusters.
+    """Analyze a glyph skeleton to find topological features.
+
+    Performs morphological skeletonization and classifies pixels as endpoints
+    (degree 1), regular pixels (degree 2), or junction pixels (degree 3+).
+    Nearby junctions are clustered together.
 
     Args:
-        mask: Binary glyph mask
-        merge_dist: Distance threshold for merging junction clusters
+        mask: Binary numpy array where True indicates glyph pixels.
+            Shape should be (height, width).
+        merge_dist: Maximum distance for merging junction pixels into
+            clusters. Junctions within this distance are considered part
+            of the same logical node. Defaults to SKELETON_MERGE_DISTANCE (12).
 
     Returns:
-        Dict with 'skel_set', 'adj', 'endpoints', 'junction_pixels', 'junction_clusters'
-        or None if skeleton is empty.
+        A dictionary containing:
+            - 'skel_set': Set of (x, y) tuples for all skeleton pixels
+            - 'adj': Dict mapping each pixel to its 8-connected neighbors
+            - 'endpoints': List of (x, y) pixels with exactly 1 neighbor
+            - 'junction_pixels': List of (x, y) pixels with 3+ neighbors
+            - 'junction_clusters': List of sets, each containing pixels
+              belonging to the same junction cluster
+        Returns None if the skeleton is empty.
+
+    Notes:
+        - Uses 8-connectivity for neighbor relationships.
+        - Junction clustering helps handle complex junctions that span
+          multiple pixels due to skeleton artifacts.
     """
     skel = skeletonize(mask)
     ys, xs = np.where(skel)
@@ -67,7 +105,25 @@ def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE
 
 def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
                               adj: dict, merge_dist: int) -> list[set]:
-    """Merge nearby junction pixels into clusters."""
+    """Merge nearby junction pixels into clusters.
+
+    Uses BFS to group junction pixels that are within merge_dist of each
+    other along the skeleton.
+
+    Args:
+        junction_pixels: List of (x, y) junction pixel positions.
+        skel_set: Set of all skeleton pixel positions.
+        adj: Adjacency dict mapping pixels to their neighbors.
+        merge_dist: Maximum Euclidean distance for merging junctions.
+
+    Returns:
+        A list of sets, where each set contains (x, y) tuples of pixels
+        belonging to the same junction cluster.
+
+    Notes:
+        - Empty list is returned if no junction pixels exist.
+        - A pixel can only belong to one cluster.
+    """
     if not junction_pixels:
         return []
 
@@ -106,12 +162,28 @@ def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
 def find_skeleton_segments(info: dict) -> list[dict]:
     """Find and classify skeleton path segments between junctions.
 
-    Returns list of segments, each with:
-    - 'path': list of (x,y) points
-    - 'start_junction': index or -1 for endpoint
-    - 'end_junction': index or -1 for endpoint
-    - 'angle': direction in degrees (0=right, 90=down)
-    - 'length': number of pixels
+    Traces paths along the skeleton from junction borders and endpoints,
+    recording the connectivity and geometric properties of each segment.
+
+    Args:
+        info: Skeleton analysis dict from analyze_skeleton(), containing
+            'adj', 'junction_pixels', 'junction_clusters', and 'endpoints'.
+
+    Returns:
+        A list of segment dictionaries, each containing:
+            - 'path': List of (x, y) points along the segment
+            - 'start': First point of the segment
+            - 'end': Last point of the segment
+            - 'start_junction': Index into junction_clusters, or -1 for endpoint
+            - 'end_junction': Index into junction_clusters, or -1 for endpoint
+            - 'angle': Direction in degrees (0=right, 90=down)
+            - 'length': Number of pixels in the path
+
+    Notes:
+        - Segments connect either two junctions, a junction and an endpoint,
+          or two endpoints.
+        - Duplicate segments (same start/end pair) are filtered out.
+        - Segments shorter than 2 pixels are not included.
     """
     adj = info['adj']
     junction_pixels = info['junction_pixels']
@@ -196,7 +268,21 @@ def find_skeleton_segments(info: dict) -> list[dict]:
 
 
 def snap_to_skeleton(point: tuple, skel_set: set) -> tuple:
-    """Find the nearest skeleton pixel to a point."""
+    """Find the nearest skeleton pixel to a given point.
+
+    Args:
+        point: The (x, y) coordinates to snap.
+        skel_set: Set of (x, y) skeleton pixel positions.
+
+    Returns:
+        The (x, y) coordinates of the nearest skeleton pixel.
+        Returns the original point if it is already on the skeleton
+        or if the skeleton set is empty.
+
+    Notes:
+        - Uses brute-force nearest neighbor search (O(n) where n is
+          skeleton size). For large skeletons, consider using a KD-tree.
+    """
     point = tuple(point) if not isinstance(point, tuple) else point
     if point in skel_set or not skel_set:
         return point
@@ -216,17 +302,29 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
                         direction: str | None = None) -> list[tuple] | None:
     """Trace a path along skeleton pixels from start to end using BFS.
 
+    Finds the shortest path along the skeleton between two points, with
+    optional directional bias and pixel avoidance.
+
     Args:
-        start: (x, y) starting point
-        end: (x, y) ending point
-        adj: adjacency dict
-        skel_set: set of skeleton pixels
-        max_steps: maximum path length
-        avoid_pixels: set of pixels to avoid
-        direction: 'down', 'up', 'left', 'right' - bias for initial direction
+        start: Starting (x, y) position. Will be snapped to skeleton.
+        end: Target (x, y) position. Will be snapped to skeleton.
+        adj: Adjacency dict mapping skeleton pixels to their neighbors.
+        skel_set: Set of all skeleton pixel positions.
+        max_steps: Maximum path length allowed. Defaults to 500.
+        avoid_pixels: Optional set of pixels to avoid during path finding.
+            If no path can be found with avoidance, retries without it.
+        direction: Optional directional bias for the first few steps.
+            One of 'down', 'up', 'left', 'right'. Helps choose the correct
+            branch at junctions near the start.
 
     Returns:
-        List of (x, y) points along the path, or None if no path found.
+        A list of (x, y) tuples representing the path from start to end,
+        inclusive of both endpoints. Returns None if no path exists.
+
+    Notes:
+        - Uses BFS with neighbor sorting for efficient path finding.
+        - Direction bias only applies to the first 15 pixels of the path.
+        - Avoided pixels incur a penalty but don't completely block paths.
     """
     if avoid_pixels is None:
         avoid_pixels = set()
@@ -298,14 +396,22 @@ def trace_segment(start: tuple, end: tuple, config, adj: dict, skel_set: set,
                   avoid_pixels: set | None = None, fallback_avoid: set | None = None) -> list[tuple] | None:
     """Trace a segment between two points along the skeleton.
 
+    Wrapper around trace_skeleton_path that extracts direction hints from
+    a configuration object and supports fallback avoidance sets.
+
     Args:
-        start: Starting point
-        end: Ending point
-        config: SegmentConfig with direction hints
-        adj: Adjacency dict
-        skel_set: Set of skeleton pixels
-        avoid_pixels: Pixels to avoid
-        fallback_avoid: Fallback avoidance set if primary fails
+        start: Starting (x, y) position.
+        end: Target (x, y) position.
+        config: Configuration object with optional 'direction' attribute
+            specifying the preferred initial direction.
+        adj: Adjacency dict mapping skeleton pixels to their neighbors.
+        skel_set: Set of all skeleton pixel positions.
+        avoid_pixels: Primary set of pixels to avoid.
+        fallback_avoid: Secondary avoidance set used if primary tracing fails.
+
+    Returns:
+        A list of (x, y) tuples representing the path, or None if no path
+        can be found even with the fallback.
     """
     direction = config.direction if hasattr(config, 'direction') else None
 
@@ -324,14 +430,27 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
                     point_in_region_fn=None) -> list[tuple] | None:
     """Trace a path from start until it reaches a target numpad region.
 
+    Uses BFS to explore the skeleton, stopping when a point falls within
+    the specified region of the bounding box.
+
     Args:
-        start: Starting point
-        region: Target numpad region (1-9)
-        bbox: Glyph bounding box
-        adj: Adjacency dict
-        skel_set: Set of skeleton pixels
-        avoid_pixels: Pixels to avoid
-        point_in_region_fn: Function to check if point is in region
+        start: Starting (x, y) position. Will be snapped to skeleton.
+        region: Target numpad region (1-9) where the path should end.
+        bbox: Bounding box as (x0, y0, x1, y1) for region calculation.
+        adj: Adjacency dict mapping skeleton pixels to their neighbors.
+        skel_set: Set of all skeleton pixel positions.
+        avoid_pixels: Optional set of pixels to avoid (after initial escape).
+        point_in_region_fn: Function(point, region, bbox) -> bool to check
+            if a point is in the target region.
+
+    Returns:
+        A list of (x, y) tuples from start to a point in the target region,
+        or None if no such path exists within the step limit.
+
+    Notes:
+        - Avoidance is relaxed for the first 5 pixels to allow escaping
+          from congested areas.
+        - Maximum path length is 500 pixels.
     """
     if avoid_pixels is None:
         avoid_pixels = set()
@@ -367,7 +486,24 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
 
 
 def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
-    """Generate a straight line of pixels from start to end using Bresenham's algorithm."""
+    """Generate a straight line of pixels from start to end.
+
+    Uses Bresenham's line algorithm for efficient integer-coordinate
+    rasterization.
+
+    Args:
+        start: Starting (x, y) coordinates.
+        end: Ending (x, y) coordinates.
+
+    Returns:
+        A list of (x, y) integer tuples representing all pixels along
+        the line, inclusive of both endpoints.
+
+    Notes:
+        - Coordinates are rounded to integers before processing.
+        - The algorithm handles all octants correctly.
+        - For diagonal lines, moves in both x and y when appropriate.
+    """
     x0, y0 = int(round(start[0])), int(round(start[1]))
     x1, y1 = int(round(end[0])), int(round(end[1]))
 
@@ -394,7 +530,25 @@ def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list
 
 
 def resample_path(path: list[tuple], num_points: int = 30) -> list[tuple]:
-    """Resample a path to have a fixed number of evenly-spaced points."""
+    """Resample a path to have a fixed number of evenly-spaced points.
+
+    Useful for normalizing paths of varying lengths for comparison or
+    for creating uniform stroke representations.
+
+    Args:
+        path: List of (x, y) coordinate tuples.
+        num_points: Desired number of output points. Defaults to 30.
+
+    Returns:
+        A new list of (x, y) tuples with exactly num_points entries,
+        evenly distributed along the original path by arc length.
+
+    Notes:
+        - Returns the original path if it has fewer than 2 points.
+        - Returns the original path if it already has num_points or fewer.
+        - Uses linear interpolation between original points.
+        - First and last points are always preserved exactly.
+    """
     if len(path) < 2:
         return list(path)
 

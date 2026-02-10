@@ -1,6 +1,26 @@
-"""Glyph rendering utilities.
+"""Glyph rendering utilities for font analysis.
 
-This module contains functions for rendering font glyphs to images and masks.
+This module provides functions for rendering font glyphs to images and binary
+masks for analysis. It supports the stroke extraction pipeline by generating
+the input images and masks that are processed by skeleton and scoring modules.
+
+Key functionality:
+    - Character rendering: Generate grayscale PNG images of characters
+    - Mask generation: Create binary masks for glyph pixels
+    - Font analysis: Detect small-caps fonts, check for holes and shape counts
+    - Shape metrics: Analyze rendered text for connected components
+
+Typical usage:
+    from stroke_rendering import render_glyph_mask, render_char_image
+
+    # Get a binary mask of a character
+    mask = render_glyph_mask('path/to/font.ttf', 'A')
+
+    # Render a character to PNG bytes
+    png_bytes = render_char_image('path/to/font.ttf', 'A')
+
+    # Check for small-caps font
+    mismatched = check_case_mismatch('path/to/font.ttf')
 """
 
 import io
@@ -11,9 +31,28 @@ from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_pa
 
 
 def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=DEFAULT_CANVAS_SIZE):
-    """Render a character to a grayscale PNG.
+    """Render a character to a centered grayscale PNG image.
 
-    Returns image bytes or None on failure.
+    Creates a square grayscale image with the character drawn in black on
+    a white background, centered within the canvas.
+
+    Args:
+        font_path: Path to the font file (.ttf, .otf, etc.). Can be absolute
+            or relative to the module's base directory.
+        char: The character to render (single character string).
+        font_size: Initial font size in points. Defaults to DEFAULT_FONT_SIZE.
+            May be scaled down if the glyph exceeds canvas bounds.
+        canvas_size: Width and height of the output image in pixels.
+            Defaults to DEFAULT_CANVAS_SIZE.
+
+    Returns:
+        PNG image data as bytes, or None if the font file cannot be loaded.
+
+    Notes:
+        - The glyph is automatically scaled down if it exceeds 90% of the
+          canvas size in either dimension.
+        - Font path is resolved using resolve_font_path() for relative paths.
+        - Output is 8-bit grayscale (mode 'L').
     """
     font_path = resolve_font_path(font_path)
     try:
@@ -54,9 +93,26 @@ def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=
 
 
 def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
-    """Render a glyph as a binary mask.
+    """Render a glyph as a binary mask for image processing.
 
-    Returns numpy boolean array where True = glyph pixel.
+    Creates a boolean numpy array where True indicates pixels that are
+    part of the glyph (ink pixels).
+
+    Args:
+        font_path: Path to the font file. Can be absolute or relative.
+        char: The character to render.
+        canvas_size: Width and height of the output mask in pixels.
+            Defaults to DEFAULT_CANVAS_SIZE.
+
+    Returns:
+        A 2D boolean numpy array of shape (canvas_size, canvas_size) where
+        True indicates glyph pixels. Returns None if the font cannot be loaded.
+
+    Notes:
+        - Uses a fixed initial font size of 200 points for good resolution.
+        - Automatically scales down for large glyphs (>90% of canvas).
+        - Threshold of 128 is used to binarize the grayscale rendering.
+        - The glyph is centered within the canvas.
     """
     font_path = resolve_font_path(font_path)
     try:
@@ -97,8 +153,28 @@ def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
 def check_case_mismatch(font_path, threshold=0.80):
     """Check if lowercase letters match their uppercase counterparts.
 
-    Returns a list of lowercase letters that appear identical to uppercase.
-    Normalizes glyphs to same size before comparing to catch small-caps fonts.
+    Detects small-caps fonts where lowercase letters are rendered as
+    scaled-down versions of uppercase letters. Compares each letter pair
+    by normalizing to the same size and computing IoU (Intersection over
+    Union) similarity.
+
+    Args:
+        font_path: Path to the font file to analyze.
+        threshold: IoU threshold above which letters are considered matching.
+            Defaults to 0.80 (80% similarity).
+
+    Returns:
+        A list of lowercase letters (e.g., ['a', 'b', 'c']) that appear
+        visually identical to their uppercase counterparts. Empty list if
+        the font cannot be loaded or no mismatches are found.
+
+    Notes:
+        - Letters with bounding boxes smaller than 5x5 pixels are skipped.
+        - Each letter pair is rendered at natural size, then scaled to a
+          common 64x64 size for fair comparison.
+        - Uses IoU metric: intersection / union of binarized glyph pixels.
+        - Useful for filtering out fonts unsuitable for case-sensitive
+          character recognition.
     """
     font_path = resolve_font_path(font_path)
     letters_to_check = 'abcdefghijklmnopqrstuvwxyz'
@@ -163,7 +239,25 @@ def check_case_mismatch(font_path, threshold=0.80):
 
 
 def render_text_for_analysis(pil_font, text):
-    """Render text and return as numpy array for shape analysis."""
+    """Render text and return as a numpy array for shape analysis.
+
+    Creates a centered rendering of the given text string suitable for
+    further image analysis operations.
+
+    Args:
+        pil_font: A PIL ImageFont object (already loaded).
+        text: The text string to render.
+
+    Returns:
+        A 2D numpy array of shape (400, 400) containing the grayscale
+        rendering (0=black/ink, 255=white/background). Returns None if
+        the text cannot be rendered (e.g., missing glyphs).
+
+    Notes:
+        - Uses a fixed 400x400 canvas size.
+        - Text is centered based on its bounding box.
+        - Exceptions during rendering are caught and result in None return.
+    """
     canvas = 400
     img = Image.new('L', (canvas, canvas), 255)
     draw = ImageDraw.Draw(img)
@@ -184,9 +278,26 @@ def render_text_for_analysis(pil_font, text):
 
 
 def analyze_shape_metrics(arr, width):
-    """Analyze shape metrics from rendered text array.
+    """Analyze shape metrics from a rendered text array.
 
-    Returns (shape_count, max_width_pct) tuple.
+    Computes basic shape statistics useful for character classification
+    and validation.
+
+    Args:
+        arr: 2D numpy array containing rendered text (grayscale).
+        width: Reference width for computing width percentage.
+
+    Returns:
+        A tuple of (shape_count, max_width_pct) where:
+            - shape_count: Number of connected components in the binarized image
+            - max_width_pct: Maximum horizontal span of any row as a fraction
+              of the reference width
+
+    Notes:
+        - Uses scipy.ndimage.label for connected component analysis.
+        - Threshold of 128 is used for binarization.
+        - max_width_pct can exceed 1.0 if the rendered text is wider than
+          the reference width.
     """
     from scipy.ndimage import label
 
@@ -209,7 +320,23 @@ def analyze_shape_metrics(arr, width):
 def check_char_holes(pil_font, char):
     """Check if a character has holes (inner contours).
 
-    Returns True if character has holes.
+    Determines whether the rendered character contains enclosed regions
+    (like the inside of 'O', 'A', '8', etc.).
+
+    Args:
+        pil_font: A PIL ImageFont object.
+        char: The character to analyze.
+
+    Returns:
+        True if the character has at least one hole (enclosed background
+        region), False otherwise.
+
+    Notes:
+        - Uses connected component labeling on the background (non-glyph)
+          pixels to detect holes.
+        - A character has holes if there is more than one background region
+          (the outer background plus at least one inner hole).
+        - Uses a 150x150 canvas for rendering.
     """
     from scipy.ndimage import label
 
@@ -236,9 +363,24 @@ def check_char_holes(pil_font, char):
 
 
 def check_char_shape_count(pil_font, char, expected):
-    """Check if character has expected number of connected components.
+    """Check if a character has the expected number of connected components.
 
-    Returns True if shape count matches expected.
+    Useful for validating that characters like 'i' (2 components) or
+    '%' (3 components) are rendered correctly.
+
+    Args:
+        pil_font: A PIL ImageFont object.
+        char: The character to analyze.
+        expected: The expected number of connected components.
+
+    Returns:
+        True if the number of connected components matches expected,
+        False otherwise.
+
+    Notes:
+        - Uses scipy.ndimage.label for connected component counting.
+        - Returns False if the character cannot be rendered.
+        - Uses a 150x150 canvas for rendering.
     """
     from scipy.ndimage import label
 

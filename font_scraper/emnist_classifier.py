@@ -1,19 +1,45 @@
-"""
-EMNIST Character Classifier
+"""EMNIST Character Classifier.
 
-A lightweight CNN for single character recognition with confidence scores.
-Trained on EMNIST ByClass dataset (62 classes: 0-9, A-Z, a-z).
+A lightweight CNN for single character recognition with confidence scores,
+trained on the EMNIST ByClass dataset (62 classes: 0-9, A-Z, a-z).
+
+This module provides a pre-trained classifier for validating stroke-based
+character generation. It can determine whether rendered strokes are
+recognizable as the intended character.
+
+Classes:
+    EMNISTNet: Simple CNN architecture for 28x28 character images.
+    EMNISTClassifier: High-level classifier API with preprocessing.
 
 Usage:
-    classifier = EMNISTClassifier()
-    classifier.load_model()  # Downloads/loads pre-trained weights
+    Basic classification::
 
-    # Classify a PIL image
-    char, confidence, top3 = classifier.classify(image)
-    print(f"Predicted: {char} ({confidence:.1%})")
+        classifier = EMNISTClassifier()
+        classifier.load_model()  # Downloads/loads pre-trained weights
 
-    # Get detailed scores
-    scores = classifier.get_scores(image)  # Dict[char, probability]
+        # Classify a PIL image
+        char, confidence, top3 = classifier.classify(image)
+        print(f"Predicted: {char} ({confidence:.1%})")
+
+        # Get detailed scores
+        scores = classifier.get_scores(image)  # Dict[char, probability]
+
+    Stroke validation::
+
+        passed, recognized, conf, expected_prob = classifier.validate_stroke(
+            stroke_image, expected_char='A'
+        )
+        if passed:
+            print(f"Stroke recognized correctly with {conf:.1%} confidence")
+
+Attributes:
+    EMNIST_CLASSES: String of all 62 character classes in order.
+    CHAR_TO_IDX: Dict mapping characters to their class indices.
+
+Note:
+    The model expects images with white content on black background
+    (EMNIST convention). The preprocess() method handles automatic
+    inversion if needed.
 """
 
 import os
@@ -34,15 +60,50 @@ EMNIST_CLASSES = (
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
     'abcdefghijklmnopqrstuvwxyz'
 )
+"""str: All 62 EMNIST ByClass character classes.
+
+The string is ordered by class index: digits 0-9 (indices 0-9),
+uppercase A-Z (indices 10-35), lowercase a-z (indices 36-61).
+"""
 
 # Reverse mapping
 CHAR_TO_IDX = {c: i for i, c in enumerate(EMNIST_CLASSES)}
+"""dict: Mapping from character to EMNIST class index.
+
+Example:
+    >>> CHAR_TO_IDX['A']
+    10
+    >>> CHAR_TO_IDX['a']
+    36
+"""
 
 
 class EMNISTNet(nn.Module):
-    """Simple CNN for EMNIST classification."""
+    """Simple CNN for EMNIST classification.
+
+    A 3-layer convolutional network with max pooling and dropout,
+    designed for 28x28 grayscale character images.
+
+    Architecture:
+        - Conv1: 1 -> 32 channels, 3x3, padding 1, then MaxPool 2x2
+        - Conv2: 32 -> 64 channels, 3x3, padding 1, then MaxPool 2x2
+        - Conv3: 64 -> 128 channels, 3x3, padding 1, then MaxPool 2x2
+        - FC1: 128*3*3 -> 256
+        - FC2: 256 -> 62 (num_classes)
+
+    Attributes:
+        conv1, conv2, conv3: Convolutional layers.
+        pool: Max pooling layer (2x2).
+        dropout1, dropout2: Dropout layers (0.25 and 0.5).
+        fc1, fc2: Fully connected layers.
+    """
 
     def __init__(self, num_classes: int = 62):
+        """Initialize the network.
+
+        Args:
+            num_classes: Number of output classes. Default 62 for EMNIST ByClass.
+        """
         super().__init__()
         # Input: 1x28x28
         self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
@@ -56,6 +117,14 @@ class EMNISTNet(nn.Module):
         self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
+        """Forward pass through the network.
+
+        Args:
+            x: Input tensor of shape (batch, 1, 28, 28).
+
+        Returns:
+            Logits tensor of shape (batch, num_classes).
+        """
         # Conv block 1
         x = self.pool(F.relu(self.conv1(x)))
         # Conv block 2
@@ -73,23 +142,33 @@ class EMNISTNet(nn.Module):
 
 
 class EMNISTClassifier:
-    """
-    EMNIST character classifier with confidence scores.
+    """EMNIST character classifier with confidence scores.
+
+    Provides a high-level API for character classification including
+    image preprocessing, model loading, and result interpretation.
 
     Attributes:
-        model: The CNN model
-        device: CPU or CUDA device
-        classes: List of 62 character classes
+        model: The underlying EMNISTNet CNN model.
+        device: PyTorch device (CPU or CUDA).
+        classes: String of all 62 character classes.
+        MODEL_PATH: Default path to pre-trained model weights.
+
+    Example:
+        >>> classifier = EMNISTClassifier()
+        >>> classifier.load_model()
+        >>> char, conf, top3 = classifier.classify(some_image)
+        >>> print(f"Best guess: {char} at {conf:.1%}")
     """
 
     MODEL_PATH = Path(__file__).parent / "emnist_model.pt"
+    """Path: Default location for pre-trained model weights."""
 
     def __init__(self, device: Optional[str] = None):
-        """
-        Initialize the classifier.
+        """Initialize the classifier.
 
         Args:
-            device: 'cuda', 'cpu', or None for auto-detect
+            device: PyTorch device string ('cuda', 'cpu'), or None
+                for automatic detection based on CUDA availability.
         """
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -98,7 +177,15 @@ class EMNISTClassifier:
         self.classes = EMNIST_CLASSES
 
     def load_model(self, model_path: Optional[Path] = None):
-        """Load pre-trained model weights."""
+        """Load pre-trained model weights.
+
+        If weights file doesn't exist, trains a new model on EMNIST
+        and saves the weights for future use.
+
+        Args:
+            model_path: Path to model weights file. Defaults to
+                MODEL_PATH (emnist_model.pt in same directory).
+        """
         if model_path is None:
             model_path = self.MODEL_PATH
 
@@ -120,7 +207,15 @@ class EMNISTClassifier:
         self.model.eval()
 
     def _train_model(self, epochs: int = 5, batch_size: int = 128):
-        """Train the model on EMNIST ByClass dataset."""
+        """Train the model on EMNIST ByClass dataset.
+
+        Downloads the EMNIST dataset if needed and trains for the
+        specified number of epochs.
+
+        Args:
+            epochs: Number of training epochs.
+            batch_size: Batch size for training.
+        """
         from torchvision import datasets, transforms
         from torch.utils.data import DataLoader
 
@@ -198,14 +293,17 @@ class EMNISTClassifier:
                   f"Test Acc: {100.*test_correct/test_total:.1f}%")
 
     def preprocess(self, image: Image.Image) -> torch.Tensor:
-        """
-        Preprocess image for classification.
+        """Preprocess image for classification.
+
+        Handles grayscale conversion, resizing to 28x28, automatic
+        inversion (EMNIST expects white-on-black), normalization,
+        and EMNIST orientation correction (transpose + flip).
 
         Args:
-            image: PIL Image (any size, RGB or grayscale)
+            image: PIL Image of any size, RGB or grayscale.
 
         Returns:
-            Tensor of shape (1, 1, 28, 28)
+            Tensor of shape (1, 1, 28, 28) ready for model input.
         """
         # Convert to grayscale
         if image.mode != 'L':
@@ -226,7 +324,7 @@ class EMNISTClassifier:
         img_array = img_array.astype(np.float32) / 255.0
         img_array = (img_array - 0.1307) / 0.3081
 
-        # EMNIST images are transposed (rotated 90° + flipped)
+        # EMNIST images are transposed (rotated 90 + flipped)
         # We need to match that orientation
         img_array = np.transpose(img_array)
         img_array = np.flip(img_array, axis=0).copy()
@@ -236,17 +334,19 @@ class EMNISTClassifier:
         return tensor.to(self.device)
 
     def classify(self, image: Image.Image) -> Tuple[str, float, List[Tuple[str, float]]]:
-        """
-        Classify a single character image.
+        """Classify a single character image.
 
         Args:
-            image: PIL Image containing a single character
+            image: PIL Image containing a single character.
 
         Returns:
-            Tuple of (predicted_char, confidence, top3_predictions)
-            - predicted_char: The most likely character
-            - confidence: Probability (0-1) of the prediction
-            - top3_predictions: List of (char, probability) for top 3
+            Tuple of (predicted_char, confidence, top3_predictions):
+                - predicted_char: The most likely character
+                - confidence: Probability (0-1) of the prediction
+                - top3_predictions: List of (char, probability) for top 3
+
+        Raises:
+            RuntimeError: If model not loaded (call load_model() first).
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
@@ -270,14 +370,16 @@ class EMNISTClassifier:
         return predicted_char, confidence, top3
 
     def get_scores(self, image: Image.Image) -> Dict[str, float]:
-        """
-        Get probability scores for all 62 characters.
+        """Get probability scores for all 62 characters.
 
         Args:
-            image: PIL Image containing a single character
+            image: PIL Image containing a single character.
 
         Returns:
-            Dict mapping each character to its probability
+            Dict mapping each character to its probability (0-1).
+
+        Raises:
+            RuntimeError: If model not loaded (call load_model() first).
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
@@ -295,19 +397,21 @@ class EMNISTClassifier:
         stroke_image: Image.Image,
         expected_char: str
     ) -> Tuple[bool, str, float, float]:
-        """
-        Validate if a stroke image matches the expected character.
+        """Validate if a stroke image matches the expected character.
+
+        Useful for quality checking generated stroke data by verifying
+        that the rendered strokes are recognizable as the intended character.
 
         Args:
-            stroke_image: PIL Image of rendered strokes
-            expected_char: The character that should be recognized
+            stroke_image: PIL Image of rendered strokes.
+            expected_char: The character that should be recognized.
 
         Returns:
-            Tuple of (passed, recognized, confidence, expected_probability)
-            - passed: True if recognized matches expected
-            - recognized: The predicted character
-            - confidence: Probability of the prediction
-            - expected_probability: Probability assigned to expected char
+            Tuple of (passed, recognized, confidence, expected_probability):
+                - passed: True if recognized matches expected (case-insensitive)
+                - recognized: The predicted character
+                - confidence: Probability of the prediction
+                - expected_probability: Probability assigned to expected char
         """
         scores = self.get_scores(stroke_image)
 
@@ -332,7 +436,14 @@ class EMNISTClassifier:
 
 
 def test_classifier():
-    """Test the classifier with some sample characters."""
+    """Test the classifier with sample rendered characters.
+
+    Creates test images using a system font and runs classification
+    on each, displaying results in a table format.
+
+    Usage:
+        python emnist_classifier.py
+    """
     from PIL import ImageDraw, ImageFont
 
     print("Testing EMNIST Classifier\n")

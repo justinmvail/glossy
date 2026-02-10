@@ -1,5 +1,39 @@
 #!/usr/bin/env python3
-"""Time InkSight on a single character to estimate full run."""
+"""Timing benchmark for InkSight handwriting vectorization model.
+
+This script measures the performance of the InkSight vectorizer running in a
+Docker container with GPU support. It benchmarks model loading time, per-character
+inference time, and estimates total processing time for the full font database.
+
+The script performs the following measurements:
+    1. Model load time: Time to load the InkSight neural network
+    2. Single character time: Inference time for one character
+    3. Batch time: Time to process 10 characters sequentially
+
+Based on these measurements, it estimates total processing time for all fonts
+in both single-container-per-font and batch modes.
+
+Requirements:
+    - Docker with GPU support (nvidia-docker)
+    - InkSight Docker image ('inksight:latest')
+    - SQLite database with font metadata (fonts.db)
+    - GPU with sufficient memory for InkSight model
+
+Example:
+    Run the timing benchmark::
+
+        $ python3 test_inksight_timing.py
+
+    Output includes:
+        - Model load time
+        - Per-character inference time
+        - Docker overhead
+        - Estimates for processing all 254 fonts
+
+Note:
+    This script requires sudo access for Docker GPU operations and expects
+    the InkSight model to be located at /home/server/inksight/model.
+"""
 
 import sqlite3
 import time
