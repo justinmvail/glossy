@@ -33,6 +33,7 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter1d
 from stroke_lib.utils.geometry import (
     smooth_stroke,
     constrain_to_mask,
+    point_in_region,
 )
 
 # Base directory for relative path resolution
@@ -335,44 +336,8 @@ def catmull_rom_segment(p_prev: tuple, p0: tuple, p1: tuple, p_next: tuple,
     return [catmull_rom_point(p_prev, p0, p1, p_next, i / (n - 1)) for i in range(n)]
 
 
-def point_in_region(point: tuple[int, int], region: int,
-                    bbox: tuple[int, int, int, int]) -> bool:
-    """Check if a point falls within a numpad region.
-
-    The bounding box is divided into a 3x3 grid corresponding to numpad
-    regions arranged as:
-        7 8 9  (top)
-        4 5 6  (middle)
-        1 2 3  (bottom)
-
-    Args:
-        point: The (x, y) coordinates to check.
-        region: The numpad region (1-9) to test against.
-        bbox: The bounding box as (x0, y0, x1, y1).
-
-    Returns:
-        True if the point lies within the specified region, False otherwise.
-
-    Notes:
-        - Region boundaries are inclusive on all sides.
-        - Uses screen coordinates where y increases downward.
-    """
-    x, y = point
-    x0, y0, x1, y1 = bbox
-    w, h = x1 - x0, y1 - y0
-
-    # Region column (0=left, 1=center, 2=right)
-    col = (region - 1) % 3
-    # Region row (0=bottom, 1=middle, 2=top) - flip for screen coordinates
-    row = 2 - (region - 1) // 3
-
-    # Boundaries
-    x_min = x0 + col * w / 3
-    x_max = x0 + (col + 1) * w / 3
-    y_min = y0 + row * h / 3
-    y_max = y0 + (row + 1) * h / 3
-
-    return x_min <= x <= x_max and y_min <= y <= y_max
+# Note: point_in_region is imported from stroke_lib.utils.geometry
+# (canonical implementation) at the top of this file.
 
 
 def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
