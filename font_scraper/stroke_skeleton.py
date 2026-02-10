@@ -29,6 +29,12 @@ from collections import defaultdict, deque
 import numpy as np
 from skimage.morphology import skeletonize
 
+# Import shared utilities from stroke_lib (canonical implementations)
+from stroke_lib.utils.geometry import (
+    generate_straight_line,
+    resample_path,
+)
+
 # Constants
 SKELETON_MERGE_DISTANCE = 12
 MIN_STROKE_LENGTH = 5
@@ -485,115 +491,8 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
     return None
 
 
-def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
-    """Generate a straight line of pixels from start to end.
-
-    Uses Bresenham's line algorithm for efficient integer-coordinate
-    rasterization.
-
-    Args:
-        start: Starting (x, y) coordinates.
-        end: Ending (x, y) coordinates.
-
-    Returns:
-        A list of (x, y) integer tuples representing all pixels along
-        the line, inclusive of both endpoints.
-
-    Notes:
-        - Coordinates are rounded to integers before processing.
-        - The algorithm handles all octants correctly.
-        - For diagonal lines, moves in both x and y when appropriate.
-    """
-    x0, y0 = int(round(start[0])), int(round(start[1]))
-    x1, y1 = int(round(end[0])), int(round(end[1]))
-
-    points = []
-    dx = abs(x1 - x0)
-    dy = abs(y1 - y0)
-    sx = 1 if x0 < x1 else -1
-    sy = 1 if y0 < y1 else -1
-    err = dx - dy
-
-    while True:
-        points.append((x0, y0))
-        if x0 == x1 and y0 == y1:
-            break
-        e2 = 2 * err
-        if e2 > -dy:
-            err -= dy
-            x0 += sx
-        if e2 < dx:
-            err += dx
-            y0 += sy
-
-    return points
-
-
-def resample_path(path: list[tuple], num_points: int = 30) -> list[tuple]:
-    """Resample a path to have a fixed number of evenly-spaced points.
-
-    Useful for normalizing paths of varying lengths for comparison or
-    for creating uniform stroke representations.
-
-    Args:
-        path: List of (x, y) coordinate tuples.
-        num_points: Desired number of output points. Defaults to 30.
-
-    Returns:
-        A new list of (x, y) tuples with exactly num_points entries,
-        evenly distributed along the original path by arc length.
-
-    Notes:
-        - Returns the original path if it has fewer than 2 points.
-        - Returns the original path if it already has num_points or fewer.
-        - Uses linear interpolation between original points.
-        - First and last points are always preserved exactly.
-    """
-    if len(path) < 2:
-        return list(path)
-
-    if len(path) <= num_points:
-        return list(path)
-
-    # Calculate cumulative distances
-    cumulative = [0.0]
-    for i in range(1, len(path)):
-        dx = path[i][0] - path[i-1][0]
-        dy = path[i][1] - path[i-1][1]
-        cumulative.append(cumulative[-1] + (dx*dx + dy*dy)**0.5)
-
-    total_length = cumulative[-1]
-    if total_length < 1e-6:
-        return [path[0], path[-1]]
-
-    # Resample at even intervals
-    result = [path[0]]
-    current_idx = 1
-    for i in range(1, num_points - 1):
-        target_dist = total_length * i / (num_points - 1)
-
-        while current_idx < len(cumulative) and cumulative[current_idx] < target_dist:
-            current_idx += 1
-
-        if current_idx >= len(path):
-            result.append(path[-1])
-            continue
-
-        # Interpolate
-        d_prev = cumulative[current_idx - 1]
-        d_curr = cumulative[current_idx]
-        if d_curr - d_prev < 1e-6:
-            t = 0.0
-        else:
-            t = (target_dist - d_prev) / (d_curr - d_prev)
-
-        x = path[current_idx-1][0] + t * (path[current_idx][0] - path[current_idx-1][0])
-        y = path[current_idx-1][1] + t * (path[current_idx][1] - path[current_idx-1][1])
-        result.append((x, y))
-
-    result.append(path[-1])
-    return result
-
+# Note: generate_straight_line and resample_path are imported from
+# stroke_lib.utils.geometry (canonical implementations) at the top of this file.
 
 # Aliases for backwards compatibility
 _analyze_skeleton = analyze_skeleton

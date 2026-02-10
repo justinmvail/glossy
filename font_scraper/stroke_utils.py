@@ -29,6 +29,12 @@ import re
 import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter1d
 
+# Import shared utilities from stroke_lib (canonical implementations)
+from stroke_lib.utils.geometry import (
+    smooth_stroke,
+    constrain_to_mask,
+)
+
 # Base directory for relative path resolution
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -50,77 +56,8 @@ def resolve_font_path(font_path: str) -> str:
     return os.path.join(BASE_DIR, font_path)
 
 
-def smooth_stroke(points: list[tuple], sigma: float = 2.0) -> list[tuple]:
-    """Apply Gaussian smoothing to a stroke's coordinates.
-
-    Smooths x and y coordinates independently using a 1D Gaussian filter
-    to reduce noise while preserving the overall stroke shape.
-
-    Args:
-        points: List of (x, y) coordinate tuples representing the stroke path.
-        sigma: Standard deviation for the Gaussian kernel. Higher values
-            produce smoother results. Defaults to 2.0.
-
-    Returns:
-        A new list of (x, y) tuples with smoothed coordinates.
-
-    Notes:
-        - Returns the original points unchanged if fewer than 3 points
-          are provided (insufficient for meaningful smoothing).
-        - Uses 'nearest' mode at boundaries to avoid edge artifacts.
-    """
-    if len(points) < 3:
-        return list(points)
-
-    xs = np.array([p[0] for p in points], dtype=float)
-    ys = np.array([p[1] for p in points], dtype=float)
-
-    xs_smooth = gaussian_filter1d(xs, sigma=sigma, mode='nearest')
-    ys_smooth = gaussian_filter1d(ys, sigma=sigma, mode='nearest')
-
-    return [(float(x), float(y)) for x, y in zip(xs_smooth, ys_smooth)]
-
-
-def constrain_to_mask(points: list[tuple], mask: np.ndarray) -> list[tuple]:
-    """Constrain points to stay inside the glyph mask.
-
-    Points that fall outside the mask are snapped to the nearest pixel
-    that is inside the mask, using a distance transform for efficient
-    nearest-neighbor lookup.
-
-    Args:
-        points: List of (x, y) coordinate tuples to constrain.
-        mask: Binary numpy array where True indicates glyph pixels.
-            Shape should be (height, width).
-
-    Returns:
-        A new list of (x, y) tuples with all points inside the mask.
-        Points already inside remain unchanged; outside points are
-        moved to the nearest inside pixel.
-
-    Notes:
-        - Returns an empty list if no points are provided.
-        - Coordinates are clamped to valid array indices before lookup.
-    """
-    if len(points) == 0:
-        return []
-
-    h, w = mask.shape
-    _, snap_indices = distance_transform_edt(~mask, return_indices=True)
-
-    result = []
-    for x, y in points:
-        ix = int(round(min(max(x, 0), w - 1)))
-        iy = int(round(min(max(y, 0), h - 1)))
-
-        if mask[iy, ix]:
-            result.append((x, y))
-        else:
-            ny = float(snap_indices[0, iy, ix])
-            nx = float(snap_indices[1, iy, ix])
-            result.append((nx, ny))
-
-    return result
+# Note: smooth_stroke and constrain_to_mask are imported from
+# stroke_lib.utils.geometry (canonical implementations) at the top of this file.
 
 
 def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:

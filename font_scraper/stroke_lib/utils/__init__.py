@@ -38,10 +38,18 @@ Example usage:
             print(f"Glyph bounds: {bbox.to_tuple()}")
 """
 
-from .geometry import angle_between, point_in_region
+from .geometry import (
+    angle_between,
+    point_in_region,
+    smooth_stroke,
+    resample_path,
+    constrain_to_mask,
+    generate_straight_line,
+)
 from .rendering import render_glyph_mask, get_glyph_bbox
 
 __all__ = [
     'angle_between', 'point_in_region',
+    'smooth_stroke', 'resample_path', 'constrain_to_mask', 'generate_straight_line',
     'render_glyph_mask', 'get_glyph_bbox',
 ]
