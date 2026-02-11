@@ -958,6 +958,9 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
     changed = True
     while changed:
         changed = False
+        # Build detailed cluster index once per iteration (O(n) instead of O(n²))
+        detailed_index = _build_detailed_cluster_index(strokes, assigned)
+
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) < 2 or len(s) >= conv_threshold:
@@ -982,27 +985,33 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
             else:
                 continue
 
-            others_at_cluster = 0
-            for sj in range(len(strokes)):
-                if sj == si:
-                    continue
-                if endpoint_cluster(strokes[sj], False, assigned) == cluster_id:
-                    others_at_cluster += 1
-                if endpoint_cluster(strokes[sj], True, assigned) == cluster_id:
-                    others_at_cluster += 1
+            # Count other endpoints at cluster using index (O(k) instead of O(n))
+            endpoints_at_cluster = detailed_index.get(cluster_id, [])
+            others_at_cluster = sum(1 for (idx, _) in endpoints_at_cluster if idx != si)
             if others_at_cluster < 2:
                 continue
 
             stub_tip = stub_path[-1]
             cluster = junction_clusters[cluster_id]
-            for sj in range(len(strokes)):
-                if sj == si:
+
+            # Extend only strokes at this cluster using index (O(k) instead of O(n))
+            strokes_extended = set()
+            for sj, is_end in endpoints_at_cluster:
+                if sj == si or sj in strokes_extended:
                     continue
+                strokes_extended.add(sj)
                 s2 = strokes[sj]
-                at_end = endpoint_cluster(s2, True, assigned) == cluster_id
-                at_start = (not at_end) and endpoint_cluster(s2, False, assigned) == cluster_id
-                if not at_end and not at_start:
-                    continue
+                at_end = is_end
+                # Check if the other endpoint is also at this cluster
+                if not at_end:
+                    other_end_cid = endpoint_cluster(s2, True, assigned)
+                    if other_end_cid == cluster_id:
+                        at_end = True  # Prefer extending from the end
+                        at_start = False
+                    else:
+                        at_start = True
+                else:
+                    at_start = False
 
                 tail, leg_end = get_stroke_tail(s2, at_end, cluster)
                 extend_stroke_to_tip(s2, at_end, tail, leg_end, stub_tip)
@@ -1178,6 +1187,30 @@ def _build_cluster_index(strokes: list[list[tuple]], assigned: list[set]) -> dic
                 if cid not in index:
                     index[cid] = set()
                 index[cid].add(si)
+    return index
+
+
+def _build_detailed_cluster_index(strokes: list[list[tuple]], assigned: list[set]) -> dict[int, list[tuple[int, bool]]]:
+    """Build an index mapping cluster IDs to (stroke_index, is_end) pairs.
+
+    This provides more detail than _build_cluster_index by tracking which
+    endpoint (start or end) of each stroke is at each cluster.
+
+    Args:
+        strokes: List of stroke paths.
+        assigned: List of assigned junction cluster sets.
+
+    Returns:
+        Dict mapping cluster_id -> list of (stroke_index, is_end) tuples.
+    """
+    index = {}
+    for si, s in enumerate(strokes):
+        for is_end in [False, True]:
+            cid = endpoint_cluster(s, is_end, assigned)
+            if cid >= 0:
+                if cid not in index:
+                    index[cid] = []
+                index[cid].append((si, is_end))
     return index
 
 
