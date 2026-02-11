@@ -759,6 +759,35 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
     return strokes
 
 
+def _find_proximity_merge_target(stub: list[tuple], stub_idx: int, strokes: list[list[tuple]],
+                                  stub_threshold: int, prox_threshold: int) -> tuple:
+    """Find best merge target for a stub based on endpoint proximity.
+
+    Returns:
+        Tuple of (target_idx, target_side, stub_side, distance) or (-1, None, None, inf) if none found.
+    """
+    best_dist = prox_threshold
+    best_target = -1
+    best_target_side = None
+    best_stub_side = None
+
+    for stub_end in [False, True]:
+        sp = stub[-1] if stub_end else stub[0]
+        for sj, target in enumerate(strokes):
+            if sj == stub_idx or len(target) < stub_threshold:
+                continue
+            for target_end in [False, True]:
+                tp = target[-1] if target_end else target[0]
+                d = ((sp[0] - tp[0]) ** 2 + (sp[1] - tp[1]) ** 2) ** 0.5
+                if d < best_dist:
+                    best_dist = d
+                    best_target = sj
+                    best_target_side = 'end' if target_end else 'start'
+                    best_stub_side = 'end' if stub_end else 'start'
+
+    return best_target, best_target_side, best_stub_side, best_dist
+
+
 def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
                            prox_threshold: int = 20) -> list[list[tuple]]:
     """Absorb short stubs by proximity to longer stroke endpoints.
@@ -788,33 +817,22 @@ def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            best_dist = prox_threshold
-            best_target = -1
-            best_target_side = None
-            best_stub_side = None
-            for stub_end in [False, True]:
-                sp = s[-1] if stub_end else s[0]
-                for sj in range(len(strokes)):
-                    if sj == si or len(strokes[sj]) < stub_threshold:
-                        continue
-                    for target_end in [False, True]:
-                        tp = strokes[sj][-1] if target_end else strokes[sj][0]
-                        d = ((sp[0] - tp[0]) ** 2 + (sp[1] - tp[1]) ** 2) ** 0.5
-                        if d < best_dist:
-                            best_dist = d
-                            best_target = sj
-                            best_target_side = 'end' if target_end else 'start'
-                            best_stub_side = 'end' if stub_end else 'start'
-            if best_target >= 0:
-                stub = s if best_stub_side == 'end' else list(reversed(s))
-                target = strokes[best_target]
-                if best_target_side == 'end':
-                    strokes[best_target] = target + stub[1:]
-                else:
-                    strokes[best_target] = list(reversed(stub[1:])) + target
-                strokes.pop(si)
-                changed = True
-                break
+
+            best_target, best_target_side, best_stub_side, _ = _find_proximity_merge_target(
+                s, si, strokes, stub_threshold, prox_threshold)
+
+            if best_target < 0:
+                continue
+
+            stub = s if best_stub_side == 'end' else list(reversed(s))
+            target = strokes[best_target]
+            if best_target_side == 'end':
+                strokes[best_target] = target + stub[1:]
+            else:
+                strokes[best_target] = list(reversed(stub[1:])) + target
+            strokes.pop(si)
+            changed = True
+            break
     return strokes
 
 

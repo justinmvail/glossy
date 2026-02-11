@@ -146,6 +146,36 @@ def render_font_mask(font_path, char, font_size=200, canvas_size=512):
     return mask, (cmin, rmin, cmax, rmax)
 
 
+def _find_waist_height(font_mask: np.ndarray, rmin: int, rmax: int) -> tuple[int, int]:
+    """Find the waist height (narrowest rightward extent) in the middle region.
+
+    Used for characters like B, P, R where the waist is where bumps meet.
+
+    Args:
+        font_mask: Boolean numpy array of font pixels.
+        rmin: Top of bounding box.
+        rmax: Bottom of bounding box.
+
+    Returns:
+        Tuple of (waist_y, min_right_extent).
+    """
+    h = rmax - rmin
+    mid_y = rmin + h // 2
+    waist_y = mid_y
+    min_right = font_mask.shape[1] + 1
+
+    for test_y in range(rmin + h // 3, rmin + 2 * h // 3):
+        row = font_mask[test_y, :]
+        if not row.any():
+            continue
+        right_extent = np.where(row)[0][-1]
+        if right_extent < min_right:
+            min_right = right_extent
+            waist_y = test_y
+
+    return waist_y, min_right
+
+
 def get_outline(font_mask):
     """Get font outline pixels (edge between filled and empty).
 
@@ -291,23 +321,11 @@ def find_vertices(char, font_mask, bbox):
     elif char == 'B':
         # B has 5 key vertices: TL, BL (spine), TR_TOP (top bump peak),
         # ML (waist), TR_BOT (bottom bump peak)
-        # Strokes: TL→BL (spine), TL→TR_TOP→ML (top bump), ML→TR_BOT→BL (bottom bump)
         vertices['TL'] = default_pos('TL')
         vertices['BL'] = default_pos('BL')
 
-        # Find waist height - narrowest rightward extent in middle region
-        mid_y = rmin + h // 2
-        waist_y = mid_y
-        min_right = cmax + 1
-        for test_y in range(rmin + h//3, rmin + 2*h//3):
-            row = font_mask[test_y, :]
-            if not row.any():
-                continue
-            right_extent = np.where(row)[0][-1]
-            if right_extent < min_right:
-                min_right = right_extent
-                waist_y = test_y
-        # ML = left spine at waist height (leftmost outline point at waist)
+        # Find waist height using helper
+        waist_y, _ = _find_waist_height(font_mask, rmin, rmax)
         vertices['ML'] = leftmost_in_range(waist_y - 3, waist_y + 3) or default_pos('ML')
 
         # TR_TOP = rightmost outline point in top half (above waist)
@@ -375,17 +393,7 @@ def find_vertices(char, font_mask, bbox):
         tr = rightmost_in_range(rmin, rmin + h//3)
         vertices['TR'] = tr if tr else default_pos('TR')
         # ML = waist where bump returns
-        mid_y = rmin + h // 2
-        best_y = mid_y
-        min_right = cmax + 1
-        for test_y in range(rmin + h//3, rmin + 2*h//3):
-            row = font_mask[test_y, :]
-            if not row.any():
-                continue
-            right_extent = np.where(row)[0][-1]
-            if right_extent < min_right:
-                min_right = right_extent
-                best_y = test_y
+        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
         vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
         mr = rightmost_in_range(rmin + h//4, rmin + h//2)
         vertices['MR'] = mr if mr else default_pos('MR')
@@ -396,17 +404,7 @@ def find_vertices(char, font_mask, bbox):
         vertices['BR'] = default_pos('BR')
         tr = rightmost_in_range(rmin, rmin + h//3)
         vertices['TR'] = tr if tr else default_pos('TR')
-        mid_y = rmin + h // 2
-        best_y = mid_y
-        min_right = cmax + 1
-        for test_y in range(rmin + h//3, rmin + 2*h//3):
-            row = font_mask[test_y, :]
-            if not row.any():
-                continue
-            right_extent = np.where(row)[0][-1]
-            if right_extent < min_right:
-                min_right = right_extent
-                best_y = test_y
+        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
         vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
         mr = rightmost_in_range(rmin + h//4, rmin + h//2)
         vertices['MR'] = mr if mr else default_pos('MR')

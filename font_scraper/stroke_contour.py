@@ -115,6 +115,39 @@ def flatten_bezier_cubic(p0: tuple, p1: tuple, p2: tuple, p3: tuple, steps: int 
     return pts
 
 
+def _process_qcurve(current: list, current_pos: tuple, args: list) -> tuple:
+    """Process a qCurveTo operation with potentially multiple control points.
+
+    TrueType fonts can have multiple control points in a single qCurveTo,
+    with implicit on-curve points at midpoints between consecutive control points.
+
+    Args:
+        current: Current contour point list to extend.
+        current_pos: Starting position for the curve.
+        args: List of control points, last one is the end point.
+
+    Returns:
+        The new current position (endpoint of the curve).
+    """
+    if len(args) == 2:
+        pts = flatten_bezier_quad(current_pos, args[0], args[1])
+        current.extend(pts)
+        return args[1]
+
+    # Multiple control points - compute implicit on-curve midpoints
+    for i in range(len(args) - 1):
+        if i < len(args) - 2:
+            mid = ((args[i][0] + args[i+1][0]) / 2, (args[i][1] + args[i+1][1]) / 2)
+            pts = flatten_bezier_quad(current_pos, args[i], mid)
+            current.extend(pts)
+            current_pos = mid
+        else:
+            pts = flatten_bezier_quad(current_pos, args[i], args[i+1])
+            current.extend(pts)
+            current_pos = args[i+1]
+    return current_pos
+
+
 def extract_contours(font_path: str, char: str) -> tuple[list | None, 'TTFont']:
     """Extract raw glyph contours from a font file using fontTools.
 
@@ -171,21 +204,7 @@ def extract_contours(font_path: str, char: str) -> tuple[list | None, 'TTFont']:
             current.extend(pts)
             current_pos = args[2]
         elif op == 'qCurveTo':
-            if len(args) == 2:
-                pts = flatten_bezier_quad(current_pos, args[0], args[1])
-                current.extend(pts)
-                current_pos = args[1]
-            else:
-                for i in range(len(args) - 1):
-                    if i < len(args) - 2:
-                        mid = ((args[i][0]+args[i+1][0])/2, (args[i][1]+args[i+1][1])/2)
-                        pts = flatten_bezier_quad(current_pos, args[i], mid)
-                        current.extend(pts)
-                        current_pos = mid
-                    else:
-                        pts = flatten_bezier_quad(current_pos, args[i], args[i+1])
-                        current.extend(pts)
-                        current_pos = args[i+1]
+            current_pos = _process_qcurve(current, current_pos, args)
         elif op in ('closePath', 'endPath'):
             if current:
                 contours.append(current)

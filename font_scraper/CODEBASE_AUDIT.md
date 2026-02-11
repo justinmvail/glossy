@@ -144,3 +144,9 @@ Systematic review of font_scraper codebase for quality improvements.
 - Type hints: 89 public functions missing annotations
 - Naming: PASS (consistent snake_case)
 
+### Session 1: Code Quality Fixes
+- Extracted `_find_proximity_merge_target()` from `absorb_proximity_stubs()` - reduced nesting depth 6→4
+- Extracted `_process_qcurve()` from `extract_contours()` - reduced nesting depth 8→4
+- Extracted `_find_waist_height()` from `find_vertices()` - reduced duplication for B/P/R chars
+- Removed dead code: `catmull_rom_point()`, `catmull_rom_segment()` from stroke_utils.py
+
