@@ -85,6 +85,37 @@ CANVAS_FILL_THRESHOLD = 0.9  # Max fraction of canvas a glyph can fill
 BINARIZATION_THRESHOLD = 128  # Grayscale threshold for mask generation
 
 
+def binarize_image(arr: np.ndarray, threshold: int = BINARIZATION_THRESHOLD,
+                   as_uint8: bool = False, invert: bool = False) -> np.ndarray:
+    """Convert a grayscale image array to binary (black/white).
+
+    Args:
+        arr: Grayscale numpy array (0-255 values).
+        threshold: Pixel values below this are considered "ink/foreground".
+            Default BINARIZATION_THRESHOLD (128).
+        as_uint8: If True, return uint8 array (0/1). If False, return bool.
+        invert: If True, return True for background pixels instead of ink.
+
+    Returns:
+        Binary numpy array. By default, True/1 = ink (dark pixels),
+        False/0 = background (light pixels).
+
+    Example:
+        >>> arr = np.array(img)
+        >>> mask = binarize_image(arr)  # Boolean mask of ink pixels
+        >>> binary = binarize_image(arr, as_uint8=True)  # uint8 0/1 array
+        >>> bg_mask = binarize_image(arr, invert=True)  # Background pixels
+    """
+    if invert:
+        binary = arr >= threshold
+    else:
+        binary = arr < threshold
+
+    if as_uint8:
+        return binary.astype(np.uint8)
+    return binary
+
+
 def _scale_font_to_fit(font_path: str, pil_font: FreeTypeFont, char: str,
                        canvas_size: int, threshold: float = CANVAS_FILL_THRESHOLD
                        ) -> tuple[FreeTypeFont | None, tuple | None]:

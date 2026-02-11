@@ -57,7 +57,7 @@ Generated: 2026-02-11
 32. [x] Extract bbox_width_height() utility (appears 5+ times)
 33. [x] Extract point_distance_squared() utility (appears 6+ times)
 34. [x] Extract render_text_to_image() utility (appears 4+ times)
-35. [ ] Extract binarize_image() utility (appears 6+ times)
+35. [x] Extract binarize_image() utility (appears 6+ times)
 
 ### MEDIUM - Deep Nesting (4+ levels)
 36. [ ] stroke_merge.py:551-610 - _find_best_merge_pair has 6 nesting levels
