@@ -330,6 +330,96 @@ def validate_char_param(char: str | None) -> tuple[bool, tuple | None]:
     return True, None
 
 
+def get_font_or_error(fid: int, response_type: str = 'json'):
+    """Get font by ID or return appropriate error response.
+
+    Args:
+        fid: Font ID to look up.
+        response_type: 'json' for JSON error, 'text' for plain text,
+            'sse' for Server-Sent Events format.
+
+    Returns:
+        tuple: (font, None) if found, or (None, error_response) if not found.
+            The error_response is ready to return from a Flask route.
+
+    Example:
+        font, err = get_font_or_error(fid)
+        if err:
+            return err
+        # Use font...
+    """
+    from flask import Response, jsonify
+    font = get_font(fid)
+    if font:
+        return font, None
+
+    if response_type == 'json':
+        return None, (jsonify(error="Font not found"), 404)
+    elif response_type == 'sse':
+        import json
+        return None, Response(f'data: {json.dumps({"error": "Font not found"})}\n\n',
+                              mimetype='text/event-stream')
+    else:
+        return None, ("Font not found", 404)
+
+
+def get_font_and_mask(fid: int, char: str, canvas_size: int = 224):
+    """Get font and render glyph mask, with error handling.
+
+    Combines font lookup and mask rendering into a single call with
+    appropriate error responses for common failure cases.
+
+    Args:
+        fid: Font ID to look up.
+        char: Character to render.
+        canvas_size: Canvas size in pixels (default 224).
+
+    Returns:
+        tuple: (font, mask, None) on success, or
+               (None, None, error_response) on failure.
+            The error_response is ready to return from a Flask route.
+
+    Example:
+        font, mask, err = get_font_and_mask(fid, c)
+        if err:
+            return err
+        # Use font and mask...
+    """
+    from flask import jsonify
+    from stroke_rendering import render_glyph_mask
+
+    font = get_font(fid)
+    if not font:
+        return None, None, (jsonify(error="Font not found"), 404)
+
+    mask = render_glyph_mask(font['file_path'], char, canvas_size)
+    if mask is None:
+        return None, None, (jsonify(error="Could not render glyph"), 500)
+
+    return font, mask, None
+
+
+def send_pil_image_as_png(img):
+    """Convert PIL Image to PNG and send as Flask response.
+
+    Args:
+        img: PIL Image object to send.
+
+    Returns:
+        flask.Response: Response with PNG data and correct mimetype.
+
+    Example:
+        img = Image.new('RGB', (100, 100), 'white')
+        return send_pil_image_as_png(img)
+    """
+    import io
+    from flask import send_file
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
+
 class FontRepository:
     """Data access layer for font and character database operations.
 

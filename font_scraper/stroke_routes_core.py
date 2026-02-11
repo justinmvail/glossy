@@ -73,7 +73,10 @@ from stroke_flask import (
     app,
     font_repository,
     get_font,
+    get_font_and_mask,
+    get_font_or_error,
     resolve_font_path,
+    send_pil_image_as_png,
     validate_char_param,
 )
 from stroke_rendering import (
@@ -482,10 +485,7 @@ def api_thin_preview(fid: int) -> Response | tuple[str, int]:
     th = thin(m, max_num_iter=thin_iter)
     img = np.full((224, 224, 3), 255, dtype=np.uint8)
     img[m], img[th] = [200, 200, 200], [0, 0, 0]
-    buf = io.BytesIO()
-    Image.fromarray(img).save(buf, format='PNG')
-    buf.seek(0)
-    return send_file(buf, mimetype='image/png')
+    return send_pil_image_as_png(Image.fromarray(img))
 
 
 @app.route('/api/check-connected/<int:fid>')
@@ -734,10 +734,7 @@ def api_preview(fid: int) -> Response | tuple[str, int]:
         for i, s in enumerate(json.loads(row['strokes_raw'])):
             if len(s) >= 2:
                 draw.line([(p[0], p[1]) for p in s], fill=STROKE_COLORS[i % len(STROKE_COLORS)] + (255,), width=2)
-    buf = io.BytesIO()
-    bg.save(buf, format='PNG')
-    buf.seek(0)
-    return send_file(buf, mimetype='image/png')
+    return send_pil_image_as_png(bg)
 
 
 @app.route('/api/process/<int:fid>', methods=['POST'])
@@ -892,12 +889,9 @@ def api_snap(fid: int) -> Response | tuple[str, int]:
         return jsonify(error="Missing ?c= parameter"), 400
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
-    m = render_glyph_mask(f['file_path'], c)
-    if m is None:
-        return jsonify(error="Could not render glyph"), 500
+    _f, m, err = get_font_and_mask(fid, c)
+    if err:
+        return err
     _, idx = distance_transform_edt(~m, return_indices=True)
     h, w = m.shape
     res = []
@@ -984,12 +978,9 @@ def api_center(fid: int) -> Response | tuple[str, int]:
         return jsonify(error="Missing ?c= parameter"), 400
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
-    m = render_glyph_mask(f['file_path'], c)
-    if m is None:
-        return jsonify(error="Could not render glyph"), 500
+    _f, m, err = get_font_and_mask(fid, c)
+    if err:
+        return err
     rows, cols = np.where(m)
     if len(rows) == 0:
         return jsonify(error="Empty glyph"), 500

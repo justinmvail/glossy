@@ -59,7 +59,7 @@ from scipy.optimize import differential_evolution, minimize
 from scipy.spatial import cKDTree
 
 from stroke_core import min_strokes, skel_strokes
-from stroke_flask import app, get_font
+from stroke_flask import app, get_font, get_font_or_error
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
@@ -594,10 +594,9 @@ def api_optimize_stream(fid: int) -> Response:
         return Response(_sse_event({'error': 'Missing ?c= parameter'}),
                         mimetype='text/event-stream')
 
-    f = _font(fid)
-    if not f:
-        return Response(_sse_event({'error': 'Font not found'}),
-                        mimetype='text/event-stream')
+    f, err = get_font_or_error(fid, response_type='sse')
+    if err:
+        return err
 
     def generate():
         try:
@@ -694,10 +693,9 @@ def api_minimal_strokes_stream(fid: int) -> Response:
         return Response(_sse_event({'error': 'Missing ?c= parameter'}),
                         mimetype='text/event-stream')
 
-    f = _font(fid)
-    if not f:
-        return Response(_sse_event({'error': 'Font not found'}),
-                        mimetype='text/event-stream')
+    f, err = get_font_or_error(fid, response_type='sse')
+    if err:
+        return err
 
     def generate():
         frame = 0

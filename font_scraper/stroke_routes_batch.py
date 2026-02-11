@@ -51,7 +51,10 @@ from stroke_flask import (
     get_db,
     get_db_context,
     get_font,
+    get_font_and_mask,
+    get_font_or_error,
     resolve_font_path,
+    send_pil_image_as_png,
     test_run_repository,
 )
 from stroke_rendering import render_glyph_mask
@@ -296,10 +299,7 @@ def api_preview_from_run(rid: int) -> Response | tuple[str, int]:
     if not cr or 'strokes' not in cr:
         img = Image.new('RGB', (224, 224), (26, 26, 46))
         ImageDraw.Draw(img).text((60, 100), "No stroke data", fill=(100, 100, 100))
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        return send_file(buf, mimetype='image/png')
+        return send_pil_image_as_png(img)
     from stroke_flask import font_repository
     f = font_repository.get_font_by_id(fid or run['font_id'])
     if not f:
@@ -315,10 +315,7 @@ def api_preview_from_run(rid: int) -> Response | tuple[str, int]:
         if len(s) >= 2:
             color = STROKE_COLORS[i % len(STROKE_COLORS)]
             draw.line([(int(p[0]), int(p[1])) for p in s], fill=color, width=3)
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    return send_file(buf, mimetype='image/png')
+    return send_pil_image_as_png(img)
 
 
 @app.route('/api/compare-runs')
@@ -511,13 +508,9 @@ def api_center_borders(fid: int) -> Response | tuple[str, int]:
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
 
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
-
-    mask = render_glyph_mask(f['file_path'], c)
-    if mask is None:
-        return jsonify(error="Could not render glyph"), 500
+    _f, mask, err = get_font_and_mask(fid, c)
+    if err:
+        return err
 
     h, w = mask.shape
     result_strokes = []
@@ -591,11 +584,10 @@ def api_detect_markers(fid: int) -> Response | tuple[str, int]:
     c = request.args.get('c')
     if not c:
         return jsonify(error="Missing ?c= parameter"), 400
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
-    m = render_glyph_mask(f['file_path'], c)
-    return jsonify(markers=skel_markers(m)) if m is not None else (jsonify(error="Could not render glyph"), 500)
+    _f, m, err = get_font_and_mask(fid, c)
+    if err:
+        return err
+    return jsonify(markers=skel_markers(m))
 
 
 @app.route('/api/clear-shape-cache/<int:fid>', methods=['POST'])
@@ -684,9 +676,9 @@ def api_skeleton(fid: int) -> Response | tuple[str, int]:
     c = request.args.get('c')
     if not c:
         return jsonify(error="Missing ?c= parameter"), 400
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
     r = auto_fit(f['file_path'], c, ret_mark=True)
     if r and r[0]:
         return jsonify(strokes=r[0], markers=r[1])

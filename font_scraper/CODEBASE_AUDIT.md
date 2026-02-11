@@ -10,9 +10,11 @@ Systematic review of font_scraper codebase for quality improvements.
     `ray_segment_intersection`, `score_single_shape`, `score_shape_coverage`, `score_shape`
   - Remaining functions verified as used (callbacks, re-exports, template refs)
 - [x] Code duplication - repeated logic across files
-  - **Status:** 1358 duplicate 5-line blocks detected
-  - Hotspots: stroke_routes_*.py (route boilerplate), font_utils.py
-  - Recommendation: Extract common route patterns to decorators/helpers
+  - **Status:** FIXED - Extracted 3 common helpers to stroke_flask.py
+  - `get_font_or_error()`: Font lookup with error response (13 uses)
+  - `get_font_and_mask()`: Font + glyph mask with errors (5 uses)
+  - `send_pil_image_as_png()`: PNG response helper (5 uses)
+  - Applied to stroke_routes_core.py, stroke_routes_batch.py, stroke_routes_stream.py
 - [x] Long functions - functions over 50-100 lines
   - **Status:** FIXED - Refactored 3 production code functions
   - template_morph.py:find_vertices() 193 → 46 lines
@@ -355,6 +357,20 @@ All tests pass (26/26 characters OK).
   `find_cross_section_midpoint` (-181 lines)
 - `stroke_scoring.py`: `score_single_shape`, `score_shape_coverage` (-95 lines)
 - `stroke_shapes.py`: `score_shape` (-39 lines)
+
+All tests pass (26/26 characters OK).
+
+### Session 4: Route Helper Extraction
+
+#### Added 3 helper functions to stroke_flask.py:
+- `get_font_or_error(fid, response_type)`: Returns font or error response
+- `get_font_and_mask(fid, char, canvas_size)`: Returns font + mask or error
+- `send_pil_image_as_png(img)`: Converts PIL Image to Flask PNG response
+
+#### Applied helpers across route files:
+- stroke_routes_core.py: 4 routes updated (api_snap, api_center, api_thin_preview, api_preview)
+- stroke_routes_batch.py: 4 routes updated (api_center_borders, api_detect_markers, api_skeleton, api_preview_from_run)
+- stroke_routes_stream.py: 2 routes updated (api_optimize_stream, api_minimal_strokes_stream)
 
 All tests pass (26/26 characters OK).
 
