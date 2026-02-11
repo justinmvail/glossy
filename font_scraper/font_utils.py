@@ -65,6 +65,20 @@ checks and coverage scoring. Fonts should ideally render all of these
 characters to be considered complete.
 """
 
+# ---------------------------------------------------------------------------
+# Perceptual Hash Rendering Constants
+# ---------------------------------------------------------------------------
+
+# Font size for perceptual hash rendering
+PHASH_FONT_SIZE = 48
+
+# Canvas dimensions for perceptual hash images
+PHASH_CANVAS_WIDTH = 256
+PHASH_CANVAS_HEIGHT = 64
+
+# Default render size for quality checks (FontScorer, CursiveDetector, etc.)
+DEFAULT_RENDER_SIZE = 64
+
 
 class FontDeduplicator:
     """Find and remove duplicate/similar fonts using perceptual hashing.
@@ -114,8 +128,12 @@ class FontDeduplicator:
         from stroke_rendering import GlyphRenderer
 
         try:
-            renderer = GlyphRenderer(font_path, font_size=48)
-            img = renderer.render_for_phash(sample_text, canvas_width=256, canvas_height=64)
+            renderer = GlyphRenderer(font_path, font_size=PHASH_FONT_SIZE)
+            img = renderer.render_for_phash(
+                sample_text,
+                canvas_width=PHASH_CANVAS_WIDTH,
+                canvas_height=PHASH_CANVAS_HEIGHT
+            )
             if img is None:
                 return None
             return str(imagehash.phash(img))
@@ -226,12 +244,13 @@ class FontScorer:
         >>> print(f"Overall: {scores['overall']:.1%}")
     """
 
-    def __init__(self, render_size: int = 64):
+    def __init__(self, render_size: int = DEFAULT_RENDER_SIZE):
         """Initialize the scorer.
 
         Args:
             render_size: Pixel size for test character renders. Larger
                 sizes give more accurate style assessment but are slower.
+                Default DEFAULT_RENDER_SIZE (64).
         """
         self.render_size = render_size
 
@@ -302,7 +321,7 @@ class FontScorer:
 
         # Perceptual hash
         try:
-            img = Image.new('L', (256, 64), 255)
+            img = Image.new('L', (PHASH_CANVAS_WIDTH, PHASH_CANVAS_HEIGHT), 255)
             draw = ImageDraw.Draw(img)
             draw.text((10, 10), "The quick brown", font=font, fill=0)
             scores['phash'] = str(imagehash.phash(img))
@@ -371,7 +390,7 @@ class CursiveDetector:
                 - connectivity_score: 0-1 score (1 = fully connected)
         """
         try:
-            font = ImageFont.truetype(font_path, 64)
+            font = ImageFont.truetype(font_path, DEFAULT_RENDER_SIZE)
         except Exception:
             return False, 0.0
 
@@ -449,7 +468,7 @@ class CursiveDetector:
                 - per_char_differences: Dict mapping char to its diff score
         """
         try:
-            font = ImageFont.truetype(font_path, 64)
+            font = ImageFont.truetype(font_path, DEFAULT_RENDER_SIZE)
         except Exception:
             return False, 0.0, {}
 
@@ -486,7 +505,7 @@ class CursiveDetector:
             Normalized difference from 0 (identical) to 1 (completely different),
             or None if comparison failed.
         """
-        size = 64
+        size = DEFAULT_RENDER_SIZE
         padding = 10
 
         # Use two different surrounding contexts
@@ -755,14 +774,14 @@ class CompletenessChecker:
                 - missing_chars_list: List of characters that failed to render
         """
         try:
-            font = ImageFont.truetype(font_path, 48)
+            font = ImageFont.truetype(font_path, PHASH_FONT_SIZE)
         except Exception:
             return 0.0, list(self.required_chars)
 
         missing = []
         for char in self.required_chars:
             try:
-                img = Image.new('L', (64, 64), 255)
+                img = Image.new('L', (DEFAULT_RENDER_SIZE, DEFAULT_RENDER_SIZE), 255)
                 draw = ImageDraw.Draw(img)
                 draw.text((5, 5), char, font=font, fill=0)
 
@@ -792,11 +811,11 @@ class CharacterRenderer:
         >>> print(f"Rendered to {path}")
     """
 
-    def __init__(self, height: int = 64, padding: int = 4):
+    def __init__(self, height: int = DEFAULT_RENDER_SIZE, padding: int = 4):
         """Initialize the renderer.
 
         Args:
-            height: Target image height in pixels. SDT uses 64.
+            height: Target image height in pixels. SDT uses DEFAULT_RENDER_SIZE (64).
             padding: Padding around the character in pixels.
         """
         self.height = height
