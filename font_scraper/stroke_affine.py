@@ -13,8 +13,10 @@ Algorithm Overview:
         - Rotation (theta): Rotates strokes around the centroid
         - Shear: Applies horizontal shearing transformation
 
-        The optimization uses Nelder-Mead followed by Differential Evolution
-        to find parameters that maximize stroke coverage of the glyph mask.
+        The optimization uses configurable strategies (Strategy Pattern):
+        - NelderMeadStrategy: Fast local search
+        - DifferentialEvolutionStrategy: Global refinement
+        - ChainedStrategy: Run multiple strategies in sequence
 
     Stage 2 - Per-Stroke Refinement:
         Each stroke is individually adjusted with translate+scale (4 params
@@ -25,6 +27,14 @@ differentiable rendering in Docker, which offers gradient-based optimization
 as an alternative to the derivative-free methods used in affine optimization.
 
 Typical usage:
+    # Using the strategy pattern directly:
+    strategy = ChainedStrategy([
+        NelderMeadStrategy(OptimizationConfig(max_iterations=800)),
+        DifferentialEvolutionStrategy(OptimizationConfig(max_iterations=20)),
+    ])
+    params, score = strategy.optimize(objective_fn, initial_params, bounds)
+
+    # Or using the high-level API:
     result = optimize_affine(font_path, char, canvas_size,
                              template_to_strokes_fn, render_glyph_mask_fn,
                              resolve_font_path_fn, smooth_stroke_fn,
@@ -33,6 +43,8 @@ Typical usage:
         strokes, score, mask, bbox = result
 """
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import logging
 
 import numpy as np
@@ -60,6 +72,222 @@ NM_F_TOLERANCE = 0.002  # Function value convergence tolerance
 DE_MAX_ITERATIONS = 20  # Maximum generations
 DE_POPULATION_SIZE = 10  # Population size multiplier
 DE_TOLERANCE = 0.005  # Convergence tolerance
+
+
+# ---------------------------------------------------------------------------
+# Optimization Strategy Pattern
+# ---------------------------------------------------------------------------
+
+@dataclass
+class OptimizationConfig:
+    """Configuration for an optimization run.
+
+    Encapsulates hyperparameters that control optimization behavior.
+    Different strategies use different subsets of these parameters.
+
+    Attributes:
+        max_iterations: Maximum number of iterations/generations/function evals.
+        tolerance: Convergence tolerance for stopping criterion.
+        x_tolerance: Parameter space convergence tolerance (Nelder-Mead).
+        f_tolerance: Function value convergence tolerance (Nelder-Mead).
+        population_size: Population size multiplier (Differential Evolution).
+        adaptive: Whether to use adaptive algorithm variants.
+        polish: Whether to polish result with L-BFGS-B (DE only).
+
+    Example:
+        >>> config = OptimizationConfig(max_iterations=1000, tolerance=1e-4)
+        >>> strategy = NelderMeadStrategy(config)
+    """
+    max_iterations: int = 100
+    tolerance: float = 0.001
+    x_tolerance: float = 0.1
+    f_tolerance: float = 0.002
+    population_size: int = 10
+    adaptive: bool = True
+    polish: bool = False
+
+
+class OptimizationStrategy(ABC):
+    """Base class for optimization strategies.
+
+    Defines the interface for optimization algorithms. Strategies can be
+    combined using ChainedStrategy to create multi-stage optimization
+    pipelines.
+
+    Subclasses must implement the optimize() method.
+
+    Attributes:
+        config: OptimizationConfig with hyperparameters.
+
+    Example:
+        >>> class MyStrategy(OptimizationStrategy):
+        ...     def optimize(self, objective_fn, initial_params, bounds):
+        ...         # Custom optimization logic
+        ...         return best_params, best_score
+    """
+
+    def __init__(self, config: OptimizationConfig = None):
+        """Initialize strategy with configuration.
+
+        Args:
+            config: Optimization configuration. If None, uses defaults.
+        """
+        self.config = config or OptimizationConfig()
+
+    @abstractmethod
+    def optimize(self, objective_fn, initial_params: np.ndarray,
+                 bounds: list[tuple]) -> tuple[np.ndarray, float]:
+        """Run optimization, return (best_params, best_score).
+
+        Args:
+            objective_fn: Function to minimize. Takes parameter array,
+                returns scalar score (lower is better).
+            initial_params: Starting point for optimization.
+            bounds: List of (min, max) tuples for each parameter.
+
+        Returns:
+            Tuple of (best_params, best_score) where:
+                - best_params: np.ndarray of optimized parameters
+                - best_score: Final objective function value
+        """
+        pass
+
+
+class NelderMeadStrategy(OptimizationStrategy):
+    """Nelder-Mead simplex optimization strategy.
+
+    A derivative-free local optimization method that works well for
+    smooth objectives with moderate dimensionality. Fast but may get
+    stuck in local minima.
+
+    Uses scipy.optimize.minimize with method='Nelder-Mead'.
+
+    Example:
+        >>> strategy = NelderMeadStrategy(OptimizationConfig(max_iterations=500))
+        >>> params, score = strategy.optimize(obj_fn, x0, bounds)
+    """
+
+    def optimize(self, objective_fn, initial_params: np.ndarray,
+                 bounds: list[tuple]) -> tuple[np.ndarray, float]:
+        """Run Nelder-Mead optimization.
+
+        Note: bounds are not enforced by Nelder-Mead itself but can be
+        used to clip the result.
+        """
+        from scipy.optimize import minimize
+
+        result = minimize(
+            objective_fn, initial_params, method='Nelder-Mead',
+            options={
+                'maxfev': self.config.max_iterations,
+                'xatol': self.config.x_tolerance,
+                'fatol': self.config.f_tolerance,
+                'adaptive': self.config.adaptive,
+            }
+        )
+        return result.x.copy(), result.fun
+
+
+class DifferentialEvolutionStrategy(OptimizationStrategy):
+    """Differential Evolution global optimization strategy.
+
+    A population-based evolutionary algorithm that's effective at
+    escaping local minima and exploring the parameter space globally.
+    Slower than Nelder-Mead but more robust.
+
+    Uses scipy.optimize.differential_evolution.
+
+    Example:
+        >>> strategy = DifferentialEvolutionStrategy(
+        ...     OptimizationConfig(max_iterations=30, population_size=15)
+        ... )
+        >>> params, score = strategy.optimize(obj_fn, x0, bounds)
+    """
+
+    def optimize(self, objective_fn, initial_params: np.ndarray,
+                 bounds: list[tuple]) -> tuple[np.ndarray, float]:
+        """Run Differential Evolution optimization."""
+        from scipy.optimize import differential_evolution
+
+        try:
+            result = differential_evolution(
+                objective_fn, bounds=bounds,
+                x0=initial_params,
+                maxiter=self.config.max_iterations,
+                popsize=self.config.population_size,
+                tol=self.config.tolerance,
+                polish=self.config.polish,
+            )
+            return result.x.copy(), result.fun
+        except (ValueError, RuntimeError) as e:
+            logger.debug("DE optimization failed: %s", e)
+            # Return initial params with evaluated score on failure
+            return initial_params.copy(), objective_fn(initial_params)
+
+
+class ChainedStrategy(OptimizationStrategy):
+    """Run multiple optimization strategies in sequence.
+
+    Chains strategies together, using the output of each as the input
+    to the next. Useful for combining fast local search (Nelder-Mead)
+    with global refinement (Differential Evolution).
+
+    Example:
+        >>> chain = ChainedStrategy([
+        ...     NelderMeadStrategy(OptimizationConfig(max_iterations=800)),
+        ...     DifferentialEvolutionStrategy(OptimizationConfig(max_iterations=20)),
+        ... ])
+        >>> params, score = chain.optimize(obj_fn, x0, bounds)
+    """
+
+    def __init__(self, strategies: list[OptimizationStrategy]):
+        """Initialize with list of strategies to run in sequence.
+
+        Args:
+            strategies: List of OptimizationStrategy instances.
+                Each will be executed in order, with the output of
+                one becoming the input to the next.
+        """
+        # Don't call super().__init__ as we don't need a config
+        self.strategies = strategies
+
+    def optimize(self, objective_fn, initial_params: np.ndarray,
+                 bounds: list[tuple]) -> tuple[np.ndarray, float]:
+        """Run all strategies in sequence."""
+        params = initial_params.copy()
+        score = float('inf')
+
+        for strategy in self.strategies:
+            new_params, new_score = strategy.optimize(
+                objective_fn, params, bounds
+            )
+            # Only update if we improved
+            if new_score < score:
+                params = new_params
+                score = new_score
+
+        return params, score
+
+
+# Default strategy for global affine optimization
+def create_default_affine_strategy() -> ChainedStrategy:
+    """Create the default optimization strategy for affine transforms.
+
+    Returns:
+        ChainedStrategy combining Nelder-Mead and Differential Evolution.
+    """
+    return ChainedStrategy([
+        NelderMeadStrategy(OptimizationConfig(
+            max_iterations=NM_MAX_FUNC_EVALS,
+            x_tolerance=NM_X_TOLERANCE,
+            f_tolerance=NM_F_TOLERANCE,
+        )),
+        DifferentialEvolutionStrategy(OptimizationConfig(
+            max_iterations=DE_MAX_ITERATIONS,
+            population_size=DE_POPULATION_SIZE,
+            tolerance=DE_TOLERANCE,
+        )),
+    ])
 
 
 def affine_transform_strokes(strokes: list[np.ndarray], params: tuple,
@@ -191,17 +419,17 @@ def prepare_affine_optimization(font_path: str, char: str, canvas_size: int,
 
 
 def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, float],
-                      score_args: tuple) -> tuple[list[np.ndarray], np.ndarray, float]:
+                      score_args: tuple,
+                      strategy: OptimizationStrategy = None) -> tuple[list[np.ndarray], np.ndarray, float]:
     """Execute Stage 1: global affine optimization on all strokes together.
 
     This stage finds optimal affine transformation parameters that apply uniformly
-    to all strokes. The optimization uses a two-phase approach:
+    to all strokes. By default, uses a two-phase approach:
 
     1. Nelder-Mead simplex method starting from identity transform (fast local search)
     2. Differential Evolution for global refinement (escapes local minima)
 
-    The objective function minimizes the negative coverage score, which measures
-    how well the transformed strokes cover the glyph mask point cloud.
+    The optimization strategy can be customized by passing a different strategy.
 
     Args:
         stroke_arrays: List of Nx2 numpy arrays, one per stroke. Each array
@@ -211,6 +439,8 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
         score_args: Tuple of scoring function arguments as returned by
             prepare_affine_optimization. Contains KD-tree, point cloud info,
             snap indices, and distance map.
+        strategy: OptimizationStrategy to use. If None, uses the default
+            ChainedStrategy with Nelder-Mead followed by Differential Evolution.
 
     Returns:
         A tuple of (best_strokes, best_params, best_score) where:
@@ -227,12 +457,13 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
             - Rotation: [-15, 15] degrees
             - Shear: [-0.3, 0.3]
 
-        The Nelder-Mead phase uses adaptive simplex sizing and terminates after
-        NM_MAX_FUNC_EVALS function evaluations or when convergence criteria are
-        met. The DE phase uses DE_POPULATION_SIZE and DE_MAX_ITERATIONS for speed.
+    Example:
+        # Use custom strategy
+        strategy = NelderMeadStrategy(OptimizationConfig(max_iterations=1000))
+        strokes, params, score = run_global_affine(
+            stroke_arrays, centroid, score_args, strategy=strategy
+        )
     """
-    from scipy.optimize import differential_evolution, minimize
-
     affine_bounds = [
         AFFINE_TRANSLATE_BOUNDS, AFFINE_TRANSLATE_BOUNDS,  # translate x, y
         AFFINE_SCALE_BOUNDS, AFFINE_SCALE_BOUNDS,  # scale x, y
@@ -244,28 +475,15 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
         transformed = affine_transform_strokes(stroke_arrays, params, centroid)
         return score_raw_strokes(transformed, *score_args)
 
-    # Quick NM from identity
-    x0 = np.array([0, 0, 1, 1, 0, 0], dtype=float)
-    nm = minimize(_affine_obj, x0, method='Nelder-Mead',
-                  options={'maxfev': NM_MAX_FUNC_EVALS,
-                           'xatol': NM_X_TOLERANCE,
-                           'fatol': NM_F_TOLERANCE,
-                           'adaptive': True})
-    best_params = nm.x.copy()
-    best_score = nm.fun
+    # Use provided strategy or create default
+    if strategy is None:
+        strategy = create_default_affine_strategy()
 
-    # DE refinement (quick)
-    try:
-        de = differential_evolution(_affine_obj, bounds=affine_bounds,
-                                    x0=best_params,
-                                    maxiter=DE_MAX_ITERATIONS,
-                                    popsize=DE_POPULATION_SIZE,
-                                    tol=DE_TOLERANCE, polish=False)
-        if de.fun < best_score:
-            best_params = de.x.copy()
-            best_score = de.fun
-    except (ValueError, RuntimeError) as e:
-        logger.debug("DE optimization failed in global affine: %s", e)
+    # Initial parameters: identity transform
+    x0 = np.array([0, 0, 1, 1, 0, 0], dtype=float)
+
+    # Run optimization
+    best_params, best_score = strategy.optimize(_affine_obj, x0, affine_bounds)
 
     # Apply best global affine
     best_strokes = affine_transform_strokes(stroke_arrays, best_params, centroid)

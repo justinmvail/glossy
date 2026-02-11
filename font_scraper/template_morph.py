@@ -15,6 +15,14 @@ This approach produces more consistent and semantically meaningful stroke
 paths compared to pure skeletonization, as it uses knowledge of how letters
 are typically written.
 
+Design Patterns:
+    The module uses a Registry Pattern for character-specific vertex finders.
+    Each character with special vertex detection logic has a VertexFinder
+    subclass registered in VERTEX_FINDERS. This allows:
+    - Adding new character handlers without modifying find_vertices()
+    - Isolating and testing character-specific logic independently
+    - Clear extension points for new characters
+
 Supported Characters:
     Currently supports A-Z uppercase letters. Each letter has a template
     defining its stroke paths and vertex positions.
@@ -33,10 +41,24 @@ Example:
         from template_morph import visualize_alphabet
         visualize_alphabet('/path/to/font.ttf', output_path='/tmp/strokes.png')
 
+    Register a custom vertex finder::
+
+        from template_morph import VertexFinder, VERTEX_FINDERS
+
+        class MyCharVertexFinder(VertexFinder):
+            def find(self, font_mask, bbox, outline_xy):
+                # Custom vertex detection logic
+                return {'TL': (x1, y1), 'BR': (x2, y2)}
+
+        VERTEX_FINDERS['X'] = MyCharVertexFinder
+
 Attributes:
     TEMPLATES: Dict mapping characters to their stroke templates.
     VERTEX_POS: Dict mapping vertex names to relative positions.
+    VERTEX_FINDERS: Dict mapping characters to VertexFinder classes.
 """
+
+from abc import ABC, abstractmethod
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -104,6 +126,272 @@ Grid layout::
     |      |      |
     BL --- BC --- BR
 """
+
+
+# ---------------------------------------------------------------------------
+# Vertex Finder Registry Pattern
+# ---------------------------------------------------------------------------
+
+class VertexFinder(ABC):
+    """Base class for character-specific vertex detection.
+
+    Each subclass implements vertex detection logic for one or more
+    characters. The registry pattern allows character-specific handlers
+    to be added without modifying the main find_vertices() function.
+
+    Subclasses must implement the find() method.
+
+    Example:
+        >>> class VertexFinderA(VertexFinder):
+        ...     def find(self, font_mask, bbox, outline_xy):
+        ...         # Find apex, base corners, and crossbar vertices
+        ...         return {'TC': (50, 10), 'BL': (10, 90), ...}
+    """
+
+    @abstractmethod
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        """Find vertices for this character.
+
+        Args:
+            font_mask: Boolean numpy array of font pixels.
+            bbox: Tuple (cmin, rmin, cmax, rmax) of bounding box.
+            outline_xy: Numpy array of (x, y) outline points.
+
+        Returns:
+            Dict mapping vertex names (e.g., 'TL', 'TC', 'BR') to
+            (x, y) pixel coordinates.
+        """
+        pass
+
+
+class VertexFinderA(VertexFinder):
+    """Vertex finder for letter A."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        vertices = {}
+
+        # TC = topmost point (apex)
+        top_idx = np.argmin(outline_xy[:, 1])
+        vertices['TC'] = (int(outline_xy[top_idx, 0]), int(outline_xy[top_idx, 1]))
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+
+        # Find crossbar height: middle of the gap region between legs
+        gap_rows = []
+        for test_y in range(rmin + h // 4, rmax - h // 8):
+            row = font_mask[test_y, :]
+            if not row.any():
+                continue
+            cols_filled = np.where(row)[0]
+            diffs = np.diff(cols_filled)
+            if np.max(diffs) > 3:
+                gap_rows.append(test_y)
+        best_y = gap_rows[len(gap_rows) // 2] if gap_rows else rmin + int(h * 0.6)
+
+        # Find ML/MR by scanning rows around crossbar height
+        scan_range = range(max(rmin, best_y - h // 8), min(rmax, best_y + h // 8 + 1))
+        far_left_x, far_left_y = cmax, best_y
+        far_right_x, far_right_y = cmin, best_y
+        for scan_y in scan_range:
+            rp = np.where(font_mask[scan_y, :])[0]
+            if len(rp) == 0:
+                continue
+            if rp[0] < far_left_x:
+                far_left_x, far_left_y = int(rp[0]), scan_y
+            if rp[-1] > far_right_x:
+                far_right_x, far_right_y = int(rp[-1]), scan_y
+
+        vertices['ML'] = snap_to_outline(far_left_x, far_left_y, outline_xy, y_tolerance=max(5, h // 8))
+        vertices['MR'] = snap_to_outline(far_right_x, far_right_y, outline_xy, y_tolerance=max(5, h // 8))
+        return vertices
+
+
+class VertexFinderB(VertexFinder):
+    """Vertex finder for letter B."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+
+        waist_y, _ = _find_waist_height(font_mask, rmin, rmax)
+        vertices['ML'] = _leftmost_in_range(outline_xy, waist_y - 3, waist_y + 3) or \
+            _default_vertex_pos('ML', bbox, outline_xy)
+
+        top_bump = _rightmost_in_range(outline_xy, rmin, waist_y)
+        vertices['TR_TOP'] = top_bump if top_bump else _default_vertex_pos('TR', bbox, outline_xy)
+
+        bot_bump = _rightmost_in_range(outline_xy, waist_y, rmax)
+        vertices['TR_BOT'] = bot_bump if bot_bump else _default_vertex_pos('BR', bbox, outline_xy)
+        return vertices
+
+
+class VertexFinderD(VertexFinder):
+    """Vertex finder for letter D."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+        vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+        br = _rightmost_in_range(outline_xy, rmax - h // 3, rmax)
+        vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
+        return vertices
+
+
+class VertexFinderCG(VertexFinder):
+    """Vertex finder for letters C and G."""
+
+    def __init__(self, char: str):
+        self.char = char
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        vertices = {}
+
+        tr = _rightmost_in_range(outline_xy, rmin, rmin + int(h * 0.3))
+        vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+        br = _rightmost_in_range(outline_xy, rmax - int(h * 0.3), rmax)
+        vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
+        tl = _leftmost_in_range(outline_xy, rmin + int(h * 0.2), rmin + int(h * 0.5))
+        vertices['TL'] = tl if tl else _default_vertex_pos('TL', bbox, outline_xy)
+        bl = _leftmost_in_range(outline_xy, rmin + int(h * 0.5), rmax - int(h * 0.2))
+        vertices['BL'] = bl if bl else _default_vertex_pos('BL', bbox, outline_xy)
+        if self.char == 'G':
+            vertices['MR'] = _default_vertex_pos('MR', bbox, outline_xy)
+            vertices['MC'] = _default_vertex_pos('MC', bbox, outline_xy)
+        return vertices
+
+
+class VertexFinderEF(VertexFinder):
+    """Vertex finder for letters E and F."""
+
+    def __init__(self, char: str):
+        self.char = char
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        mid_y = rmin + h // 2
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
+        vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
+        mr = _rightmost_in_range(outline_xy, mid_y - h // 8, mid_y + h // 8)
+        vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+        if self.char == 'E':
+            vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+        return vertices
+
+
+class VertexFinderHK(VertexFinder):
+    """Vertex finder for letters H and K."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        mid_y = rmin + h // 2
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
+        vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+        vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
+        vertices['MR'] = snap_to_outline(cmax, mid_y, outline_xy)
+        return vertices
+
+
+class VertexFinderP(VertexFinder):
+    """Vertex finder for letter P."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+        vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
+        vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
+        mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
+        vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+        return vertices
+
+
+class VertexFinderR(VertexFinder):
+    """Vertex finder for letter R."""
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        cmin, rmin, cmax, rmax = bbox
+        h = rmax - rmin
+        vertices = {}
+
+        vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+        vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+        vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+        tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+        vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
+        vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
+        mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
+        vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+        return vertices
+
+
+class DefaultVertexFinder(VertexFinder):
+    """Fallback vertex finder for characters without specific handlers."""
+
+    def __init__(self, char: str):
+        self.char = char
+
+    def find(self, font_mask: np.ndarray, bbox: tuple,
+             outline_xy: np.ndarray) -> dict[str, tuple[int, int]]:
+        """Default: compute standard positions and snap to outline."""
+        vertices = {}
+        for name in set(sum(TEMPLATES.get(self.char, {}).get('strokes', []), [])):
+            if name in VERTEX_POS:
+                vertices[name] = _default_vertex_pos(name, bbox, outline_xy)
+        return vertices
+
+
+# Registry mapping characters to their VertexFinder classes/instances
+# Note: Some finders need character context (C/G, E/F), so we use factory functions
+VERTEX_FINDERS: dict[str, VertexFinder | type[VertexFinder]] = {
+    'A': VertexFinderA(),
+    'B': VertexFinderB(),
+    'D': VertexFinderD(),
+    'C': VertexFinderCG('C'),
+    'G': VertexFinderCG('G'),
+    'E': VertexFinderEF('E'),
+    'F': VertexFinderEF('F'),
+    'H': VertexFinderHK(),
+    'K': VertexFinderHK(),
+    'P': VertexFinderP(),
+    'R': VertexFinderR(),
+}
 
 
 def render_font_mask(font_path: str, char: str, font_size: int = 200,
@@ -283,177 +571,11 @@ def _default_vertex_pos(name: str, bbox: tuple, outline_xy: np.ndarray):
     return snap_to_outline(x, y, outline_xy)
 
 
-def _find_vertices_A(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letter A."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    vertices = {}
-
-    # TC = topmost point (apex)
-    top_idx = np.argmin(outline_xy[:, 1])
-    vertices['TC'] = (int(outline_xy[top_idx, 0]), int(outline_xy[top_idx, 1]))
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
-
-    # Find crossbar height: middle of the gap region between legs
-    gap_rows = []
-    for test_y in range(rmin + h // 4, rmax - h // 8):
-        row = font_mask[test_y, :]
-        if not row.any():
-            continue
-        cols_filled = np.where(row)[0]
-        diffs = np.diff(cols_filled)
-        if np.max(diffs) > 3:
-            gap_rows.append(test_y)
-    best_y = gap_rows[len(gap_rows) // 2] if gap_rows else rmin + int(h * 0.6)
-
-    # Find ML/MR by scanning rows around crossbar height
-    scan_range = range(max(rmin, best_y - h // 8), min(rmax, best_y + h // 8 + 1))
-    far_left_x, far_left_y = cmax, best_y
-    far_right_x, far_right_y = cmin, best_y
-    for scan_y in scan_range:
-        rp = np.where(font_mask[scan_y, :])[0]
-        if len(rp) == 0:
-            continue
-        if rp[0] < far_left_x:
-            far_left_x, far_left_y = int(rp[0]), scan_y
-        if rp[-1] > far_right_x:
-            far_right_x, far_right_y = int(rp[-1]), scan_y
-
-    vertices['ML'] = snap_to_outline(far_left_x, far_left_y, outline_xy, y_tolerance=max(5, h // 8))
-    vertices['MR'] = snap_to_outline(far_right_x, far_right_y, outline_xy, y_tolerance=max(5, h // 8))
-    return vertices
-
-
-def _find_vertices_B(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letter B."""
-    cmin, rmin, cmax, rmax = bbox
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-
-    waist_y, _ = _find_waist_height(font_mask, rmin, rmax)
-    vertices['ML'] = _leftmost_in_range(outline_xy, waist_y - 3, waist_y + 3) or \
-        _default_vertex_pos('ML', bbox, outline_xy)
-
-    top_bump = _rightmost_in_range(outline_xy, rmin, waist_y)
-    vertices['TR_TOP'] = top_bump if top_bump else _default_vertex_pos('TR', bbox, outline_xy)
-
-    bot_bump = _rightmost_in_range(outline_xy, waist_y, rmax)
-    vertices['TR_BOT'] = bot_bump if bot_bump else _default_vertex_pos('BR', bbox, outline_xy)
-    return vertices
-
-
-def _find_vertices_D(bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letter D."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
-    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
-    br = _rightmost_in_range(outline_xy, rmax - h // 3, rmax)
-    vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
-    return vertices
-
-
-def _find_vertices_CG(char: str, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letters C and G."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    vertices = {}
-
-    tr = _rightmost_in_range(outline_xy, rmin, rmin + int(h * 0.3))
-    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
-    br = _rightmost_in_range(outline_xy, rmax - int(h * 0.3), rmax)
-    vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
-    tl = _leftmost_in_range(outline_xy, rmin + int(h * 0.2), rmin + int(h * 0.5))
-    vertices['TL'] = tl if tl else _default_vertex_pos('TL', bbox, outline_xy)
-    bl = _leftmost_in_range(outline_xy, rmin + int(h * 0.5), rmax - int(h * 0.2))
-    vertices['BL'] = bl if bl else _default_vertex_pos('BL', bbox, outline_xy)
-    if char == 'G':
-        vertices['MR'] = _default_vertex_pos('MR', bbox, outline_xy)
-        vertices['MC'] = _default_vertex_pos('MC', bbox, outline_xy)
-    return vertices
-
-
-def _find_vertices_EF(char: str, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letters E and F."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    mid_y = rmin + h // 2
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
-    vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
-    mr = _rightmost_in_range(outline_xy, mid_y - h // 8, mid_y + h // 8)
-    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
-    if char == 'E':
-        vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
-    return vertices
-
-
-def _find_vertices_HK(bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letters H and K."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    mid_y = rmin + h // 2
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
-    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
-    vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
-    vertices['MR'] = snap_to_outline(cmax, mid_y, outline_xy)
-    return vertices
-
-
-def _find_vertices_P(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letter P."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
-    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
-    best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
-    vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
-    mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
-    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
-    return vertices
-
-
-def _find_vertices_R(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
-    """Find vertices for letter R."""
-    cmin, rmin, cmax, rmax = bbox
-    h = rmax - rmin
-    vertices = {}
-
-    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
-    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
-    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
-    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
-    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
-    best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
-    vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
-    mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
-    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
-    return vertices
-
-
 def find_vertices(char: str, font_mask: np.ndarray, bbox: tuple) -> dict:
     """Find letter-specific vertex positions on the font outline.
 
-    Uses character-specific heuristics to locate key vertices like
-    corners, endpoints, and junction points on the font outline.
+    Uses the VERTEX_FINDERS registry to dispatch to character-specific
+    handlers. If no handler is registered, falls back to DefaultVertexFinder.
 
     Args:
         char: The character being processed.
@@ -463,6 +585,21 @@ def find_vertices(char: str, font_mask: np.ndarray, bbox: tuple) -> dict:
     Returns:
         Dict mapping vertex names (e.g., 'TL', 'TC', 'BR') to (x, y)
         pixel coordinates on the outline.
+
+    Example:
+        >>> vertices = find_vertices('A', mask, bbox)
+        >>> print(vertices['TC'])  # Apex of the A
+        (112, 45)
+
+    Note:
+        To add support for a new character, create a VertexFinder subclass
+        and register it in VERTEX_FINDERS:
+
+            class VertexFinderX(VertexFinder):
+                def find(self, font_mask, bbox, outline_xy):
+                    return {'TL': ..., 'BR': ...}
+
+            VERTEX_FINDERS['X'] = VertexFinderX()
     """
     outline = get_outline(font_mask)
     outline_pts = np.argwhere(outline)  # (row, col)
@@ -471,30 +608,12 @@ def find_vertices(char: str, font_mask: np.ndarray, bbox: tuple) -> dict:
     # Convert to (x, y) = (col, row)
     outline_xy = outline_pts[:, ::-1]
 
-    # Dispatch to character-specific handlers
-    if char == 'A':
-        return _find_vertices_A(font_mask, bbox, outline_xy)
-    elif char == 'B':
-        return _find_vertices_B(font_mask, bbox, outline_xy)
-    elif char == 'D':
-        return _find_vertices_D(bbox, outline_xy)
-    elif char in ('C', 'G'):
-        return _find_vertices_CG(char, bbox, outline_xy)
-    elif char in ('E', 'F'):
-        return _find_vertices_EF(char, bbox, outline_xy)
-    elif char in ('H', 'K'):
-        return _find_vertices_HK(bbox, outline_xy)
-    elif char == 'P':
-        return _find_vertices_P(font_mask, bbox, outline_xy)
-    elif char == 'R':
-        return _find_vertices_R(font_mask, bbox, outline_xy)
-    else:
-        # Default: compute all standard positions and snap to outline
-        vertices = {}
-        for name in set(sum(TEMPLATES.get(char, {}).get('strokes', []), [])):
-            if name in VERTEX_POS:
-                vertices[name] = _default_vertex_pos(name, bbox, outline_xy)
-        return vertices
+    # Look up finder in registry, fall back to default
+    finder = VERTEX_FINDERS.get(char)
+    if finder is None:
+        finder = DefaultVertexFinder(char)
+
+    return finder.find(font_mask, bbox, outline_xy)
 
 
 def interpolate_stroke(vertices_list: list, n_points: int = 50) -> list:
