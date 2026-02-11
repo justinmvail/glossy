@@ -19,7 +19,7 @@ Generated: 2026-02-11
 6. [x] stroke_merge.py:985-992 - absorb_convergence_stubs uses O(n²) nested loops
 7. [x] stroke_merge.py:1059-1075 - absorb_junction_stubs has triple nested loops
 8. [x] stroke_core.py:330-339 - _merge_to_expected_count brute force pair search
-9. [ ] stroke_merge.py:452-490 - endpoint_cluster() called 100+ times without caching
+9. [x] stroke_merge.py:452-490 - endpoint_cluster() called 100+ times without caching
 
 ### CRITICAL - God Modules (>1000 lines, mixed concerns)
 10. [ ] Split stroke_pipeline.py (1364 lines) into pipeline + variant evaluator + path tracing

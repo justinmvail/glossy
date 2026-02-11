@@ -690,13 +690,15 @@ def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
 
 
 def _find_t_junction_candidate(strokes: list[list[tuple]], cluster_map: dict,
-                                assigned: list[set]) -> tuple | None:
+                                assigned: list[set],
+                                endpoint_cache: dict[tuple[int, bool], int] = None) -> tuple | None:
     """Find a T-junction candidate for merging.
 
     Args:
         strokes: List of stroke paths.
         cluster_map: Cluster to endpoints mapping.
         assigned: List of junction cluster sets.
+        endpoint_cache: Optional pre-built cache from _build_endpoint_cache().
 
     Returns:
         Tuple (cid, si, side_i, sj, side_j, second_longest_len) if found, else None.
@@ -709,15 +711,18 @@ def _find_t_junction_candidate(strokes: list[list[tuple]], cluster_map: dict,
 
         entries_sorted = sorted(entries, key=lambda e: len(strokes[e[0]]), reverse=True)
         shortest_idx, _shortest_side = entries_sorted[-1]
-        shortest_stroke = strokes[shortest_idx]
         second_longest_len = len(strokes[entries_sorted[1][0]])
 
-        # Check shortest stroke has valid junctions
-        s_sc = endpoint_cluster(shortest_stroke, False, assigned)
-        s_ec = endpoint_cluster(shortest_stroke, True, assigned)
+        # Check shortest stroke has valid junctions (use cache if available)
+        if endpoint_cache:
+            s_sc = _get_cached_cluster(endpoint_cache, shortest_idx, False)
+            s_ec = _get_cached_cluster(endpoint_cache, shortest_idx, True)
+        else:
+            s_sc = endpoint_cluster(strokes[shortest_idx], False, assigned)
+            s_ec = endpoint_cluster(strokes[shortest_idx], True, assigned)
         if s_sc < 0 or s_ec < 0:
             continue
-        if len(shortest_stroke) >= second_longest_len * 0.4:
+        if len(strokes[shortest_idx]) >= second_longest_len * 0.4:
             continue
 
         # Get the two longest strokes
@@ -726,9 +731,13 @@ def _find_t_junction_candidate(strokes: list[list[tuple]], cluster_map: dict,
         if si == sj:
             continue
 
-        # Check they don't form a loop
-        far_i = endpoint_cluster(strokes[si], from_end=(side_i != 'end'), assigned=assigned)
-        far_j = endpoint_cluster(strokes[sj], from_end=(side_j != 'end'), assigned=assigned)
+        # Check they don't form a loop (use cache if available)
+        if endpoint_cache:
+            far_i = _get_cached_cluster(endpoint_cache, si, side_i != 'end')
+            far_j = _get_cached_cluster(endpoint_cache, sj, side_j != 'end')
+        else:
+            far_i = endpoint_cluster(strokes[si], from_end=(side_i != 'end'), assigned=assigned)
+            far_j = endpoint_cluster(strokes[sj], from_end=(side_j != 'end'), assigned=assigned)
         if far_i >= 0 and far_i == far_j:
             continue
 
@@ -744,7 +753,8 @@ def _find_t_junction_candidate(strokes: list[list[tuple]], cluster_map: dict,
 
 
 def _remove_short_cross_strokes(strokes: list[list[tuple]], cid: int,
-                                 threshold_len: float, assigned: list[set]) -> bool:
+                                 threshold_len: float, assigned: list[set],
+                                 endpoint_cache: dict[tuple[int, bool], int] = None) -> bool:
     """Remove short cross-strokes at a junction.
 
     Args:
@@ -752,14 +762,19 @@ def _remove_short_cross_strokes(strokes: list[list[tuple]], cid: int,
         cid: Cluster ID to check.
         threshold_len: Length threshold (40% of second longest).
         assigned: List of junction cluster sets.
+        endpoint_cache: Optional pre-built cache from _build_endpoint_cache().
 
     Returns:
         True if a stroke was removed.
     """
     for sk in range(len(strokes)):
         s = strokes[sk]
-        s_sc = endpoint_cluster(s, False, assigned)
-        s_ec = endpoint_cluster(s, True, assigned)
+        if endpoint_cache:
+            s_sc = _get_cached_cluster(endpoint_cache, sk, False)
+            s_ec = _get_cached_cluster(endpoint_cache, sk, True)
+        else:
+            s_sc = endpoint_cluster(s, False, assigned)
+            s_ec = endpoint_cluster(s, True, assigned)
         if s_sc >= 0 and s_ec >= 0 and len(s) < threshold_len and (s_sc == cid or s_ec == cid):
             strokes.pop(sk)
             return True
@@ -802,13 +817,17 @@ def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
     changed = True
     while changed:
         changed = False
+        # Build caches once per iteration (O(n) instead of O(n²) repeated calls)
         cluster_map = _build_cluster_endpoint_map(strokes, assigned)
-        candidate = _find_t_junction_candidate(strokes, cluster_map, assigned)
+        endpoint_cache = _build_endpoint_cache(strokes, assigned)
+        candidate = _find_t_junction_candidate(strokes, cluster_map, assigned, endpoint_cache)
 
         if candidate:
             cid, si, side_i, sj, side_j, second_longest_len = candidate
             _execute_merge(strokes, si, side_i, sj, side_j)
-            _remove_short_cross_strokes(strokes, cid, second_longest_len * 0.4, assigned)
+            # Rebuild cache after merge since stroke indices changed
+            endpoint_cache = _build_endpoint_cache(strokes, assigned)
+            _remove_short_cross_strokes(strokes, cid, second_longest_len * 0.4, assigned, endpoint_cache)
             changed = True
 
     return strokes
@@ -1213,6 +1232,34 @@ def _build_detailed_cluster_index(strokes: list[list[tuple]], assigned: list[set
     return index
 
 
+def _build_endpoint_cache(strokes: list[list[tuple]], assigned: list[set]) -> dict[tuple[int, bool], int]:
+    """Build a cache mapping (stroke_index, is_end) to cluster_id.
+
+    This is the reverse of _build_detailed_cluster_index and provides O(1)
+    lookup of which cluster a stroke endpoint belongs to, avoiding repeated
+    calls to endpoint_cluster().
+
+    Args:
+        strokes: List of stroke paths.
+        assigned: List of assigned junction cluster sets.
+
+    Returns:
+        Dict mapping (stroke_index, is_end) -> cluster_id.
+        Missing keys indicate the endpoint is not at any cluster (cluster_id = -1).
+    """
+    cache = {}
+    for si, s in enumerate(strokes):
+        for is_end in [False, True]:
+            cid = endpoint_cluster(s, is_end, assigned)
+            cache[(si, is_end)] = cid
+    return cache
+
+
+def _get_cached_cluster(cache: dict[tuple[int, bool], int], stroke_idx: int, is_end: bool) -> int:
+    """Get cluster ID from cache, returning -1 if not found."""
+    return cache.get((stroke_idx, is_end), -1)
+
+
 def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
                         stub_threshold: int = 20) -> list[list[tuple]]:
     """Remove orphaned short stubs with no neighbors at their junction clusters.
@@ -1238,15 +1285,16 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
-        # Build cluster index once per iteration (O(n) instead of O(n²))
+        # Build caches once per iteration (O(n) instead of O(n²))
         cluster_index = _build_cluster_index(strokes, assigned)
+        endpoint_cache = _build_endpoint_cache(strokes, assigned)
 
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            sc = endpoint_cluster(s, False, assigned)
-            ec = endpoint_cluster(s, True, assigned)
+            sc = _get_cached_cluster(endpoint_cache, si, False)
+            ec = _get_cached_cluster(endpoint_cache, si, True)
 
             orphan = False
             for cid in [sc, ec]:
