@@ -71,6 +71,14 @@ from stroke_dataclasses import (
 )
 from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
 
+# Angle range for classifying segments as vertical (degrees from horizontal)
+VERTICAL_ANGLE_MIN = 60
+VERTICAL_ANGLE_MAX = 120
+
+# Waist region calculation ratios (fraction of glyph height)
+WAIST_TOLERANCE_RATIO = 0.15  # For detecting waist pixels near mid_y
+WAIST_MARGIN_RATIO = 0.05  # Margin for middle-third region detection
+
 
 def extract_region_from_waypoint(wp) -> int | None:
     """Extract the region number from a waypoint definition.
@@ -247,7 +255,7 @@ class MinimalStrokePipeline:
             return None
 
         segments = self._find_skeleton_segments(info)
-        vertical_segments = [s for s in segments if 60 <= abs(s['angle']) <= 120]
+        vertical_segments = [s for s in segments if VERTICAL_ANGLE_MIN <= abs(s['angle']) <= VERTICAL_ANGLE_MAX]
 
         skel_list = list(info['skel_set'])
         if not skel_list:
@@ -723,7 +731,7 @@ class MinimalStrokePipeline:
                                     region=region, is_vertex=True, apex_extension=apex_extension)
 
         # Waist vertex: find leftmost/rightmost near middle
-        waist_tolerance = (bbox[3] - bbox[1]) * 0.15
+        waist_tolerance = (bbox[3] - bbox[1]) * WAIST_TOLERANCE_RATIO
         waist_pixels = [p for p in skel_list if abs(p[1] - mid_y) < waist_tolerance]
         if waist_pixels:
             vertex_pt = min(waist_pixels, key=lambda p: p[0]) if template_pos[0] < mid_x else max(waist_pixels, key=lambda p: p[0])
@@ -769,7 +777,7 @@ class MinimalStrokePipeline:
         third_h = h / 3
         top_bound = bbox[1] + third_h
         bot_bound = bbox[1] + 2 * third_h
-        waist_margin = h * 0.05
+        waist_margin = h * WAIST_MARGIN_RATIO
 
         if self._is_vertical_stroke(stroke_template):
             return self._process_vertical_stroke(stroke_template)

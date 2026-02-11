@@ -2,7 +2,7 @@
 
 This document tracks code quality issues identified through a comprehensive review of the glossy/font_scraper codebase. Issues are prioritized and will be checked off as they are fixed.
 
-**Last Updated**: 2026-02-10 (Long function refactoring completed)
+**Last Updated**: 2026-02-10 (Magic numbers refactoring completed)
 **Review Scope**: All stroke_*.py files, stroke_lib package, Flask routes
 
 ---
@@ -159,47 +159,47 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 6. Magic Numbers and Strings
 
-- [ ] **stroke_core.py:86, 90, 129** - `merge_distance=12` undefined constant
-  - Define `SKELETON_MERGE_DISTANCE = 12` at module level
+- [x] **stroke_core.py:86, 90, 129** - `merge_distance=12` undefined constant
+  - ✅ Imported SKELETON_MERGE_DISTANCE from stroke_skeleton.py
 
-- [ ] **stroke_pipeline.py:232** - `60 <= abs(s['angle']) <= 120` magic angle range
-  - Define `VERTICAL_ANGLE_MIN = 60`, `VERTICAL_ANGLE_MAX = 120`
+- [x] **stroke_pipeline.py:232** - `60 <= abs(s['angle']) <= 120` magic angle range
+  - ✅ Defined VERTICAL_ANGLE_MIN = 60, VERTICAL_ANGLE_MAX = 120
 
-- [ ] **stroke_pipeline.py:701** - `waist_tolerance = h * 0.15` magic multiplier
-  - Define `WAIST_TOLERANCE_RATIO = 0.15`
+- [x] **stroke_pipeline.py:701** - `waist_tolerance = h * 0.15` magic multiplier
+  - ✅ Defined WAIST_TOLERANCE_RATIO = 0.15
 
-- [ ] **stroke_pipeline.py:747** - `waist_margin = h * 0.05` magic multiplier
-  - Define `WAIST_MARGIN_RATIO = 0.05`
+- [x] **stroke_pipeline.py:747** - `waist_margin = h * 0.05` magic multiplier
+  - ✅ Defined WAIST_MARGIN_RATIO = 0.05
 
-- [ ] **stroke_pipeline_stream.py:60** - `[:500]` hardcoded skeleton limit
-  - Define `MAX_SKELETON_MARKERS = 500`
+- [x] **stroke_pipeline_stream.py:60** - `[:500]` hardcoded skeleton limit
+  - ✅ Defined MAX_SKELETON_MARKERS = 500
 
-- [ ] **stroke_routes_core.py:519-520** - Quality thresholds (10, 15, 0.225, 2)
-  - Define named constants with documentation
+- [x] **stroke_routes_core.py:519-520** - Quality thresholds (10, 15, 0.225, 2)
+  - ✅ Already defined as MIN_SHAPE_COUNT, MAX_SHAPE_COUNT, MAX_WIDTH_RATIO, EXPECTED_EXCLAMATION_SHAPES
 
-- [ ] **stroke_routes_stream.py:245** - Affine bounds `[(-15, 15), ...]`
-  - Define `AFFINE_TRANSLATION_BOUNDS = (-15, 15)` etc.
+- [x] **stroke_routes_stream.py:245** - Affine bounds `[(-15, 15), ...]`
+  - ✅ Defined AFFINE_TX_BOUNDS, AFFINE_TY_BOUNDS, AFFINE_SX_BOUNDS, AFFINE_SY_BOUNDS, AFFINE_ROTATE_BOUNDS, AFFINE_SHEAR_BOUNDS
 
-- [ ] **stroke_routes_stream.py:219** - Optimizer params `maxfev=400, xatol=0.2`
-  - Define `NM_MAX_EVALUATIONS = 400` etc.
+- [x] **stroke_routes_stream.py:219** - Optimizer params `maxfev=400, xatol=0.2`
+  - ✅ Defined NM_GLOBAL_MAXFEV, NM_GLOBAL_XATOL, NM_GLOBAL_FATOL, NM_PERSTROKE_MAXFEV, NM_PERSTROKE_XATOL, DE_MAXITER, DE_POPSIZE, DE_TOL
 
-- [ ] **stroke_rendering.py:68, 128** - `0.9` canvas fill threshold
-  - Define `CANVAS_FILL_THRESHOLD = 0.9`
+- [x] **stroke_rendering.py:68, 128** - `0.9` canvas fill threshold
+  - ✅ Already defined as CANVAS_FILL_THRESHOLD = 0.9
 
-- [ ] **stroke_rendering.py:150, 224** - `128` binarization threshold
-  - Define `BINARIZATION_THRESHOLD = 128`
+- [x] **stroke_rendering.py:150, 224** - `128` binarization threshold
+  - ✅ Already defined as BINARIZATION_THRESHOLD = 128
 
-- [ ] **stroke_shapes.py:485-495** - Magic values in adaptive_radius
-  - Document why `1.5`, `6.0`, `95th percentile`
+- [x] **stroke_shapes.py:485-495** - Magic values in adaptive_radius
+  - ✅ Defined MIN_SHAPE_POINTS, POINT_SPACING_TARGET, RADIUS_FLOOR_MULTIPLIER, MIN_RADIUS, DISTANCE_PERCENTILE
 
-- [ ] **stroke_skeleton.py:369-384** - Neighbor scoring weights
-  - Define `DIRECTION_BIAS_WEIGHT = 10`, `AVOID_PENALTY = 1000`
+- [x] **stroke_skeleton.py:369-384** - Neighbor scoring weights
+  - ✅ Defined DIRECTION_BIAS_STEPS, DIRECTION_BIAS_WEIGHT, AVOID_PENALTY
 
-- [ ] **stroke_lib/analysis/skeleton.py:221** - `near_vertex_dist = 5`
-  - Make configurable parameter
+- [x] **stroke_lib/analysis/skeleton.py:221** - `near_vertex_dist = 5`
+  - ✅ Defined NEAR_VERTEX_DISTANCE = 5 as module constant
 
-- [ ] **stroke_lib/analysis/skeleton.py:715** - `stub_threshold = 20`
-  - Make configurable parameter
+- [x] **stroke_lib/analysis/skeleton.py:715** - `stub_threshold = 20`
+  - ✅ Defined STUB_THRESHOLD = 20 as module constant
 
 ### 7. Missing Type Hints
 
@@ -368,6 +368,14 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_routes_stream.py: Added logging, specific exception handling
   - stroke_lib/api/services.py: Added logging, proper connection cleanup
   - stroke_routes_batch.py: Check column exists before ALTER TABLE
+- [x] Magic numbers refactoring (2026-02-10)
+  - stroke_skeleton.py: Added DIRECTION_BIAS_STEPS, DIRECTION_BIAS_WEIGHT, AVOID_PENALTY
+  - stroke_core.py: Imported and used SKELETON_MERGE_DISTANCE
+  - stroke_pipeline.py: Added VERTICAL_ANGLE_MIN/MAX, WAIST_TOLERANCE_RATIO, WAIST_MARGIN_RATIO
+  - stroke_pipeline_stream.py: Added MAX_SKELETON_MARKERS
+  - stroke_routes_stream.py: Added optimizer constants (NM_*, DE_*, AFFINE_*_BOUNDS)
+  - stroke_shapes.py: Added MIN_SHAPE_POINTS, POINT_SPACING_TARGET, RADIUS_FLOOR_MULTIPLIER, MIN_RADIUS, DISTANCE_PERCENTILE
+  - stroke_lib/analysis/skeleton.py: Added NEAR_VERTEX_DISTANCE, STUB_THRESHOLD
 
 ### In Progress
 - [ ] None currently

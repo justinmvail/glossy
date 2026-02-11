@@ -47,6 +47,12 @@ from scipy.spatial import cKDTree
 from ..domain.skeleton import SkeletonInfo, Marker, MarkerType
 from ..domain.geometry import Point, Stroke
 
+# Distance threshold for suppressing termination markers near vertices
+NEAR_VERTEX_DISTANCE = 5
+
+# Minimum stroke length to avoid being classified as a stub
+STUB_THRESHOLD = 20
+
 
 class SkeletonAnalyzer:
     """Facade for skeleton analysis operations.
@@ -218,7 +224,6 @@ class SkeletonAnalyzer:
             info.endpoints, info.junction_clusters, info.adj, info.assigned
         )
 
-        near_vertex_dist = 5
         for (x, y) in info.endpoints:
             if (x, y) in info.junction_pixels:
                 continue
@@ -229,7 +234,7 @@ class SkeletonAnalyzer:
             for v in vertices:
                 dx = v[0] - x
                 dy = v[1] - y
-                if (dx * dx + dy * dy) ** 0.5 < near_vertex_dist:
+                if (dx * dx + dy * dy) ** 0.5 < NEAR_VERTEX_DISTANCE:
                     too_close = True
                     break
 
@@ -712,8 +717,6 @@ class SkeletonAnalyzer:
         Returns:
             List of stroke paths with stubs absorbed.
         """
-        stub_threshold = 20
-
         def endpoint_cluster(stroke, from_end):
             pt = tuple(stroke[-1]) if from_end else tuple(stroke[0])
             return info.assigned.get(pt, -1)
@@ -724,7 +727,7 @@ class SkeletonAnalyzer:
             changed = False
             for si in range(len(strokes)):
                 s = strokes[si]
-                if len(s) >= stub_threshold:
+                if len(s) >= STUB_THRESHOLD:
                     continue
 
                 sc = endpoint_cluster(s, False)

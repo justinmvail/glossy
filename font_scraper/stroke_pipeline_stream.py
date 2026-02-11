@@ -46,6 +46,9 @@ from stroke_skeleton import (
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_utils import point_in_region
 
+# Maximum skeleton pixels to visualize (for performance)
+MAX_SKELETON_MARKERS = 500
+
 
 def _create_skeleton_markers(info: dict) -> tuple[list[dict], list[dict], list[dict]]:
     """Create visualization markers for skeleton features.
@@ -57,7 +60,7 @@ def _create_skeleton_markers(info: dict) -> tuple[list[dict], list[dict], list[d
         Tuple of (skeleton_markers, endpoint_markers, junction_markers).
     """
     skel_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'skeleton'}
-                    for p in list(info['skel_set'])[:500]]  # Limit for performance
+                    for p in list(info['skel_set'])[:MAX_SKELETON_MARKERS]]
     ep_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'endpoint'}
                   for p in info['endpoints']]
     jp_markers = [{'x': float(p[0]), 'y': float(p[1]), 'type': 'junction'}

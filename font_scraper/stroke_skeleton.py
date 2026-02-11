@@ -38,6 +38,9 @@ from stroke_lib.utils.geometry import (
 # Constants
 SKELETON_MERGE_DISTANCE = 12
 MIN_STROKE_LENGTH = 5
+DIRECTION_BIAS_STEPS = 15  # Apply direction bias only for first N steps
+DIRECTION_BIAS_WEIGHT = 10  # Multiplier for direction matching bonus
+AVOID_PENALTY = 1000  # Penalty score for stepping on avoided pixels
 
 
 def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE) -> dict | None:
@@ -434,14 +437,14 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
             score = to_end
 
             # Direction bias (only for first few pixels)
-            if dir_vec and steps < 15:
+            if dir_vec and steps < DIRECTION_BIAS_STEPS:
                 dx, dy = n[0] - current[0], n[1] - current[1]
                 dot = dx * dir_vec[0] + dy * dir_vec[1]
-                score -= dot * 10  # Bonus for matching direction
+                score -= dot * DIRECTION_BIAS_WEIGHT  # Bonus for matching direction
 
             # Penalty for avoid_pixels
             if n in avoid_pixels:
-                score += 1000
+                score += AVOID_PENALTY
 
             return score
 

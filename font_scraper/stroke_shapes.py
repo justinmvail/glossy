@@ -31,6 +31,13 @@ from collections.abc import Callable
 
 import numpy as np
 
+# Point cloud and shape sampling constants
+MIN_SHAPE_POINTS = 60  # Minimum points to sample per shape
+POINT_SPACING_TARGET = 1.5  # Target pixel spacing between shape samples
+RADIUS_FLOOR_MULTIPLIER = 1.5  # Radius floor = spacing * this multiplier
+MIN_RADIUS = 6.0  # Absolute minimum matching radius
+DISTANCE_PERCENTILE = 95  # Percentile for stroke width estimation
+
 
 def shape_vline(params: tuple, bbox: tuple, offset: tuple = (0, 0), n_pts: int = 60) -> np.ndarray:
     """Generate a vertical line segment.
@@ -419,7 +426,7 @@ def param_vector_to_shapes(param_vector: np.ndarray, shape_types: list[str],
     if n_pts is None:
         bw = bbox[2] - bbox[0]
         bh = bbox[3] - bbox[1]
-        n_pts = max(60, int((bw * bw + bh * bh) ** 0.5 / 1.5))
+        n_pts = max(MIN_SHAPE_POINTS, int((bw * bw + bh * bh) ** 0.5 / POINT_SPACING_TARGET))
     shapes = []
     for i, stype in enumerate(shape_types):
         start, end = slices[i]
@@ -489,10 +496,10 @@ def adaptive_radius(mask: np.ndarray, spacing: int = 2) -> float:
     from scipy.ndimage import distance_transform_edt
     dist = distance_transform_edt(mask)
     vals = dist[mask]
-    floor = spacing * 1.5
+    floor = spacing * RADIUS_FLOOR_MULTIPLIER
     if len(vals) == 0:
-        return max(6.0, floor)
-    return max(float(np.percentile(vals, 95)), floor)
+        return max(MIN_RADIUS, floor)
+    return max(float(np.percentile(vals, DISTANCE_PERCENTILE)), floor)
 
 
 def score_shape(shape_pts: np.ndarray, tree, radius: float, claimed: set | None = None) -> float:

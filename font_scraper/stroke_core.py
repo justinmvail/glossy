@@ -50,6 +50,7 @@ from stroke_pipeline import MinimalStrokePipeline
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import quick_stroke_score
 from stroke_skeleton import (
+    SKELETON_MERGE_DISTANCE,
     find_skeleton_segments,
     generate_straight_line,
     resample_path,
@@ -87,7 +88,7 @@ def _skel(mask):
         points. This helps consolidate complex junction regions into single
         logical junction points.
     """
-    info = SkeletonAnalyzer(merge_distance=12).analyze(mask)
+    info = SkeletonAnalyzer(merge_distance=SKELETON_MERGE_DISTANCE).analyze(mask)
     if not info:
         return None
     from collections import defaultdict
@@ -126,7 +127,7 @@ def skel_markers(mask):
         This function is useful for visualizing glyph structure or for
         providing anchor points in interactive stroke editing interfaces.
     """
-    markers = SkeletonAnalyzer(merge_distance=12).detect_markers(mask)
+    markers = SkeletonAnalyzer(merge_distance=SKELETON_MERGE_DISTANCE).detect_markers(mask)
     return [m.to_dict() for m in markers]
 
 

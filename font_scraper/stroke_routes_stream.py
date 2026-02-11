@@ -66,6 +66,29 @@ from stroke_shapes import adaptive_radius, make_point_cloud
 # Logger for optimization errors
 _logger = logging.getLogger(__name__)
 
+# Nelder-Mead global optimization parameters
+NM_GLOBAL_MAXFEV = 400  # Maximum function evaluations for global NM
+NM_GLOBAL_XATOL = 0.2  # Position tolerance for global NM
+NM_GLOBAL_FATOL = 0.005  # Function value tolerance
+
+# Per-stroke refinement parameters
+NM_PERSTROKE_MAXFEV = 800  # Maximum function evaluations for per-stroke NM
+NM_PERSTROKE_XATOL = 0.15  # Tighter tolerance for refinement
+
+# Differential Evolution parameters
+DE_MAXITER = 15
+DE_POPSIZE = 8
+DE_TOL = 0.01
+
+# Affine transformation bounds
+# [tx, ty, sx, sy, rotate, shear] - translation, scale, rotation, shear
+AFFINE_TX_BOUNDS = (-15, 15)  # X translation
+AFFINE_TY_BOUNDS = (-15, 15)  # Y translation
+AFFINE_SX_BOUNDS = (0.75, 1.25)  # X scale
+AFFINE_SY_BOUNDS = (0.75, 1.25)  # Y scale
+AFFINE_ROTATE_BOUNDS = (-10, 10)  # Rotation in degrees
+AFFINE_SHEAR_BOUNDS = (-0.2, 0.2)  # Shear factor
+
 
 # Alias for backward compatibility
 _font = get_font
@@ -220,7 +243,8 @@ def _run_nm_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
 
     try:
         nm = minimize(affine_obj, x0, method='Nelder-Mead',
-                      options={'maxfev': 400, 'xatol': 0.2, 'fatol': 0.005, 'adaptive': True})
+                      options={'maxfev': NM_GLOBAL_MAXFEV, 'xatol': NM_GLOBAL_XATOL,
+                               'fatol': NM_GLOBAL_FATOL, 'adaptive': True})
         best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
         return nm.x, nm.fun, best_strokes
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
@@ -250,12 +274,13 @@ def _run_de_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
         transformed = _affine_transform(stroke_arrays, params, centroid)
         return score_raw_strokes(transformed, *score_args)
 
-    affine_bounds = [(-15, 15), (-15, 15), (0.75, 1.25), (0.75, 1.25), (-10, 10), (-0.2, 0.2)]
+    affine_bounds = [AFFINE_TX_BOUNDS, AFFINE_TY_BOUNDS, AFFINE_SX_BOUNDS,
+                     AFFINE_SY_BOUNDS, AFFINE_ROTATE_BOUNDS, AFFINE_SHEAR_BOUNDS]
 
     try:
         de = differential_evolution(affine_obj, bounds=affine_bounds,
-                                    x0=initial_x, maxiter=15, popsize=8,
-                                    tol=0.01, polish=False)
+                                    x0=initial_x, maxiter=DE_MAXITER, popsize=DE_POPSIZE,
+                                    tol=DE_TOL, polish=False)
         if de.fun < best_score:
             return de.fun, _affine_transform(stroke_arrays, tuple(de.x), centroid)
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
@@ -296,7 +321,8 @@ def _run_per_stroke_refinement(best_strokes: list[np.ndarray],
 
     try:
         nm2 = minimize(per_stroke_obj, x0_per, method='Nelder-Mead',
-                       options={'maxfev': 800, 'xatol': 0.15, 'fatol': 0.005, 'adaptive': True})
+                       options={'maxfev': NM_PERSTROKE_MAXFEV, 'xatol': NM_PERSTROKE_XATOL,
+                                'fatol': NM_GLOBAL_FATOL, 'adaptive': True})
 
         if nm2.fun < best_score:
             final_strokes = []
