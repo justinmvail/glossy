@@ -23,7 +23,7 @@ Generated: 2026-02-11
 13. [x] Add logging to `stroke_merge.py`, `stroke_scoring.py`
 14. [x] Review `pass` in exception handlers
 15. [x] Split `inksight_vectorizer.py` into 3 modules
-16. [ ] Add unit tests for design pattern classes
+16. [x] Add unit tests for design pattern classes
 
 ---
 
@@ -184,13 +184,18 @@ Only 20 logging statements across 6 files:
 Current test files:
 - `test_flask_routes.py` - 24 integration tests
 - `test_minimal_strokes.py` - 26 character quality tests
+- `test_design_patterns.py` - ✓ 27 unit tests for design patterns
 - `test_ocr_single.py` - OCR testing
 - `test_inksight_timing.py` - Performance testing
 
-**Missing test coverage:**
-- Unit tests for design pattern classes (Shape, Strategy, Penalty)
-- Unit tests for `stroke_merge.py` merge strategies
-- Unit tests for `stroke_scoring.py` scoring penalties
+**Test coverage added:**
+- ✓ Shape classes (7 shapes, generate/bounds/param_count)
+- ✓ OptimizationStrategy classes (NelderMead, DiffEvolution, Chained)
+- ✓ ScoringPenalty classes (Snap, Overlap) and CompositeScorer
+- ✓ MergeStrategy classes and MergePipeline
+- ✓ VertexFinder registry
+
+**Remaining gaps:**
 - Integration tests for scrapers
 
 ---
