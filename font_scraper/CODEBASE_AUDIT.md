@@ -5,9 +5,10 @@ Systematic review of font_scraper codebase for quality improvements.
 ## 1. Code Quality
 
 - [x] Dead code - unused functions/imports/variables
-  - **Status:** 58 potentially unused functions found
-  - Notable: `analyze_skeleton`, `batch_process`, `contour_to_strokes`, etc.
-  - Many are utility functions - need manual review to confirm unused
+  - **Status:** FIXED - Removed 7 confirmed unused functions (414 lines)
+  - Removed: `optimize_diffvg`, `contour_detect_markers`, `find_cross_section_midpoint`,
+    `ray_segment_intersection`, `score_single_shape`, `score_shape_coverage`, `score_shape`
+  - Remaining functions verified as used (callbacks, re-exports, template refs)
 - [x] Code duplication - repeated logic across files
   - **Status:** 1358 duplicate 5-line blocks detected
   - Hotspots: stroke_routes_*.py (route boilerplate), font_utils.py
@@ -345,4 +346,15 @@ All tests pass (26/26 characters OK).
 - **Fixed:** 12 items
 - **Passed/Acceptable:** 33 items
 - **All 10 categories:** Complete
+
+### Session 4: Dead Code Removal
+
+#### Removed 7 unused functions (414 lines total):
+- `stroke_affine.py`: `optimize_diffvg` (-99 lines)
+- `stroke_contour.py`: `contour_detect_markers`, `ray_segment_intersection`,
+  `find_cross_section_midpoint` (-181 lines)
+- `stroke_scoring.py`: `score_single_shape`, `score_shape_coverage` (-95 lines)
+- `stroke_shapes.py`: `score_shape` (-39 lines)
+
+All tests pass (26/26 characters OK).
 

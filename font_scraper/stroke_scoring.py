@@ -356,64 +356,6 @@ def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
 
 
-def score_single_shape(params: np.ndarray, shape_type: str, bbox: tuple,
-                       uncovered_pts: np.ndarray, uncovered_tree: cKDTree,
-                       n_uncovered: int, radius: float,
-                       snap_yi: np.ndarray, snap_xi: np.ndarray,
-                       w: int, h: int, n_pts: int | None = None) -> float:
-    """Score a single shape against uncovered points for greedy fitting.
-
-    Evaluates how many previously-uncovered points a shape would cover,
-    used during iterative greedy stroke fitting to select the best next
-    stroke to add.
-
-    Args:
-        params: Numpy array of shape parameters for this shape.
-        shape_type: Shape type string (e.g., 'line', 'arc', 'bezier').
-        bbox: Bounding box as (x_min, y_min, x_max, y_max).
-        uncovered_pts: Nx2 array of currently uncovered point coordinates.
-        uncovered_tree: cKDTree built from uncovered_pts.
-        n_uncovered: Number of uncovered points.
-        radius: Coverage radius for determining if points are covered.
-        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
-        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
-        w: Width of the mask/image.
-        h: Height of the mask/image.
-        n_pts: Optional number of points to sample along the shape.
-            If None, automatically determined based on bounding box size.
-
-    Returns:
-        Negative coverage fraction minus snap penalty. Lower values indicate
-        better shapes that cover more uncovered points with fewer mask violations.
-
-    Notes:
-        - Only penalizes for snap distance (no edge or overlap penalties).
-        - Designed for fast evaluation during greedy search.
-    """
-    if n_pts is None:
-        bw = bbox[2] - bbox[0]
-        bh = bbox[3] - bbox[1]
-        n_pts = max(60, int((bw * bw + bh * bh) ** 0.5 / 1.5))
-    pts = SHAPE_FNS[shape_type](tuple(params), bbox, offset=(0, 0), n_pts=n_pts)
-    if len(pts) == 0:
-        return 0.0
-    xi = np.clip(np.round(pts[:, 0]).astype(int), 0, w - 1)
-    yi = np.clip(np.round(pts[:, 1]).astype(int), 0, h - 1)
-    snapped_x = snap_xi[yi, xi].astype(float)
-    snapped_y = snap_yi[yi, xi].astype(float)
-    snapped = np.column_stack([snapped_x, snapped_y])
-    snap_dist = np.sqrt((pts[:, 0] - snapped_x) ** 2 +
-                        (pts[:, 1] - snapped_y) ** 2)
-    off_mask = float(np.mean(snap_dist > 0.5))
-    snap_penalty = 0.5 * off_mask
-    hits = uncovered_tree.query_ball_point(snapped, radius)
-    covered = set()
-    for lst in hits:
-        covered.update(lst)
-    coverage = len(covered) / max(n_uncovered, 1)
-    return -(coverage - snap_penalty)
-
-
 def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> float:
     """Compute a quick coverage score for stroke quality validation.
 
@@ -468,40 +410,3 @@ def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> fl
 
     covered_glyph = np.sum(mask & covered)
     return float(covered_glyph) / float(glyph_pixels)
-
-
-def score_shape_coverage(shape_pts: np.ndarray, tree: cKDTree, radius: float,
-                         claimed: set | None = None) -> float:
-    """Count cloud points within radius of a shape path.
-
-    Provides a weighted coverage count that gives bonus weight to
-    unclaimed points, useful for prioritizing shapes that cover
-    new territory.
-
-    Args:
-        shape_pts: Nx2 array of points along the shape.
-        tree: cKDTree built from the target point cloud.
-        radius: Coverage radius for determining if points are hit.
-        claimed: Optional set of point indices already covered by
-            other shapes. Unclaimed hits receive full weight (1.0),
-            claimed hits receive reduced weight (0.3).
-
-    Returns:
-        Weighted coverage score. If claimed is None, returns the simple
-        count of covered points. Otherwise returns:
-            unclaimed_hits * 1.0 + claimed_hits * 0.3
-
-    Notes:
-        - Returns 0 if shape_pts is empty.
-        - Useful for greedy shape selection to favor covering new areas.
-    """
-    if len(shape_pts) == 0:
-        return 0
-    indices = tree.query_ball_point(shape_pts, radius)
-    hit = set()
-    for idx_list in indices:
-        hit.update(idx_list)
-    if claimed is None:
-        return len(hit)
-    unclaimed = hit - claimed
-    return len(unclaimed) * 1.0 + len(hit & claimed) * 0.3
