@@ -106,10 +106,8 @@ is_cursive, connectivity_score = detector.check(font_path)
 Filter fonts that don't render readable text.
 
 ```python
-from font_utils import OCRPrefilter
-
-prefilter = OCRPrefilter(confidence_threshold=0.7)
-passed, confidence, ocr_text = prefilter.check(font_path, "Hello World 123")
+# Planned - OCRPrefilter not yet implemented
+# Will use TrOCR Docker container for font readability checking
 ```
 
 **Method:**
@@ -206,7 +204,7 @@ for stroke_data in raw_strokes:
 Validate processed strokes produce recognizable characters.
 
 ```python
-from font_utils import OCRValidator
+from inksight_vectorizer import OCRValidator
 
 validator = OCRValidator()
 result = validator.validate(processed_strokes, expected_char)
@@ -380,19 +378,9 @@ ORDER BY c.quality_score ASC;
 
 ## Resumability
 
-Each stage writes to disk and database. Pipeline can resume from any checkpoint:
+Each stage writes to disk and database. Pipeline can resume from any checkpoint.
 
-```python
-from pipeline import FontPipeline
-
-pipeline = FontPipeline(db_path='fonts.db')
-
-# Resume from where we left off
-pipeline.run(
-    resume=True,
-    stages=['cursive_detect', 'ocr_prefilter', 'render', 'vectorize']
-)
-```
+**Note:** A unified `FontPipeline` orchestrator class is planned but not yet implemented. Currently, run each stage manually using the individual modules and track progress via the database.
 
 **Checkpoint locations:**
 | Stage | Disk | Database |

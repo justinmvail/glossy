@@ -48,12 +48,14 @@ python google_fonts_scraper.py --output ./google
 --pages, -p      Pages to scrape
 --category, -c   Use category instead of search
 --max-fonts, -m  Limit total fonts
+--rate-limit     Seconds between requests (default: 1.0)
 ```
 
 ### google_fonts_scraper.py
 ```
 --output, -o     Output directory
 --max-fonts, -m  Limit fonts (default: all ~120)
+--rate-limit     Seconds between requests (default: 0.5)
 ```
 
 ## Output
