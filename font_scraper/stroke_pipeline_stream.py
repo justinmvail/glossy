@@ -364,6 +364,71 @@ def _make_selection_frame(skel_score: float, best_score: float,
     }
 
 
+def _stream_render_phase(font_path: str, char: str,
+                         canvas_size: int) -> Generator[dict, None, Any]:
+    """Stream the render phase and return the mask.
+
+    Args:
+        font_path: Resolved path to font file.
+        char: Character to render.
+        canvas_size: Canvas size in pixels.
+
+    Yields:
+        Progress and error frames.
+
+    Returns:
+        The rendered mask, or None if failed.
+    """
+    yield {'phase': 'Render', 'step': 'Rendering glyph mask...', 'strokes': [], 'markers': []}
+
+    mask = render_glyph_mask(font_path, char, canvas_size)
+    if mask is None:
+        yield {'phase': 'Error', 'step': 'Failed to render mask', 'strokes': [], 'markers': [], 'done': True}
+    return mask
+
+
+def _stream_skeleton_phase(pipe: MinimalStrokePipeline) -> Generator[dict, None, tuple | None]:
+    """Stream the skeleton analysis phase.
+
+    Args:
+        pipe: The MinimalStrokePipeline instance.
+
+    Yields:
+        Progress and error frames with skeleton markers.
+
+    Returns:
+        Tuple of (analysis, info, bbox, markers) or None if failed.
+    """
+    yield {'phase': 'Skeleton', 'step': 'Analyzing skeleton...', 'strokes': [], 'markers': []}
+
+    analysis = pipe.analysis
+    if analysis is None:
+        yield {'phase': 'Error', 'step': 'Failed to analyze skeleton', 'strokes': [], 'markers': [], 'done': True}
+        return None
+
+    info = analysis.info
+    bbox = analysis.bbox
+
+    skel_markers, ep_markers, jp_markers = _create_skeleton_markers(info)
+    all_markers = skel_markers + ep_markers + jp_markers
+
+    yield {
+        'phase': 'Skeleton',
+        'step': f'Found {len(info["skel_set"])} skeleton pixels, {len(info["endpoints"])} endpoints, {len(info["junction_pixels"])} junctions',
+        'strokes': [],
+        'markers': all_markers
+    }
+
+    yield {
+        'phase': 'Segments',
+        'step': f'Found {len(analysis.segments)} skeleton segments',
+        'strokes': [],
+        'markers': ep_markers + jp_markers
+    }
+
+    return analysis, info, bbox, (ep_markers, jp_markers)
+
+
 def _stream_skeleton_evaluation(pipe: MinimalStrokePipeline, variants: dict,
                                  best_strokes: list, best_score: float,
                                  best_variant: str, mask,
@@ -522,52 +587,29 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
     font_path = resolve_font_path(font_path)
 
     # Phase 1: Render mask
-    yield {'phase': 'Render', 'step': 'Rendering glyph mask...', 'strokes': [], 'markers': []}
-
-    mask = render_glyph_mask(font_path, char, canvas_size)
+    render_gen = _stream_render_phase(font_path, char, canvas_size)
+    mask = yield from _consume_subgenerator(render_gen)
     if mask is None:
-        yield {'phase': 'Error', 'step': 'Failed to render mask', 'strokes': [], 'markers': [], 'done': True}
         return
 
     # Phase 2: Create pipeline and analyze skeleton
-    yield {'phase': 'Skeleton', 'step': 'Analyzing skeleton...', 'strokes': [], 'markers': []}
-
     pipe = _create_pipeline(font_path, char, canvas_size)
-    analysis = pipe.analysis
-    if analysis is None:
-        yield {'phase': 'Error', 'step': 'Failed to analyze skeleton', 'strokes': [], 'markers': [], 'done': True}
+    skel_gen = _stream_skeleton_phase(pipe)
+    skel_result = yield from _consume_subgenerator(skel_gen)
+    if skel_result is None:
         return
 
-    info = analysis.info
-    bbox = analysis.bbox
+    analysis, info, bbox, _ = skel_result
 
-    # Create skeleton visualization markers
-    skel_markers, ep_markers, jp_markers = _create_skeleton_markers(info)
-
-    yield {
-        'phase': 'Skeleton',
-        'step': f'Found {len(info["skel_set"])} skeleton pixels, {len(info["endpoints"])} endpoints, {len(info["junction_pixels"])} junctions',
-        'strokes': [],
-        'markers': skel_markers + ep_markers + jp_markers
-    }
-
-    # Phase 3: Find segments
-    yield {
-        'phase': 'Segments',
-        'step': f'Found {len(analysis.segments)} skeleton segments',
-        'strokes': [],
-        'markers': ep_markers + jp_markers
-    }
-
-    # Phase 4: Evaluate template variants
+    # Phase 3: Evaluate template variants
     template_gen = _stream_template_variants(pipe, char, bbox)
     best_strokes, best_score, best_variant = yield from _consume_subgenerator(template_gen)
 
-    # Phase 5: Evaluate skeleton method
-    skel_gen = _stream_skeleton_evaluation(pipe, NUMPAD_TEMPLATE_VARIANTS.get(char, {}),
-                                            best_strokes, best_score, best_variant,
-                                            mask, quick_stroke_score)
-    best_strokes, best_score, best_variant = yield from _consume_subgenerator(skel_gen)
+    # Phase 4: Evaluate skeleton method
+    eval_gen = _stream_skeleton_evaluation(pipe, NUMPAD_TEMPLATE_VARIANTS.get(char, {}),
+                                           best_strokes, best_score, best_variant,
+                                           mask, quick_stroke_score)
+    best_strokes, best_score, best_variant = yield from _consume_subgenerator(eval_gen)
 
     # Final result
     yield {
