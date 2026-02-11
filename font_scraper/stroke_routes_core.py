@@ -92,15 +92,24 @@ from stroke_rendering import (
     render_glyph_mask,
     render_text_for_analysis,
 )
+from stroke_services_core import (
+    check_font_quality,
+    get_character_data,
+    save_character_data,
+    render_glyph_image,
+    render_thin_preview,
+    render_stroke_preview,
+    render_font_sample,
+    process_strokes,
+    snap_strokes_to_boundary,
+    center_strokes_on_glyph,
+    MIN_SHAPE_COUNT,
+    MAX_SHAPE_COUNT,
+    MAX_WIDTH_RATIO,
+)
 
 # Alias for backward compatibility
 _font = get_font
-
-# Quality check thresholds
-MIN_SHAPE_COUNT = 10
-MAX_SHAPE_COUNT = 15
-MAX_WIDTH_RATIO = 0.225
-EXPECTED_EXCLAMATION_SHAPES = 2
 
 
 def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> tuple[bool, int, float, list[str]]:
