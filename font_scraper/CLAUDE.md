@@ -47,10 +47,10 @@ python3 test_minimal_strokes.py
 |--------|---------|
 | `stroke_rendering.py` | Glyph mask rendering with caching |
 | `stroke_skeleton.py` | Skeletonization wrapper |
-| `stroke_merge.py` | Stroke merging and stub absorption |
-| `stroke_scoring.py` | Coverage and topology scoring |
-| `stroke_affine.py` | Affine transformation optimization |
-| `stroke_shapes.py` | Parametric shape fitting |
+| `stroke_merge.py` | Stroke merging via MergePipeline (Strategy pattern) |
+| `stroke_scoring.py` | Coverage scoring via CompositeScorer (Composite pattern) |
+| `stroke_affine.py` | Optimization via OptimizationStrategy (Strategy pattern) |
+| `stroke_shapes.py` | Shape classes via SHAPES registry (Polymorphism) |
 | `stroke_contour.py` | Contour extraction utilities |
 
 ### Supporting Code
@@ -59,8 +59,126 @@ python3 test_minimal_strokes.py
 |--------|---------|
 | `stroke_lib/` | Reusable stroke library (analysis, templates, optimization) |
 | `font_utils.py` | Font utilities (dedup, cursive detection, rendering) |
-| `template_morph.py` | Character-specific vertex detection |
+| `template_morph.py` | Character vertex detection via VERTEX_FINDERS registry |
 | `db_schema.py` | Database schema and migrations |
+
+## Design Patterns
+
+The codebase uses several design patterns to maximize extensibility:
+
+### Shape Classes (Polymorphism) - `stroke_shapes.py`
+
+```python
+from stroke_shapes import SHAPES, Shape
+
+# Use the registry
+shape = SHAPES['arc_right']
+points = shape.generate(params, bbox)
+bounds = shape.get_bounds()
+
+# Add new shape: subclass Shape, register in SHAPES
+class MyShape(Shape):
+    def generate(self, params, bbox, offset=(0,0), n_pts=60): ...
+    def get_bounds(self): return [(0, 1), (0, 1)]
+    @property
+    def param_count(self): return 2
+```
+
+### Optimization Strategy - `stroke_affine.py`
+
+```python
+from stroke_affine import (
+    OptimizationStrategy, NelderMeadStrategy,
+    DifferentialEvolutionStrategy, ChainedStrategy,
+    OptimizationConfig, create_default_affine_strategy
+)
+
+# Use default chained strategy
+strategy = create_default_affine_strategy()
+best_params, best_score = strategy.optimize(objective_fn, initial, bounds)
+
+# Or customize
+config = OptimizationConfig(max_iterations=200, tolerance=0.0001)
+strategy = ChainedStrategy([
+    NelderMeadStrategy(config),
+    DifferentialEvolutionStrategy(config)
+])
+```
+
+### Composite Scoring - `stroke_scoring.py`
+
+```python
+from stroke_scoring import (
+    CompositeScorer, ScoringPenalty,
+    SnapPenalty, EdgePenalty, OverlapPenalty
+)
+
+# Default scorer
+scorer = CompositeScorer()
+score = scorer.score(stroke_arrays, context)
+
+# Custom penalties
+scorer = CompositeScorer(penalties=[
+    SnapPenalty(weight=0.8),
+    EdgePenalty(weight=0.2),
+    OverlapPenalty(weight=0.5),
+])
+```
+
+### Vertex Finder Registry - `template_morph.py`
+
+```python
+from template_morph import VERTEX_FINDERS, VertexFinder, find_vertices
+
+# Use the registry (automatic via find_vertices)
+vertices = find_vertices('A', font_mask, bbox)
+
+# Add new character: subclass VertexFinder, register
+class VertexFinderX(VertexFinder):
+    def find(self, font_mask, bbox, outline_xy): ...
+
+VERTEX_FINDERS['X'] = VertexFinderX()
+```
+
+### Merge Strategy Pipeline - `stroke_merge.py`
+
+```python
+from stroke_merge import (
+    MergePipeline, MergeStrategy, MergeContext,
+    DirectionMergeStrategy, TJunctionMergeStrategy,
+    StubAbsorptionStrategy, OrphanRemovalStrategy
+)
+
+# Use default pipeline
+pipeline = MergePipeline.create_default()
+strokes = pipeline.run(strokes, junction_clusters, assigned)
+
+# Or use preset configurations
+pipeline = MergePipeline.create_aggressive()  # More merging
+pipeline = MergePipeline.create_conservative()  # Less merging
+
+# Or customize
+pipeline = MergePipeline([
+    DirectionMergeStrategy(max_angle=np.pi/6),
+    TJunctionMergeStrategy(),
+    StubAbsorptionStrategy(conv_threshold=15),
+])
+```
+
+### Pipeline Factory - `stroke_pipeline.py`
+
+```python
+from stroke_pipeline import PipelineFactory, PipelineConfig
+
+# Named configurations
+pipeline = PipelineFactory.create_default(font_path, char)
+pipeline = PipelineFactory.create_fast(font_path, char)      # 128px, speed
+pipeline = PipelineFactory.create_high_quality(font_path, char)  # 448px, quality
+
+# Custom configuration
+config = PipelineConfig(canvas_size=300, resample_points=40)
+pipeline = PipelineFactory.create_with_config(font_path, char, config)
+```
 
 ### Scrapers
 
@@ -128,7 +246,12 @@ python3 test_minimal_strokes.py --compare test_baseline.json
 
 ### Modify stroke processing
 1. Core logic in `stroke_core.py` or `stroke_pipeline.py`
-2. Run `python3 test_minimal_strokes.py` to verify quality metrics
+2. Use design patterns for extensibility (see Design Patterns section):
+   - New shape type: subclass `Shape` in `stroke_shapes.py`
+   - New scoring penalty: subclass `ScoringPenalty` in `stroke_scoring.py`
+   - New merge strategy: subclass `MergeStrategy` in `stroke_merge.py`
+   - New optimization algorithm: subclass `OptimizationStrategy` in `stroke_affine.py`
+3. Run `python3 test_minimal_strokes.py` to verify quality metrics
 
 ### Update database schema
 1. Add migration to `db_schema.py`

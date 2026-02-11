@@ -48,14 +48,7 @@ logger = logging.getLogger(__name__)
 
 from stroke_flask import resolve_font_path
 from stroke_lib.analysis.skeleton import SkeletonAnalyzer
-from stroke_merge import (
-    absorb_convergence_stubs,
-    absorb_junction_stubs,
-    absorb_proximity_stubs,
-    merge_t_junctions,
-    remove_orphan_stubs,
-    run_merge_pass,
-)
+from stroke_merge import MergePipeline
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import quick_stroke_score
 from stroke_skeleton import (
@@ -271,15 +264,13 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     # Trace all paths through the skeleton
     raw_paths = _trace_all_paths(adj, endpoints, junction_pixels)
 
-    # Filter by minimum length and apply merge passes
+    # Filter by minimum length and apply merge pipeline
     strokes = [s for s in raw_paths if len(s) >= min_len]
     assigned_clusters = [set(c) for c in junction_clusters]
-    strokes = merge_t_junctions(strokes, junction_clusters, assigned_clusters)
-    strokes = run_merge_pass(strokes, assigned_clusters, min_len=0)
-    strokes = absorb_convergence_stubs(strokes, junction_clusters, assigned_clusters)
-    strokes = absorb_junction_stubs(strokes, assigned_clusters)
-    strokes = absorb_proximity_stubs(strokes)
-    strokes = remove_orphan_stubs(strokes, assigned_clusters)
+
+    # Use MergePipeline for all merge operations
+    pipeline = MergePipeline.create_default()
+    strokes = pipeline.run(strokes, junction_clusters, assigned_clusters)
 
     return [[[float(x), float(y)] for x, y in s] for s in strokes]
 
