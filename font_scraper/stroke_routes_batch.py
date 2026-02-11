@@ -46,6 +46,7 @@ from stroke_flask import (
     app,
     ensure_test_tables,
     get_db,
+    get_db_context,
     get_font,
     resolve_font_path,
 )
@@ -713,41 +714,38 @@ def api_minimal_strokes_batch(fid):
         table if it doesn't exist (for tracking which template was used).
     """
     _, _, min_strokes, _ = _get_stroke_funcs()
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
-    if not f:
-        db.close()
-        return jsonify(error="Font not found"), 404
-    # Ensure template_variant column exists
-    cursor = db.execute("PRAGMA table_info(characters)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if 'template_variant' not in columns:
-        try:
-            db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
-            db.commit()
-        except sqlite3.OperationalError as e:
-            # Log but continue - column might have been added by another process
-            import logging
-            logging.getLogger(__name__).warning(
-                "Could not add template_variant column: %s", e
-            )
-    gen, skp, fail, force = 0, 0, 0, request.args.get('force', '').lower() == 'true'
-    for c in CHARS:
-        if not force and db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL", (fid, c)).fetchone():
-            skp += 1
-            continue
-        st, var = min_strokes(f['file_path'], c, ret_var=True)
-        if not st:
-            fail += 1
-            continue
-        row = db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
-        if row:
-            db.execute("UPDATE characters SET strokes_raw = ?, template_variant = ? WHERE id = ?", (json.dumps(st), var, row['id']))
-        else:
-            db.execute("INSERT INTO characters (font_id, char, strokes_raw, template_variant) VALUES (?, ?, ?, ?)", (fid, c, json.dumps(st), var))
-        gen += 1
-    db.commit()
-    db.close()
+    with get_db_context() as db:
+        f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
+        if not f:
+            return jsonify(error="Font not found"), 404
+        # Ensure template_variant column exists
+        cursor = db.execute("PRAGMA table_info(characters)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'template_variant' not in columns:
+            try:
+                db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
+                db.commit()
+            except sqlite3.OperationalError as e:
+                # Log but continue - column might have been added by another process
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Could not add template_variant column: %s", e
+                )
+        gen, skp, fail, force = 0, 0, 0, request.args.get('force', '').lower() == 'true'
+        for c in CHARS:
+            if not force and db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL", (fid, c)).fetchone():
+                skp += 1
+                continue
+            st, var = min_strokes(f['file_path'], c, ret_var=True)
+            if not st:
+                fail += 1
+                continue
+            row = db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
+            if row:
+                db.execute("UPDATE characters SET strokes_raw = ?, template_variant = ? WHERE id = ?", (json.dumps(st), var, row['id']))
+            else:
+                db.execute("INSERT INTO characters (font_id, char, strokes_raw, template_variant) VALUES (?, ?, ?, ?)", (fid, c, json.dumps(st), var))
+            gen += 1
     return jsonify(ok=True, generated=gen, skipped=skp, failed=fail)
 
 

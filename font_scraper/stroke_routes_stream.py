@@ -58,7 +58,7 @@ from scipy.ndimage import distance_transform_edt
 from scipy.optimize import differential_evolution, minimize
 from scipy.spatial import cKDTree
 from stroke_core import min_strokes, skel_strokes
-from stroke_flask import app, get_db, get_font, resolve_font_path
+from stroke_flask import app, get_db, get_font
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
@@ -369,7 +369,7 @@ def _get_initial_strokes(font_path: str, char: str,
 
     # Fallback to skeleton strokes
     try:
-        mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
+        mask = render_glyph_mask(font_path, char, canvas_size)
         if mask is not None:
             strokes = skel_strokes(mask, min_len=5)
             if strokes:
@@ -438,7 +438,7 @@ def optimize_stream_generator(font_path: str, char: str,
         return
 
     # Prepare optimization
-    mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
+    mask = render_glyph_mask(font_path, char, canvas_size)
     if mask is None:
         yield _sse_event({'error': 'Could not render glyph mask'})
         return

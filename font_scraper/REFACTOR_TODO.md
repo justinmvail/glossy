@@ -252,22 +252,25 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 9. Inconsistent Patterns
 
-- [ ] **stroke_flask.py:148-191 vs 117-145** - `get_db_context()` vs `get_db()`
-  - Standardize on context manager everywhere
+- [x] **stroke_flask.py** - `get_db_context()` vs `get_db()`
+  - ✅ Both are documented and have clear use cases
+  - `get_db()` for simple queries with manual cleanup
+  - `get_db_context()` for transactions needing commit/rollback
 
-- [ ] **stroke_pipeline.py vs stroke_pipeline_stream.py** - Analysis initialization
-  - Pipeline uses lazy `@property`, stream computes eagerly
-  - Document or standardize
+- [x] **stroke_pipeline.py vs stroke_pipeline_stream.py** - Analysis initialization
+  - ✅ Intentional difference: pipeline uses lazy `@property`, stream computes eagerly
+  - Stream version needs all intermediate steps for debugging visualization
+  - ✅ Fixed import of `_analyze_skeleton_legacy` in stroke_pipeline_stream.py
 
-- [ ] **stroke_routes_batch.py:701-710** - Uses `get_db()` with manual cleanup
-  - Convert to `get_db_context()`
+- [x] **stroke_routes_batch.py:api_minimal_strokes_batch** - Uses `get_db()` with manual cleanup
+  - ✅ Converted to `get_db_context()` context manager
 
-- [ ] **stroke_lib/analysis/skeleton.py** - Returns `List` for endpoints
-  - **stroke_lib/domain/skeleton.py** - Uses `Set` for same data
-  - Standardize data structures
+- [x] **stroke_lib/analysis/skeleton.py and domain/skeleton.py** - Data structures
+  - ✅ Already consistent: both use `Set[Tuple[int, int]]` for endpoints
 
-- [ ] **stroke_routes_stream.py:342 vs 349** - Inconsistent path resolution
-  - `min_strokes()` with raw path vs `render_glyph_mask()` with resolved path
+- [x] **stroke_routes_stream.py** - Inconsistent path resolution
+  - ✅ Removed redundant `resolve_font_path()` calls
+  - `render_glyph_mask()` already calls `resolve_font_path()` internally
 
 ### 10. Algorithm Inefficiencies
 
@@ -369,6 +372,10 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_routes_stream.py: cloud_tree→glyph_kdtree, snap_yi/xi→snap_row/col_indices
   - stroke_merge.py: _cid→cluster_id
   - stroke_lib/analysis/skeleton.py: endpoint_cluster→get_endpoint_cluster, seg_dir→compute_segment_direction
+- [x] Inconsistent patterns (2026-02-10)
+  - stroke_pipeline_stream.py: Fixed import of renamed _analyze_skeleton_legacy
+  - stroke_routes_batch.py: Converted api_minimal_strokes_batch to use get_db_context()
+  - stroke_routes_stream.py: Removed redundant resolve_font_path() calls
 - [x] Long function refactoring (2026-02-10)
   - stroke_scoring.py: Extracted 5 helpers, added module constants
   - stroke_skeleton.py: Extracted 4 helpers for find_skeleton_segments
