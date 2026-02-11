@@ -30,22 +30,13 @@ Note:
 from collections.abc import Generator
 from typing import Any
 
-from stroke_core import analyze_skeleton_legacy as analyze_skeleton
 from stroke_core import _merge_to_expected_count, skel_strokes
 from stroke_dataclasses import parse_stroke_template
 from stroke_flask import resolve_font_path
 from stroke_pipeline import MinimalStrokePipeline
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import quick_stroke_score
-from stroke_skeleton import (
-    find_skeleton_segments,
-    generate_straight_line,
-    resample_path,
-    trace_segment,
-    trace_to_region,
-)
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
-from stroke_utils import point_in_region
 
 # Maximum skeleton pixels to visualize (for performance)
 MAX_SKELETON_MARKERS = 500
@@ -53,6 +44,9 @@ MAX_SKELETON_MARKERS = 500
 
 def _create_pipeline(font_path: str, char: str, canvas_size: int) -> MinimalStrokePipeline:
     """Create a MinimalStrokePipeline with all required callbacks.
+
+    Uses PipelineFactory to ensure consistent configuration with other
+    pipeline users (stroke_core.py, etc.).
 
     Args:
         font_path: Resolved path to the font file.
@@ -62,22 +56,13 @@ def _create_pipeline(font_path: str, char: str, canvas_size: int) -> MinimalStro
     Returns:
         Configured MinimalStrokePipeline instance.
     """
-    return MinimalStrokePipeline(
-        font_path, char, canvas_size,
-        resolve_font_path_fn=lambda x: x,
-        render_glyph_mask_fn=render_glyph_mask,
-        analyze_skeleton_fn=analyze_skeleton,
-        find_skeleton_segments_fn=find_skeleton_segments,
-        point_in_region_fn=point_in_region,
-        trace_segment_fn=trace_segment,
-        trace_to_region_fn=trace_to_region,
-        generate_straight_line_fn=generate_straight_line,
-        resample_path_fn=resample_path,
-        skeleton_to_strokes_fn=skel_strokes,
+    from stroke_pipeline import PipelineConfig, PipelineFactory
+
+    config = PipelineConfig(
+        canvas_size=canvas_size,
         apply_stroke_template_fn=_merge_to_expected_count,
-        adjust_stroke_paths_fn=lambda st, c, m: st,
-        quick_stroke_score_fn=quick_stroke_score,
     )
+    return PipelineFactory.create_with_config(font_path, char, config)
 
 
 def _consume_subgenerator(gen: Generator) -> Generator[dict, None, Any]:
@@ -189,7 +174,7 @@ def _resolve_waypoint_marker(pipe: MinimalStrokePipeline, wp: Any, wp_idx: int,
     """
     next_dir = segment_configs[wp_idx].direction if wp_idx < len(segment_configs) else None
     if next_dir is None and wp_idx + 1 < len(waypoints):
-        next_dir = pipe._infer_direction(wp.region, waypoints[wp_idx + 1].region)
+        next_dir = infer_direction_from_regions(wp.region, waypoints[wp_idx + 1].region)
 
     resolved_wp = pipe.resolve_waypoint(wp, next_dir, mid_x, mid_y,
                                         top_bound, bot_bound, waist_margin)

@@ -384,7 +384,9 @@ def _extend_strokes_to_stub_tip(strokes: list, endpoints_at_cluster: list,
 
 
 def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list[set],
-                             assigned: list[set], conv_threshold: int = 18) -> list[list[tuple]]:
+                             assigned: list[set], conv_threshold: int = 18,
+                             detailed_index: dict = None,
+                             endpoint_cache: dict = None) -> list[list[tuple]]:
     """Absorb short convergence stubs into longer strokes at junction clusters.
 
     A convergence stub is a short stroke with one endpoint at a junction cluster
@@ -396,15 +398,22 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
         junction_clusters: List of original junction cluster sets.
         assigned: List of assigned junction cluster sets.
         conv_threshold: Maximum length for a stroke to be considered a stub.
+        detailed_index: Optional pre-built detailed cluster index (rebuilt if None).
+        endpoint_cache: Optional pre-built endpoint cache (rebuilt if None).
 
     Returns:
         The modified strokes list.
     """
+    # Track if we need to rebuild caches (first iteration or after changes)
+    need_rebuild = (detailed_index is None or endpoint_cache is None)
     changed = True
     while changed:
         changed = False
-        detailed_index = _build_detailed_cluster_index(strokes, assigned)
-        endpoint_cache = _build_endpoint_cache(strokes, assigned)
+        # Build caches if needed (first time or after strokes changed)
+        if need_rebuild:
+            detailed_index = _build_detailed_cluster_index(strokes, assigned)
+            endpoint_cache = _build_endpoint_cache(strokes, assigned)
+            need_rebuild = False
 
         for si in range(len(strokes)):
             s = strokes[si]
@@ -432,6 +441,7 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
 
             strokes.pop(si)
             changed = True
+            need_rebuild = True  # Strokes changed, rebuild caches next iteration
             break
 
     return strokes
@@ -512,7 +522,9 @@ def _merge_stub_into_target(strokes: list, stub_idx: int, target_idx: int,
 
 
 def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
-                          stub_threshold: int = 20) -> list[list[tuple]]:
+                          stub_threshold: int = 20,
+                          detailed_index: dict = None,
+                          endpoint_cache: dict = None) -> list[list[tuple]]:
     """Absorb short stubs into neighboring strokes at junction clusters.
 
     Unlike convergence stubs (which have one free end), junction stubs have
@@ -523,15 +535,22 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
         strokes: List of stroke paths. Modified in place.
         assigned: List of assigned junction cluster sets.
         stub_threshold: Maximum length for a stroke to be considered a stub.
+        detailed_index: Optional pre-built detailed cluster index (rebuilt if None).
+        endpoint_cache: Optional pre-built endpoint cache (rebuilt if None).
 
     Returns:
         The modified strokes list.
     """
+    # Track if we need to rebuild caches (first iteration or after changes)
+    need_rebuild = (detailed_index is None or endpoint_cache is None)
     changed = True
     while changed:
         changed = False
-        detailed_index = _build_detailed_cluster_index(strokes, assigned)
-        endpoint_cache = _build_endpoint_cache(strokes, assigned)
+        # Build caches if needed (first time or after strokes changed)
+        if need_rebuild:
+            detailed_index = _build_detailed_cluster_index(strokes, assigned)
+            endpoint_cache = _build_endpoint_cache(strokes, assigned)
+            need_rebuild = False
 
         for si in range(len(strokes)):
             if len(strokes[si]) >= stub_threshold:
@@ -550,6 +569,7 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
             if target_idx >= 0:
                 _merge_stub_into_target(strokes, si, target_idx, stub_side, target_side)
                 changed = True
+                need_rebuild = True  # Strokes changed, rebuild caches next iteration
                 break
 
     return strokes
@@ -626,7 +646,9 @@ def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
 
 
 def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
-                        stub_threshold: int = 20) -> list[list[tuple]]:
+                        stub_threshold: int = 20,
+                        cluster_index: dict = None,
+                        endpoint_cache: dict = None) -> list[list[tuple]]:
     """Remove orphaned short stubs with no neighbors at their junction clusters.
 
     An orphan stub is a short stroke at a junction cluster where no other
@@ -636,16 +658,22 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
         strokes: List of stroke paths. Modified in place.
         assigned: List of assigned junction cluster sets.
         stub_threshold: Maximum length for a stroke to be considered for removal.
+        cluster_index: Optional pre-built cluster index (rebuilt if None).
+        endpoint_cache: Optional pre-built endpoint cache (rebuilt if None).
 
     Returns:
         The modified strokes list.
     """
+    # Track if we need to rebuild caches (first iteration or after changes)
+    need_rebuild = (cluster_index is None or endpoint_cache is None)
     changed = True
     while changed:
         changed = False
-        # Build caches once per iteration (O(n) instead of O(n²))
-        cluster_index = _build_cluster_index(strokes, assigned)
-        endpoint_cache = _build_endpoint_cache(strokes, assigned)
+        # Build caches if needed (first time or after strokes changed)
+        if need_rebuild:
+            cluster_index = _build_cluster_index(strokes, assigned)
+            endpoint_cache = _build_endpoint_cache(strokes, assigned)
+            need_rebuild = False
 
         for si in range(len(strokes)):
             s = strokes[si]
@@ -666,6 +694,7 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
             if orphan:
                 strokes.pop(si)
                 changed = True
+                need_rebuild = True  # Strokes changed, rebuild caches next iteration
                 break
 
     return strokes

@@ -42,21 +42,17 @@ Command-line Arguments:
 """
 
 import argparse
-import io
 import json
 import logging
-import os
 import re
 import time
-import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
-from font_source import FontMetadata, FontSource, ScraperConfig
+from font_source import FontMetadata, FontSource, ScraperConfig, create_scrape_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +94,13 @@ class DaFontScraper(FontSource):
         '603': 'Handwritten',
     }
 
+    # Regex patterns for HTML parsing (compiled once for efficiency)
+    FONT_LINK_PATTERN = re.compile(r'\.font$')
+    DOWNLOAD_COUNT_PATTERN = re.compile(r'[\d,]+\s*downloads')
+    DOWNLOAD_COUNT_EXTRACT = re.compile(r'([\d,]+)\s*downloads')
+    DOWNLOAD_LINK_PATTERN = re.compile(r'dl\.dafont\.com|dl\.php\?f=')
+    FONT_SLUG_PATTERN = re.compile(r'[?&]f=([^&]+)')
+
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
         """Initialize the DaFont scraper.
 
@@ -128,32 +131,16 @@ class DaFontScraper(FontSource):
         category_name = self.CATEGORIES.get(category, f'Unknown ({category})')
         logger.info("Scraping category: %s (cat=%s)", category_name, category)
 
+        url_template = f"{self.BASE_URL}/theme.php?cat={category}&page={{page}}"
+
+        # Create a parser that includes the category name
+        def parse_with_category(html: str) -> list[FontMetadata]:
+            return self._parse_font_list(html, category_name)
+
         fonts = []
-        page = 1
-
-        while page <= max_pages:
-            url = f"{self.BASE_URL}/theme.php?cat={category}&page={page}"
-            logger.debug("Page %d: %s", page, url)
-
-            try:
-                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
-                resp.raise_for_status()
-
-                page_fonts = self._parse_font_list(resp.text, category_name)
-
-                if not page_fonts:
-                    logger.debug("No fonts found on page %d, stopping.", page)
-                    break
-
-                fonts.extend(page_fonts)
-                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
-
-                page += 1
-                time.sleep(self.rate_limit)
-
-            except requests.RequestException as e:
-                logger.warning("Error fetching page %d: %s", page, e)
-                break
+        for page_fonts in self.paginate(url_template, max_pages, parse_with_category, self.PAGE_TIMEOUT):
+            fonts.extend(page_fonts)
+            logger.debug("Total fonts so far: %d", len(fonts))
 
         return fonts
 
@@ -175,7 +162,7 @@ class DaFontScraper(FontSource):
         fonts = []
 
         # Method 1: Find font name links (end with .font)
-        font_links = soup.find_all('a', href=re.compile(r'\.font$'))
+        font_links = soup.find_all('a', href=self.FONT_LINK_PATTERN)
 
         for font_link in font_links:
             try:
@@ -199,9 +186,9 @@ class DaFontScraper(FontSource):
                 # Get download count from nearby text
                 downloads = 0
                 # Look for download count in sibling/parent text
-                next_text = font_link.find_next(string=re.compile(r'[\d,]+\s*downloads'))
+                next_text = font_link.find_next(string=self.DOWNLOAD_COUNT_PATTERN)
                 if next_text:
-                    dl_match = re.search(r'([\d,]+)\s*downloads', next_text)
+                    dl_match = self.DOWNLOAD_COUNT_EXTRACT.search(next_text)
                     if dl_match:
                         downloads = int(dl_match.group(1).replace(',', ''))
 
@@ -240,12 +227,12 @@ class DaFontScraper(FontSource):
         seen = set()
 
         # Look for download links
-        for link in soup.find_all('a', href=re.compile(r'dl\.dafont\.com|dl\.php\?f=')):
+        for link in soup.find_all('a', href=self.DOWNLOAD_LINK_PATTERN):
             try:
                 download_url = link.get('href', '')
 
                 # Extract font slug from download URL
-                match = re.search(r'[?&]f=([^&]+)', download_url)
+                match = self.FONT_SLUG_PATTERN.search(download_url)
                 if not match:
                     continue
 
@@ -295,51 +282,26 @@ class DaFontScraper(FontSource):
         if font.name in self.downloaded:
             return True
 
-        try:
-            logger.debug("Downloading: %s", font.name)
-
-            resp = self.get_with_retry(font.download_url, timeout=self.DOWNLOAD_TIMEOUT)
-            resp.raise_for_status()
-
-            # DaFont serves ZIP files
-            if resp.content[:4] != b'PK\x03\x04':
-                logger.warning("Not a ZIP file for %s", font.name)
-                return False
-
-            # Extract fonts from ZIP
-            extracted = 0
-            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                for name in zf.namelist():
-                    lower_name = name.lower()
-                    if lower_name.endswith(('.ttf', '.otf')):
-                        # Clean filename
-                        safe_name = self.safe_filename(os.path.basename(name))
-                        out_path = self.output_dir / safe_name
-
-                        if not out_path.exists():
-                            with zf.open(name) as src, open(out_path, 'wb') as dst:
-                                dst.write(src.read())
-                            extracted += 1
-
-            if extracted > 0:
-                logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
-                self.downloaded.add(font.name)
-                return True
-            else:
-                logger.warning("No TTF/OTF files found in ZIP for %s", font.name)
-                return False
-
-        except zipfile.BadZipFile:
-            logger.error("Invalid ZIP file for %s", font.name)
+        # Use base class download method
+        content = self.download_font_file(font.download_url, font.name, self.DOWNLOAD_TIMEOUT)
+        if content is None:
             self.failed.append(font.name)
             return False
-        except requests.RequestException as e:
-            logger.error("Error downloading %s: %s", font.name, e)
-            self.failed.append(font.name)
+
+        # DaFont serves ZIP files
+        if content[:4] != b'PK\x03\x04':
+            logger.warning("Not a ZIP file for %s", font.name)
             return False
-        except Exception as e:
-            logger.error("Unexpected error for %s: %s", font.name, e)
-            self.failed.append(font.name)
+
+        # Use base class ZIP extraction
+        extracted = self.extract_font_from_zip(content)
+
+        if extracted > 0:
+            logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
+            self.downloaded.add(font.name)
+            return True
+        else:
+            logger.warning("No TTF/OTF files found in ZIP for %s", font.name)
             return False
 
     def scrape_fonts(self, config: ScraperConfig) -> list[FontMetadata]:
@@ -447,19 +409,21 @@ class DaFontScraper(FontSource):
         # Download fonts
         logger.info("Downloading %d fonts...", len(fonts_to_download))
 
-        for i, font in enumerate(fonts_to_download):
-            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts_to_download), font.name)
+        for i, font in enumerate(fonts_to_download, 1):
+            self.log_progress(i, len(fonts_to_download), font.name)
             self.download_font(font)
             time.sleep(self.rate_limit)
 
-        # Save metadata
-        metadata = {
-            'fonts_found': len(all_fonts),
-            'fonts_downloaded': len(self.downloaded),
-            'fonts_failed': len(self.failed),
-            'categories': categories,
-            'font_list': [f.to_dict() for f in fonts_to_download]
-        }
+        # Build standardized metadata
+        metadata = create_scrape_metadata(
+            source=self.SOURCE_NAME,
+            fonts_found=len(all_fonts),
+            fonts_downloaded=len(self.downloaded),
+            fonts_failed=len(self.failed),
+            output_dir=str(self.output_dir),
+            fonts=[f.to_dict() for f in fonts_to_download],
+            categories=categories,
+        )
 
         meta_path = self.output_dir / 'dafont_metadata.json'
         with open(meta_path, 'w') as f:

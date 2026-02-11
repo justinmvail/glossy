@@ -27,6 +27,18 @@ Key Concepts:
     - Segment: A line segment between two adjacent contour points
     - Cross-section: A perpendicular slice through the glyph at a given point
 
+Data Structure Conventions:
+    This module uses tuples for coordinate pairs to maintain consistency with
+    stroke_utils.py and other stroke processing modules:
+    - Point: tuple[float, float] - A single (x, y) coordinate
+    - Contour: list[tuple[float, float]] - A sequence of connected points
+    - Segment: tuple[tuple, tuple] - Two points defining a line segment
+
+Error Handling Conventions:
+    - Returns None when the character is not found in the font
+    - Returns empty list [] when no contours can be extracted
+    - Raises exceptions only for invalid arguments or I/O errors
+
 Typical usage:
     # Get pixel-space contours
     contours = get_pixel_contours(font_path, 'A', canvas_size=224)
@@ -35,6 +47,7 @@ Typical usage:
     strokes = contour_to_strokes(font_path, 'A', canvas_size=224)
 """
 
+from __future__ import annotations
 
 import numpy as np
 from fontTools.pens.recordingPen import RecordingPen
@@ -42,7 +55,8 @@ from fontTools.ttLib import TTFont
 from PIL import ImageFont
 
 
-def flatten_bezier_quad(p0: tuple, p1: tuple, p2: tuple, steps: int = 15) -> list[tuple]:
+def flatten_bezier_quad(p0: tuple[float, float], p1: tuple[float, float],
+                        p2: tuple[float, float], steps: int = 15) -> list[tuple[float, float]]:
     """Flatten a quadratic Bezier curve into a sequence of discrete points.
 
     Quadratic Bezier curves are defined by three control points and are commonly
@@ -79,7 +93,9 @@ def flatten_bezier_quad(p0: tuple, p1: tuple, p2: tuple, steps: int = 15) -> lis
     return pts
 
 
-def flatten_bezier_cubic(p0: tuple, p1: tuple, p2: tuple, p3: tuple, steps: int = 20) -> list[tuple]:
+def flatten_bezier_cubic(p0: tuple[float, float], p1: tuple[float, float],
+                         p2: tuple[float, float], p3: tuple[float, float],
+                         steps: int = 20) -> list[tuple[float, float]]:
     """Flatten a cubic Bezier curve into a sequence of discrete points.
 
     Cubic Bezier curves are defined by four control points and are commonly
@@ -276,7 +292,8 @@ def font_to_pixel_transform(tt: 'TTFont', font_path: str, char: str,
 
 
 def get_pixel_contours(font_path: str, char: str, canvas_size: int = 224,
-                       resolve_font_path_fn: callable | None = None) -> list[list[tuple]]:
+                       resolve_font_path_fn: callable | None = None
+                       ) -> list[list[tuple[float, float]]]:
     """Extract glyph contours as pixel-space polylines.
 
     This is a convenience function that combines contour extraction with
@@ -322,7 +339,8 @@ def get_pixel_contours(font_path: str, char: str, canvas_size: int = 224,
     return pixel_contours
 
 
-def contour_segments(pixel_contours: list[list[tuple]]) -> list[tuple]:
+def contour_segments(pixel_contours: list[list[tuple[float, float]]]
+                     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Convert pixel contours to a flat list of line segments.
 
     This function extracts all line segments from contours for use in

@@ -561,24 +561,13 @@ def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
         - Overlap penalty: 0.5 * excess overlap beyond 25% free overlap
     """
     all_shapes = _param_vector_to_shapes(param_vector, shape_types, slices, bbox)
-    all_pts = np.concatenate(all_shapes, axis=0)
-    if len(all_pts) == 0:
-        return 0.0
 
-    # Snap points and compute penalties
-    snapped = _snap_points_to_mask(all_pts, snap_xi, snap_yi, w, h)
-    snap_penalty = _compute_snap_penalty(all_pts, snapped)
-    edge_penalty = _compute_edge_penalty(snapped, dist_map, w, h)
-
-    # Compute per-shape coverage
-    per_shape = _compute_per_shape_coverage(all_shapes, snapped, cloud_tree, radius)
-    covered_all = set().union(*per_shape) if per_shape else set()
-    coverage = len(covered_all) / n_cloud
-
-    # Compute overlap penalty
-    overlap_penalty = _compute_overlap_penalty(per_shape)
-
-    return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
+    # Use the default CompositeScorer for consistent scoring logic
+    context = ScoringContext(
+        cloud_tree=cloud_tree, n_cloud=n_cloud, radius=radius,
+        snap_xi=snap_xi, snap_yi=snap_yi, w=w, h=h, dist_map=dist_map
+    )
+    return _default_scorer.score(all_shapes, context)
 
 
 def score_all_strokes_ctx(param_vector: np.ndarray, shape_types: list[str],
@@ -650,45 +639,15 @@ def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
         score = score_raw_strokes(strokes, cloud_tree, n_cloud, radius,
                                   snap_yi, snap_xi, w, h, scorer=scorer)
     """
-    # SCORING PATH SELECTION:
-    # - If `scorer` parameter is provided (not None): use the CompositeScorer pattern
-    #   which provides configurable penalty weights and extensible penalty types.
-    # - If `scorer` is None: use the legacy implementation with fixed penalty functions
-    #   (_compute_snap_penalty, _compute_edge_penalty, _compute_overlap_penalty).
-    # The legacy path is retained for backwards compatibility with existing code
-    # that relies on the default scoring behavior without passing a scorer.
-    if scorer is not None:
-        # Use the composite scorer pattern
-        context = ScoringContext(
-            cloud_tree=cloud_tree, n_cloud=n_cloud, radius=radius,
-            snap_xi=snap_xi, snap_yi=snap_yi, w=w, h=h, dist_map=dist_map
-        )
-        return scorer.score(stroke_arrays, context)
+    # Always use CompositeScorer for unified scoring logic
+    # If no custom scorer provided, use the default scorer with standard weights
+    active_scorer = scorer if scorer is not None else _default_scorer
 
-    # Legacy implementation for backwards compatibility
-    if not stroke_arrays or all(len(s) == 0 for s in stroke_arrays):
-        return 0.0
-
-    processed = [s for s in stroke_arrays if len(s) >= 2]
-    if not processed:
-        return 0.0
-
-    all_pts = np.concatenate(processed, axis=0)
-
-    # Snap points and compute penalties using shared helpers
-    snapped = _snap_points_to_mask(all_pts, snap_xi, snap_yi, w, h)
-    snap_penalty = _compute_snap_penalty(all_pts, snapped)
-    edge_penalty = _compute_edge_penalty(snapped, dist_map, w, h)
-
-    # Compute per-shape coverage
-    per_shape = _compute_per_shape_coverage(processed, snapped, cloud_tree, radius)
-    covered_all = set().union(*per_shape) if per_shape else set()
-    coverage = len(covered_all) / n_cloud
-
-    # Compute overlap penalty
-    overlap_penalty = _compute_overlap_penalty(per_shape)
-
-    return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
+    context = ScoringContext(
+        cloud_tree=cloud_tree, n_cloud=n_cloud, radius=radius,
+        snap_xi=snap_xi, snap_yi=snap_yi, w=w, h=h, dist_map=dist_map
+    )
+    return active_scorer.score(stroke_arrays, context)
 
 
 def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> float:

@@ -47,6 +47,7 @@ Attributes:
     DIFFVG_TIMEOUT (int): DiffVG operation timeout in seconds (300).
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -140,6 +141,40 @@ STALE_CYCLES_LIMIT = 2
 # DiffVG
 DIFFVG_ITERATIONS = 500
 DIFFVG_TIMEOUT = 300
+
+
+# --- Response Format Standards ---
+# This codebase uses consistent response patterns across all API endpoints.
+#
+# SUCCESS RESPONSES (action confirmations):
+#   Use success_response() helper -> {"ok": true, ...extra_data}
+#   Examples:
+#     - POST /api/char/<id>       -> {"ok": true}
+#     - POST /api/reject/<id>     -> {"ok": true, "status": "rejected"}
+#     - POST /api/skeleton-batch  -> {"ok": true, "generated": 45, "skipped": 12}
+#
+# DATA RESPONSES (data retrieval):
+#   Use data_response() helper -> {...data_fields}
+#   Examples:
+#     - GET /api/char/<id>        -> {"strokes": [...], "markers": [...], "image": "..."}
+#     - GET /api/test-history     -> {"runs": [...]}
+#     - GET /api/minimal-strokes  -> {"strokes": [...], "variant": "default"}
+#
+# ERROR RESPONSES (all formats return JSON with "error" field):
+#   Use error_response() helper -> {"error": "message"}, status_code
+#   Examples:
+#     - Missing parameter         -> {"error": "Missing ?c= parameter"}, 400
+#     - Not found                 -> {"error": "Font not found"}, 404
+#     - Server error              -> {"error": "Could not render glyph"}, 500
+#
+# IMAGE RESPONSES (PNG):
+#   Use send_pil_image_as_png() helper
+#   Returns: PNG bytes with mimetype='image/png'
+#
+# SSE STREAMING:
+#   Use format_sse_event() helper -> 'data: {...json...}\n\n'
+#   Error events: {"error": "message"}
+#   Final events: {"done": true, ...result_data}
 
 
 @app.template_filter('urlencode')
@@ -314,11 +349,14 @@ def get_font(fid: int) -> sqlite3.Row | None:
 
 
 def validate_char_param(char: str | None) -> tuple[bool, tuple | None]:
-    """Validate a character parameter from a request query string.
+    """Validate a character parameter from a request query string (JSON format).
 
     Ensures the character parameter is present and contains exactly one
     character. Returns a tuple indicating validity and an optional error
-    response for invalid input.
+    response for invalid input. Always returns JSON-formatted errors.
+
+    Note:
+        For format-flexible validation, use get_char_param_or_error() instead.
 
     Args:
         char: The character value from request.args.get('c'), may be None
@@ -350,37 +388,238 @@ def validate_char_param(char: str | None) -> tuple[bool, tuple | None]:
     return True, None
 
 
-def get_font_or_error(fid: int, response_type: str = 'json'):
+def get_char_param_or_error(response_format: str = 'json'):
+    """Get and validate the ?c= query parameter from the current request.
+
+    Unified character parameter extraction and validation. Automatically
+    accesses the Flask request context and returns format-appropriate errors.
+
+    Args:
+        response_format: Error response format - 'json', 'text', or 'sse'.
+            Defaults to 'json'.
+
+    Returns:
+        tuple: (char, None) if valid, or (None, error_response) if invalid.
+            The error_response is ready to return from a Flask route.
+
+    Example:
+        JSON API endpoint::
+
+            @app.route('/api/char/<int:fid>')
+            def api_get_char(fid):
+                c, err = get_char_param_or_error()
+                if err:
+                    return err
+                # c is a valid single character...
+
+        SSE streaming endpoint::
+
+            @app.route('/api/stream/<int:fid>')
+            def api_stream(fid):
+                c, err = get_char_param_or_error(response_format='sse')
+                if err:
+                    return err
+                # Generate SSE events for character c...
+
+        Plain text/image endpoint::
+
+            @app.route('/api/render/<int:fid>')
+            def api_render(fid):
+                c, err = get_char_param_or_error(response_format='text')
+                if err:
+                    return err
+                # Return rendered image...
+    """
+    from flask import request
+
+    char = request.args.get('c')
+    if not char:
+        return None, error_response("Missing ?c= parameter", 400, response_format)
+    if len(char) != 1:
+        return None, error_response("Character must be a single character", 400, response_format)
+    return char, None
+
+
+def format_sse_event(data: dict) -> str:
+    """Format a dictionary as a Server-Sent Events data line.
+
+    Provides unified SSE event formatting across all streaming endpoints.
+
+    Args:
+        data: Dictionary to serialize as JSON event data.
+
+    Returns:
+        str: SSE-formatted string with 'data: ' prefix and double newline.
+
+    Example:
+        Formatting a progress event::
+
+            event = format_sse_event({'phase': 'Init', 'score': 0.5})
+            # Returns: 'data: {"phase": "Init", "score": 0.5}\\n\\n'
+
+        Using in a streaming endpoint::
+
+            def generate():
+                yield format_sse_event({'status': 'starting'})
+                for i in range(10):
+                    yield format_sse_event({'progress': i})
+                yield format_sse_event({'done': True})
+    """
+    return f'data: {json.dumps(data)}\n\n'
+
+
+def success_response(**kwargs):
+    """Create a standardized success response.
+
+    Provides consistent success response formatting across all API endpoints.
+    Always includes {"ok": true} in the response, with additional data fields.
+
+    Args:
+        **kwargs: Additional key-value pairs to include in the response.
+            Common fields include: status, count, data, strokes, etc.
+
+    Returns:
+        flask.Response: JSON response with {"ok": true, ...kwargs}.
+
+    Example:
+        Simple success::
+
+            return success_response()
+            # Returns: {"ok": true}
+
+        Success with status::
+
+            return success_response(status='rejected')
+            # Returns: {"ok": true, "status": "rejected"}
+
+        Success with data::
+
+            return success_response(generated=45, skipped=12, failed=5)
+            # Returns: {"ok": true, "generated": 45, "skipped": 12, "failed": 5}
+    """
+    from flask import jsonify
+    return jsonify(ok=True, **kwargs)
+
+
+def data_response(**kwargs):
+    """Create a data response without the "ok" field.
+
+    For endpoints that return data directly (e.g., strokes, markers, runs).
+    Use success_response() for action confirmations.
+
+    Args:
+        **kwargs: Key-value pairs to include in the response.
+
+    Returns:
+        flask.Response: JSON response with the provided data.
+
+    Example:
+        Strokes data::
+
+            return data_response(strokes=[...], variant='default')
+            # Returns: {"strokes": [...], "variant": "default"}
+
+        Test run history::
+
+            return data_response(runs=[...])
+            # Returns: {"runs": [...]}
+    """
+    from flask import jsonify
+    return jsonify(**kwargs)
+
+
+def error_response(message: str, status_code: int = 400, response_format: str = 'json'):
+    """Create an error response in the specified format.
+
+    Unified error response creation supporting JSON, plain text, and SSE formats.
+    Use this for consistent error handling across all route handlers.
+
+    Args:
+        message: The error message to include in the response.
+        status_code: HTTP status code (default 400). Ignored for SSE format.
+        response_format: Output format - 'json', 'text', or 'sse'.
+
+    Returns:
+        Response appropriate for the format:
+            - 'json': (jsonify(error=message), status_code)
+            - 'text': (message, status_code)
+            - 'sse': Response with SSE-formatted error event
+
+    Example:
+        JSON error::
+
+            return error_response("Missing parameter", 400, 'json')
+            # Returns: (jsonify(error="Missing parameter"), 400)
+
+        Plain text error::
+
+            return error_response("Font not found", 404, 'text')
+            # Returns: ("Font not found", 404)
+
+        SSE error::
+
+            return error_response("Connection lost", response_format='sse')
+            # Returns: Response('data: {"error": "Connection lost"}\\n\\n',
+            #                   mimetype='text/event-stream')
+    """
+    from flask import Response, jsonify
+
+    if response_format == 'json':
+        return jsonify(error=message), status_code
+    elif response_format == 'sse':
+        return Response(format_sse_event({'error': message}),
+                        mimetype='text/event-stream')
+    else:  # 'text'
+        return message, status_code
+
+
+def get_font_or_error(fid: int, response_format: str = 'json'):
     """Get font by ID or return appropriate error response.
+
+    Unified font lookup with automatic error handling. Combines database
+    lookup with format-appropriate error response generation.
 
     Args:
         fid: Font ID to look up.
-        response_type: 'json' for JSON error, 'text' for plain text,
-            'sse' for Server-Sent Events format.
+        response_format: Error response format - 'json', 'text', or 'sse'.
+            Defaults to 'json'.
 
     Returns:
         tuple: (font, None) if found, or (None, error_response) if not found.
             The error_response is ready to return from a Flask route.
 
     Example:
-        font, err = get_font_or_error(fid)
-        if err:
-            return err
-        # Use font...
+        Basic usage in a JSON API endpoint::
+
+            @app.route('/api/char/<int:fid>')
+            def api_get_char(fid):
+                font, err = get_font_or_error(fid)
+                if err:
+                    return err
+                # Use font...
+
+        Using with SSE streaming::
+
+            @app.route('/api/stream/<int:fid>')
+            def api_stream(fid):
+                font, err = get_font_or_error(fid, response_format='sse')
+                if err:
+                    return err
+                # Generate SSE events...
+
+        Using with plain text responses::
+
+            @app.route('/render/<int:fid>')
+            def render(fid):
+                font, err = get_font_or_error(fid, response_format='text')
+                if err:
+                    return err
+                # Return image...
     """
-    from flask import Response, jsonify
     font = get_font(fid)
     if font:
         return font, None
-
-    if response_type == 'json':
-        return None, (jsonify(error="Font not found"), 404)
-    elif response_type == 'sse':
-        import json
-        return None, Response(f'data: {json.dumps({"error": "Font not found"})}\n\n',
-                              mimetype='text/event-stream')
-    else:
-        return None, ("Font not found", 404)
+    return None, error_response("Font not found", 404, response_format)
 
 
 def get_font_and_mask(fid: int, char: str, canvas_size: int = 224):

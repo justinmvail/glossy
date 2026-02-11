@@ -436,59 +436,84 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     return [[[float(x), float(y)] for x, y in s] for s in strokes]
 
 
-def _find_closest_endpoint_pair(strokes: list[list[list[float]]]) -> tuple[float, int, int, bool]:
-    """Find the closest pair of endpoints between different strokes.
+def _find_closest_pair_simple(
+    strokes: list[list[list[float]]]
+) -> tuple[float, int, int, bool]:
+    """Find closest endpoint pair using O(n^2) brute-force search.
 
-    Uses cKDTree for O(n log n) performance when stroke count is large,
-    falling back to simple O(n²) search for small counts where tree
-    construction overhead would dominate.
+    Note: This function is kept for testing/debugging purposes but is no
+    longer used by default. _find_closest_endpoint_pair always uses KD-tree.
 
     Args:
         strokes: List of strokes, each a list of [x, y] coordinate pairs.
 
     Returns:
-        Tuple of (distance_squared, stroke_i, stroke_j, reverse_j):
-        - distance_squared: Squared distance between closest endpoints
-        - stroke_i: Index of first stroke (lower index)
-        - stroke_j: Index of second stroke (higher index)
-        - reverse_j: True if stroke_j should be reversed when merging
-        Returns (inf, -1, -1, False) if no valid pair found.
+        Tuple of (distance_squared, stroke_i, stroke_j, reverse_j).
     """
     n = len(strokes)
-    if n < 2:
-        return float('inf'), -1, -1, False
+    best_dist, best_i, best_j, reverse_j = float('inf'), -1, -1, False
 
-    # For small counts, simple O(n²) is faster than tree construction
-    if n <= 6:
-        best_dist, best_i, best_j, reverse_j = float('inf'), -1, -1, False
-        for i in range(n):
-            for j in range(i + 1, n):
-                # Skip empty strokes
-                if len(strokes[i]) == 0 or len(strokes[j]) == 0:
-                    continue
-                for end_i, end_j, rev in [(strokes[i][-1], strokes[j][0], False),
-                                          (strokes[i][-1], strokes[j][-1], True),
-                                          (strokes[i][0], strokes[j][0], False),
-                                          (strokes[i][0], strokes[j][-1], True)]:
-                    d = (end_i[0] - end_j[0])**2 + (end_i[1] - end_j[1])**2
-                    if d < best_dist:
-                        best_dist, best_i, best_j, reverse_j = d, i, j, rev
-        return best_dist, best_i, best_j, reverse_j
+    for i in range(n):
+        if len(strokes[i]) == 0:
+            continue
+        for j in range(i + 1, n):
+            if len(strokes[j]) == 0:
+                continue
+            # Check all four endpoint combinations
+            for end_i, end_j, rev in [
+                (strokes[i][-1], strokes[j][0], False),
+                (strokes[i][-1], strokes[j][-1], True),
+                (strokes[i][0], strokes[j][0], False),
+                (strokes[i][0], strokes[j][-1], True),
+            ]:
+                d = (end_i[0] - end_j[0])**2 + (end_i[1] - end_j[1])**2
+                if d < best_dist:
+                    best_dist, best_i, best_j, reverse_j = d, i, j, rev
 
-    # Build array of endpoints: each stroke contributes 2 points
-    # Format: [x, y] with metadata tracked separately
+    return best_dist, best_i, best_j, reverse_j
+
+
+def _build_endpoint_arrays(
+    strokes: list[list[list[float]]]
+) -> tuple[np.ndarray, list[tuple[int, bool]]]:
+    """Build arrays of endpoints and their metadata for KD-tree search.
+
+    Args:
+        strokes: List of strokes, each a list of [x, y] coordinate pairs.
+
+    Returns:
+        Tuple of (points, metadata) where:
+        - points: numpy array of shape (2*n, 2) with all endpoints
+        - metadata: list of (stroke_idx, is_end) tuples for each point
+    """
     endpoints = []
     metadata = []  # (stroke_idx, is_end)
+
     for i, s in enumerate(strokes):
         endpoints.append(s[0])   # start
         metadata.append((i, False))
         endpoints.append(s[-1])  # end
         metadata.append((i, True))
 
-    points = np.array(endpoints)
+    return np.array(endpoints), metadata
+
+
+def _find_closest_pair_kdtree(
+    strokes: list[list[list[float]]]
+) -> tuple[float, int, int, bool]:
+    """Find closest endpoint pair using KD-tree for O(n log n) performance.
+
+    More efficient than brute-force for larger stroke counts (n > 6).
+
+    Args:
+        strokes: List of strokes, each a list of [x, y] coordinate pairs.
+
+    Returns:
+        Tuple of (distance_squared, stroke_i, stroke_j, reverse_j).
+    """
+    points, metadata = _build_endpoint_arrays(strokes)
     tree = cKDTree(points)
 
-    # For each endpoint, find nearest from a different stroke
     best_dist, best_i, best_j, reverse_j = float('inf'), -1, -1, False
 
     for idx, (stroke_idx, is_end) in enumerate(metadata):
@@ -505,20 +530,42 @@ def _find_closest_endpoint_pair(strokes: list[list[list[float]]]) -> tuple[float
             if d_sq < best_dist:
                 # Ensure i < j for consistent ordering
                 si, sj = stroke_idx, neighbor_stroke
+                cur_is_end, cur_neighbor_is_end = is_end, neighbor_is_end
                 if si > sj:
                     si, sj = sj, si
-                    is_end, neighbor_is_end = neighbor_is_end, is_end
+                    cur_is_end, cur_neighbor_is_end = cur_neighbor_is_end, cur_is_end
 
                 # Determine if j should be reversed based on which endpoints connect
-                # We connect: stroke_i[is_end] to stroke_j[neighbor_is_end]
-                # If connecting i's end to j's end, j needs reversing
-                # If connecting i's end to j's start, no reverse needed
-                rev = neighbor_is_end if stroke_idx < neighbor_stroke else is_end
-
+                rev = cur_neighbor_is_end if stroke_idx < neighbor_stroke else cur_is_end
                 best_dist, best_i, best_j, reverse_j = d_sq, si, sj, rev
             break  # Found closest from different stroke
 
     return best_dist, best_i, best_j, reverse_j
+
+
+def _find_closest_endpoint_pair(strokes: list[list[list[float]]]) -> tuple[float, int, int, bool]:
+    """Find the closest pair of endpoints between different strokes.
+
+    Uses cKDTree for O(n log n) performance. Always uses KD-tree approach
+    for consistency and to avoid O(n^2) worst-case behavior.
+
+    Args:
+        strokes: List of strokes, each a list of [x, y] coordinate pairs.
+
+    Returns:
+        Tuple of (distance_squared, stroke_i, stroke_j, reverse_j):
+        - distance_squared: Squared distance between closest endpoints
+        - stroke_i: Index of first stroke (lower index)
+        - stroke_j: Index of second stroke (higher index)
+        - reverse_j: True if stroke_j should be reversed when merging
+        Returns (inf, -1, -1, False) if no valid pair found.
+    """
+    n = len(strokes)
+    if n < 2:
+        return float('inf'), -1, -1, False
+
+    # Always use KD-tree for consistent O(n log n) performance
+    return _find_closest_pair_kdtree(strokes)
 
 
 def _merge_to_expected_count(strokes: list[list[list[float]]],
@@ -623,25 +670,14 @@ def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
         variants defined in NUMPAD_TEMPLATE_VARIANTS for the character
         and returns the one with the best score.
     """
-    # Lazy import to avoid circular dependency with stroke_pipeline
-    from stroke_pipeline import MinimalStrokePipeline
+    # Use PipelineFactory to reduce coupling and centralize pipeline construction
+    from stroke_pipeline import PipelineConfig, PipelineFactory
 
-    pipe = MinimalStrokePipeline(
-        fp, c, cs,
-        resolve_font_path_fn=resolve_font_path,
-        render_glyph_mask_fn=render_glyph_mask,
-        analyze_skeleton_fn=analyze_skeleton_legacy,
-        find_skeleton_segments_fn=find_skeleton_segments,
-        point_in_region_fn=point_in_region,
-        trace_segment_fn=trace_segment,
-        trace_to_region_fn=trace_to_region,
-        generate_straight_line_fn=generate_straight_line,
-        resample_path_fn=resample_path,
-        skeleton_to_strokes_fn=skel_strokes,
+    config = PipelineConfig(
+        canvas_size=cs,
         apply_stroke_template_fn=_merge_to_expected_count,
-        adjust_stroke_paths_fn=lambda st, c, m: st,  # No-op for now
-        quick_stroke_score_fn=quick_stroke_score,
     )
+    pipe = PipelineFactory.create_with_config(fp, c, config)
 
     if tpl:
         st = pipe.run(tpl, trace_paths=True)

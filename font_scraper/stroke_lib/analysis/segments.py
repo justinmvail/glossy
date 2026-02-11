@@ -37,6 +37,9 @@ from collections import defaultdict, deque
 from ..domain.geometry import Point, Segment
 from ..domain.skeleton import SkeletonInfo
 
+# Import shared path tracing utility from sibling module
+from ..utils.geometry import pick_straightest_neighbor
+
 
 class SegmentClassifier:
     """Classifies skeleton segments by direction and properties.
@@ -356,31 +359,8 @@ class SegmentClassifier:
             if not candidates:
                 break
 
-            # Pick straightest continuation
-            if len(candidates) == 1:
-                next_pt, next_edge = candidates[0]
-            else:
-                n_look = min(4, len(path))
-                dx_in = current[0] - path[-n_look][0]
-                dy_in = current[1] - path[-n_look][1]
-                len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
-                if len_in > 0.01:
-                    dx_in /= len_in
-                    dy_in /= len_in
-
-                best_dot = -2
-                next_pt, next_edge = candidates[0]
-                for n, e in candidates:
-                    dx_out = n[0] - current[0]
-                    dy_out = n[1] - current[1]
-                    len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
-                    if len_out > 0.01:
-                        dot = (dx_in * dx_out + dy_in * dy_out) / len_out
-                    else:
-                        dot = 0
-                    if dot > best_dot:
-                        best_dot = dot
-                        next_pt, next_edge = n, e
+            # Use shared utility for straightest path selection
+            next_pt, next_edge = pick_straightest_neighbor(current, path, candidates)
 
             visited_edges.add(next_edge)
             path.append(next_pt)

@@ -38,18 +38,73 @@ Attributes:
 
 from __future__ import annotations
 
+import io
 import logging
+import os
 import re
 import time
+import zipfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Generator
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+def create_scrape_metadata(
+    source: str,
+    fonts_found: int,
+    fonts_downloaded: int,
+    fonts_failed: int,
+    output_dir: str = "",
+    fonts: list[dict] = None,
+    categories: list[str] = None,
+    query: str = "",
+) -> dict:
+    """Create a standardized metadata dictionary for scrape results.
+
+    This function ensures all scrapers return consistent metadata keys.
+
+    Args:
+        source: Name of the source (e.g., 'dafont', 'fontspace', 'google').
+        fonts_found: Total number of fonts discovered.
+        fonts_downloaded: Number of fonts successfully downloaded.
+        fonts_failed: Number of fonts that failed to download.
+        output_dir: Directory where fonts were saved.
+        fonts: List of font dictionaries with metadata.
+        categories: List of category IDs (for scrapers that use categories).
+        query: Search query used (for scrapers that use search).
+
+    Returns:
+        Dictionary with standardized keys:
+            - source: Name of the source
+            - fonts_found: Total fonts discovered
+            - fonts_downloaded: Successfully downloaded count
+            - fonts_failed: Failed download count
+            - output_dir: Output directory path
+            - fonts: List of font metadata dicts
+            - categories: List of categories (if applicable)
+            - query: Search query (if applicable)
+    """
+    result = {
+        'source': source,
+        'fonts_found': fonts_found,
+        'fonts_downloaded': fonts_downloaded,
+        'fonts_failed': fonts_failed,
+    }
+    if output_dir:
+        result['output_dir'] = output_dir
+    if fonts is not None:
+        result['fonts'] = fonts
+    if categories:
+        result['categories'] = categories
+    if query:
+        result['query'] = query
+    return result
 
 
 @dataclass
@@ -316,6 +371,16 @@ class FontSource(ABC):
         """
         pass
 
+    def log_progress(self, current: int, total: int, name: str) -> None:
+        """Log download progress in a standardized format.
+
+        Args:
+            current: Current item number (1-indexed).
+            total: Total number of items.
+            name: Name of the item being processed.
+        """
+        logger.info("[%d/%d] %s", current, total, name)
+
     def scrape_and_download(self, config: ScraperConfig = None) -> dict:
         """Main entry point: discover and download fonts.
 
@@ -329,11 +394,11 @@ class FontSource(ABC):
             config: ScraperConfig with options. Defaults to ScraperConfig().
 
         Returns:
-            Dictionary with:
+            Dictionary with standardized keys (via create_scrape_metadata):
                 - 'source': Name of the source
                 - 'fonts_found': Number of fonts discovered
-                - 'downloaded': Number successfully downloaded
-                - 'failed': Number that failed to download
+                - 'fonts_downloaded': Number successfully downloaded
+                - 'fonts_failed': Number that failed to download
                 - 'output_dir': Path to output directory
                 - 'fonts': List of FontMetadata dicts for downloaded fonts
         """
@@ -341,29 +406,32 @@ class FontSource(ABC):
             config = ScraperConfig()
 
         # Discover fonts
-        print(f"Scraping fonts from {self.SOURCE_NAME}...")
+        logger.info("Scraping fonts from %s...", self.SOURCE_NAME)
         self.fonts_found = self.scrape_fonts(config)
-        print(f"Found {len(self.fonts_found)} fonts")
+        logger.info("Found %d fonts", len(self.fonts_found))
 
         # Apply max_fonts limit
         fonts_to_download = self.fonts_found
         if config.max_fonts and len(fonts_to_download) > config.max_fonts:
             fonts_to_download = fonts_to_download[:config.max_fonts]
-            print(f"Limiting to {config.max_fonts} fonts")
+            logger.info("Limiting to %d fonts", config.max_fonts)
 
         # Download each font
-        print(f"\nDownloading {len(fonts_to_download)} fonts...")
+        logger.info("Downloading %d fonts...", len(fonts_to_download))
         for i, font in enumerate(fonts_to_download, 1):
-            print(f"  [{i}/{len(fonts_to_download)}] {font.name}")
+            self.log_progress(i, len(fonts_to_download), font.name)
 
             try:
                 if self.download_font(font):
                     self.downloaded.add(font.name)
                 else:
-                    self.failed.append(font.name)
+                    # Track failure if download_font returns False but doesn't track
+                    if font.name not in self.failed:
+                        self.failed.append(font.name)
             except Exception as e:
-                print(f"    Error: {e}")
-                self.failed.append(font.name)
+                logger.error("Error downloading %s: %s", font.name, e)
+                if font.name not in self.failed:
+                    self.failed.append(font.name)
 
             self.wait_rate_limit()
 
@@ -372,17 +440,17 @@ class FontSource(ABC):
             f for f in fonts_to_download if f.name in self.downloaded
         ]
 
-        print(f"\nComplete: {len(self.downloaded)} downloaded, "
-              f"{len(self.failed)} failed")
+        logger.info("Complete: %d downloaded, %d failed",
+                    len(self.downloaded), len(self.failed))
 
-        return {
-            'source': self.SOURCE_NAME,
-            'fonts_found': len(self.fonts_found),
-            'downloaded': len(self.downloaded),
-            'failed': len(self.failed),
-            'output_dir': str(self.output_dir),
-            'fonts': [f.to_dict() for f in downloaded_fonts],
-        }
+        return create_scrape_metadata(
+            source=self.SOURCE_NAME,
+            fonts_found=len(self.fonts_found),
+            fonts_downloaded=len(self.downloaded),
+            fonts_failed=len(self.failed),
+            output_dir=str(self.output_dir),
+            fonts=[f.to_dict() for f in downloaded_fonts],
+        )
 
     def get_downloaded_fonts(self) -> list[FontMetadata]:
         """Get list of successfully downloaded fonts.
@@ -405,3 +473,113 @@ class FontSource(ABC):
         self.fonts_found = []
         self.downloaded = set()
         self.failed = []
+
+    def download_font_file(self, url: str, filename: str, timeout: int = 60) -> bytes | None:
+        """Download a font file from a URL.
+
+        Common download logic used by all scrapers. Handles HTTP requests
+        with retry logic and returns the raw content.
+
+        Args:
+            url: The URL to download from.
+            filename: The font name (used for logging).
+            timeout: Request timeout in seconds. Defaults to 60.
+
+        Returns:
+            The raw bytes of the downloaded file, or None if download failed.
+        """
+        try:
+            logger.debug("Downloading: %s", filename)
+            resp = self.get_with_retry(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp.content
+        except requests.RequestException as e:
+            logger.error("Error downloading %s: %s", filename, e)
+            return None
+
+    def extract_font_from_zip(self, zip_content: bytes, output_dir: Path = None) -> int:
+        """Extract TTF/OTF font files from a ZIP archive.
+
+        Common ZIP extraction logic used by DaFont and FontSpace scrapers.
+
+        Args:
+            zip_content: The raw bytes of the ZIP file.
+            output_dir: Directory to extract fonts to. Defaults to self.output_dir.
+
+        Returns:
+            The number of font files extracted, or 0 if extraction failed.
+        """
+        if output_dir is None:
+            output_dir = self.output_dir
+
+        extracted = 0
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
+                for name in zf.namelist():
+                    lower_name = name.lower()
+                    if lower_name.endswith(('.ttf', '.otf')):
+                        # Clean filename
+                        safe_name = self.safe_filename(os.path.basename(name))
+                        out_path = output_dir / safe_name
+
+                        if not out_path.exists():
+                            with zf.open(name) as src, open(out_path, 'wb') as dst:
+                                dst.write(src.read())
+                            extracted += 1
+        except zipfile.BadZipFile as e:
+            logger.error("Invalid ZIP file: %s", e)
+        return extracted
+
+    def paginate(
+        self,
+        url_template: str,
+        max_pages: int,
+        page_parser: Callable[[str], list[FontMetadata]],
+        timeout: int = 30
+    ) -> Generator[list[FontMetadata], None, None]:
+        """Iterate through paginated results.
+
+        Common pagination pattern used by DaFont and FontSpace scrapers.
+        Yields fonts from each page until no more results or max_pages reached.
+
+        Args:
+            url_template: URL template with {page} placeholder for page number.
+            max_pages: Maximum number of pages to fetch.
+            page_parser: Function that parses HTML and returns list of FontMetadata.
+            timeout: Request timeout in seconds. Defaults to 30.
+
+        Yields:
+            List of FontMetadata objects for each page.
+
+        Example:
+            for page_fonts in self.paginate(
+                "https://example.com/fonts?page={page}",
+                max_pages=10,
+                page_parser=self._parse_font_list
+            ):
+                all_fonts.extend(page_fonts)
+        """
+        page = 1
+        while page <= max_pages:
+            url = url_template.format(page=page)
+            logger.debug("Page %d: %s", page, url)
+
+            try:
+                resp = self.get_with_retry(url, timeout=timeout)
+                resp.raise_for_status()
+
+                page_fonts = page_parser(resp.text)
+
+                if not page_fonts:
+                    logger.debug("No fonts found on page %d, stopping.", page)
+                    break
+
+                yield page_fonts
+                logger.debug("Found %d fonts on page %d", len(page_fonts), page)
+
+                page += 1
+                time.sleep(self.rate_limit)
+
+            except requests.RequestException as e:
+                logger.warning("Error fetching page %d: %s", page, e)
+                break

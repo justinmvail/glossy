@@ -81,6 +81,7 @@ from stroke_pipeline_core import (
     is_vertical_stroke as core_is_vertical_stroke,
 )
 from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
+from stroke_utils import infer_direction_from_regions, point_distance, point_in_region
 
 # "Truly vertical" angle thresholds (narrower range than VERTICAL_ANGLE_MIN/MAX)
 # Used for preferring strictly vertical segments when available
@@ -123,13 +124,22 @@ class PipelineConfig:
             Higher values give smoother paths. Default: 30.
         score_stroke_penalty: Penalty weight applied per extra/missing stroke
             compared to expected count. Default: 0.3.
+        apply_stroke_template_fn: Optional callback to apply character-specific
+            templates to strokes. Signature: (strokes, char) -> strokes.
+            Default: None (uses no-op lambda).
+        adjust_stroke_paths_fn: Optional callback to adjust stroke paths after
+            extraction. Signature: (strokes, char, mask) -> strokes.
+            Default: None (uses no-op lambda).
     """
+    from typing import Callable
     canvas_size: int = 224
     trace_paths: bool = True
     use_skeleton_fallback: bool = True
     min_stroke_len: int = 5
     resample_points: int = 30
     score_stroke_penalty: float = 0.3
+    apply_stroke_template_fn: Callable | None = None
+    adjust_stroke_paths_fn: Callable | None = None
 
 
 class PipelineFactory:
@@ -225,7 +235,7 @@ class PipelineFactory:
             Configured MinimalStrokePipeline instance.
         """
         # Lazy imports to avoid circular dependencies
-        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton
+        from stroke_core import analyze_skeleton_legacy as analyze_skeleton
         from stroke_core import skel_strokes
         from stroke_flask import resolve_font_path
         from stroke_rendering import render_glyph_mask
@@ -246,6 +256,10 @@ class PipelineFactory:
         def configured_skeleton_to_strokes(mask, min_stroke_len=None):
             return skel_strokes(mask, min_stroke_len or config.min_stroke_len)
 
+        # Use config callbacks or defaults
+        apply_template_fn = config.apply_stroke_template_fn or (lambda st, c: st)
+        adjust_paths_fn = config.adjust_stroke_paths_fn or (lambda st, c, m: st)
+
         return MinimalStrokePipeline(
             font_path=font_path,
             char=char,
@@ -260,8 +274,8 @@ class PipelineFactory:
             generate_straight_line_fn=generate_straight_line,
             resample_path_fn=configured_resample_path,
             skeleton_to_strokes_fn=configured_skeleton_to_strokes,
-            apply_stroke_template_fn=lambda st, c: st,
-            adjust_stroke_paths_fn=lambda st, c, m: st,
+            apply_stroke_template_fn=apply_template_fn,
+            adjust_stroke_paths_fn=adjust_paths_fn,
             quick_stroke_score_fn=quick_stroke_score,
         )
 
@@ -359,6 +373,10 @@ class MinimalStrokePipeline:
         self.canvas_size = canvas_size
         self._analysis: SkeletonAnalysis | None = None
 
+        # Caches for performance optimization
+        self._kdtree_cache: dict[tuple, tuple] = {}  # Cache for KDTree query results
+        self._junction_segment_map: dict | None = None  # Cache for junction-to-segment map
+
         # Store function references
         self._render_glyph_mask = render_glyph_mask_fn
         self._analyze_skeleton = analyze_skeleton_fn
@@ -395,7 +413,7 @@ class MinimalStrokePipeline:
             >>> result = pipeline.evaluate_all_variants()
         """
         # Lazy imports to avoid circular dependencies
-        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton
+        from stroke_core import analyze_skeleton_legacy as analyze_skeleton
         from stroke_core import skel_strokes
         from stroke_flask import resolve_font_path
         from stroke_rendering import render_glyph_mask
@@ -486,6 +504,10 @@ class MinimalStrokePipeline:
 
         skel_tree = cKDTree(skel_list)
 
+        # Clear caches when analysis changes (new data)
+        self._kdtree_cache.clear()
+        self._junction_segment_map = None
+
         return SkeletonAnalysis(
             mask=mask, info=info, segments=segments,
             vertical_segments=vertical_segments, bbox=bbox,
@@ -524,6 +546,7 @@ class MinimalStrokePipeline:
         """Find the nearest skeleton pixel to a position.
 
         Uses a KD-tree for efficient O(log n) nearest-neighbor lookup.
+        Results are cached to avoid redundant queries for the same position.
 
         Args:
             pos: Target position as (x, y) coordinates.
@@ -534,8 +557,43 @@ class MinimalStrokePipeline:
         Raises:
             AttributeError: If analysis has not been computed or is None.
         """
+        # Round position to create a hashable cache key
+        cache_key = (round(pos[0], 2), round(pos[1], 2))
+        if cache_key in self._kdtree_cache:
+            return self._kdtree_cache[cache_key]
+
         _, idx = self.analysis.skel_tree.query(pos)
-        return self.analysis.skel_list[idx]
+        result = self.analysis.skel_list[idx]
+        self._kdtree_cache[cache_key] = result
+        return result
+
+    def _get_junction_segment_map(self, segments: list) -> dict:
+        """Get or build the cached junction-to-segment index map.
+
+        Args:
+            segments: List of segment dictionaries with 'start_junction' and 'end_junction'.
+
+        Returns:
+            Dict mapping junction_id -> list of segment indices.
+        """
+        # Build cache key based on segment count and first/last segment identity
+        # (segments list is derived from analysis.vertical_segments, which is stable)
+        cache_key = (len(segments), id(segments[0]) if segments else None)
+        if self._junction_segment_map is not None:
+            cached_key, cached_map = self._junction_segment_map
+            if cached_key == cache_key:
+                return cached_map
+
+        # Build the junction-to-segment map
+        junc_segs = defaultdict(list)
+        for i, seg in enumerate(segments):
+            for j in [seg['start_junction'], seg['end_junction']]:
+                if j >= 0:
+                    junc_segs[j].append(i)
+
+        result = dict(junc_segs)
+        self._junction_segment_map = (cache_key, result)
+        return result
 
     def find_best_vertical_segment(self, template_start: tuple[float, float],
                                    template_end: tuple[float, float]) -> tuple | None:
@@ -563,12 +621,8 @@ class MinimalStrokePipeline:
         if not vertical_segments:
             return None
         truly_vertical = [s for s in vertical_segments if TRULY_VERTICAL_ANGLE_MIN <= abs(s['angle']) <= TRULY_VERTICAL_ANGLE_MAX] or vertical_segments
-        # Build junction-to-segment map and find connected chains
-        junc_segs = defaultdict(list)
-        for i, seg in enumerate(truly_vertical):
-            for j in [seg['start_junction'], seg['end_junction']]:
-                if j >= 0:
-                    junc_segs[j].append(i)
+        # Get cached junction-to-segment map (avoids rebuilding on each call)
+        junc_segs = self._get_junction_segment_map(truly_vertical)
         visited, chains = set(), []
         for i in range(len(truly_vertical)):
             if i in visited:
@@ -585,19 +639,22 @@ class MinimalStrokePipeline:
                         queue.extend(o for o in junc_segs[j] if o not in visited)
             if chain:
                 chains.append(chain)
-        # Score chains by distance to template positions
-        def euclidean_distance(p1, p2):
-            return ((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)**0.5
+        # Score chains by distance to template positions (using shared utility)
         best, best_score = None, float('inf')
+        # Early termination threshold - if we find a very close match, stop searching
+        EARLY_EXIT_THRESHOLD = 5.0  # pixels
         for chain in chains:
             pts = sorted([p for i in chain for p in [truly_vertical[i]['start'], truly_vertical[i]['end']]], key=lambda p: p[1])
             if not pts:
                 continue
             top, bot = pts[0], pts[-1]
-            s1, s2 = euclidean_distance(top, template_start) + euclidean_distance(bot, template_end), euclidean_distance(bot, template_start) + euclidean_distance(top, template_end)
+            s1, s2 = point_distance(top, template_start) + point_distance(bot, template_end), point_distance(bot, template_start) + point_distance(top, template_end)
             score = min(s1, s2)
             if score < best_score:
                 best_score, best = score, (top, bot) if s1 <= s2 else (bot, top)
+                # Early exit if we found a very close match
+                if best_score < EARLY_EXIT_THRESHOLD:
+                    break
         return best
 
     def resolve_waypoint(self, wp: ParsedWaypoint, next_direction: str | None,
@@ -634,6 +691,8 @@ class MinimalStrokePipeline:
 
         analysis = self.analysis
         bbox = analysis.bbox
+        if bbox is None or len(bbox) < 4:
+            raise ValueError("Invalid bbox: analysis.bbox must have 4 elements")
         skel_list = analysis.skel_list
         info = analysis.info
 
@@ -699,6 +758,89 @@ class MinimalStrokePipeline:
             return min(pixels, key=lambda p:
                       (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
 
+    def _get_region_pixels_with_fallback(self, region: int, template_pos: tuple[float, float],
+                                          top_bound: float, bot_bound: float) -> list:
+        """Get skeleton pixels in region, with Y-band fallback.
+
+        Args:
+            region: Numpad region (1-9).
+            template_pos: Template position as (x, y) pixel coordinates.
+            top_bound: Y-coordinate of the top third boundary.
+            bot_bound: Y-coordinate of the bottom third boundary.
+
+        Returns:
+            List of skeleton pixels in the region or Y-band fallback.
+        """
+        skel_list = self.analysis.skel_list
+        bbox = self.analysis.bbox
+
+        region_pixels = [p for p in skel_list if self._point_in_region(p, region, bbox)]
+        if region_pixels:
+            return region_pixels
+
+        # Fallback to Y-band based on template position
+        if template_pos[1] < top_bound:
+            return [p for p in skel_list if p[1] < top_bound]
+        if template_pos[1] > bot_bound:
+            return [p for p in skel_list if p[1] > bot_bound]
+        return [p for p in skel_list if top_bound <= p[1] <= bot_bound]
+
+    def _get_endpoints_in_region(self, region: int) -> list:
+        """Get all endpoints within a region.
+
+        Args:
+            region: Numpad region (1-9).
+
+        Returns:
+            List of endpoint coordinates in the region.
+        """
+        bbox = self.analysis.bbox
+        endpoints = self.analysis.info['endpoints']
+        return [ep for ep in endpoints if self._point_in_region(ep, region, bbox)]
+
+    def _find_nearest_endpoint_in_region(self, region: int,
+                                          template_pos: tuple[float, float]) -> tuple | None:
+        """Find nearest endpoint within a region.
+
+        Args:
+            region: Numpad region (1-9).
+            template_pos: Template position for distance calculation.
+
+        Returns:
+            Nearest endpoint coordinates or None if no endpoints in region.
+        """
+        endpoints_in_region = self._get_endpoints_in_region(region)
+        if not endpoints_in_region:
+            return None
+        return min(endpoints_in_region, key=lambda p:
+                   (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+
+    def _find_region_fallback_extremum(self, region: int, region_pixels: list,
+                                        template_pos: tuple[float, float],
+                                        mid_x: float) -> tuple:
+        """Find fallback extremum based on region position.
+
+        Args:
+            region: Numpad region (1-9).
+            region_pixels: List of skeleton pixels in region.
+            template_pos: Template position for corner regions.
+            mid_x: X-coordinate of bounding box center.
+
+        Returns:
+            Extremum pixel coordinates.
+        """
+        is_corner = region in [7, 9, 1, 3]
+        if is_corner:
+            return min(region_pixels, key=lambda p:
+                       abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1]))
+        if region == 8:
+            return min(region_pixels, key=lambda p: p[1])
+        if region == 2:
+            return max(region_pixels, key=lambda p: p[1])
+        if template_pos[0] < mid_x:
+            return min(region_pixels, key=lambda p: p[0])
+        return max(region_pixels, key=lambda p: p[0])
+
     def _resolve_terminal(self, region: int, template_pos: tuple[float, float],
                           next_direction: str | None, mid_x: float,
                           top_bound: float, bot_bound: float) -> ResolvedWaypoint:
@@ -720,20 +862,8 @@ class MinimalStrokePipeline:
         Returns:
             ResolvedWaypoint with the computed position.
         """
-        analysis = self.analysis
-        bbox = analysis.bbox
-        skel_list = analysis.skel_list
-        info = analysis.info
-
-        # Get pixels in region, with fallback to Y-band
-        region_pixels = [p for p in skel_list if self._point_in_region(p, region, bbox)]
-        if not region_pixels:
-            if template_pos[1] < top_bound:
-                region_pixels = [p for p in skel_list if p[1] < top_bound]
-            elif template_pos[1] > bot_bound:
-                region_pixels = [p for p in skel_list if p[1] > bot_bound]
-            else:
-                region_pixels = [p for p in skel_list if top_bound <= p[1] <= bot_bound]
+        region_pixels = self._get_region_pixels_with_fallback(
+            region, template_pos, top_bound, bot_bound)
 
         if not region_pixels:
             pos = self.find_nearest_skeleton(template_pos)
@@ -744,42 +874,114 @@ class MinimalStrokePipeline:
 
         # For corners, prefer endpoints by direction
         if is_corner:
-            endpoints_in_region = [ep for ep in info['endpoints']
-                                   if self._point_in_region(ep, region, bbox)]
+            endpoints_in_region = self._get_endpoints_in_region(region)
             extremum = self._find_extremum_by_direction(endpoints_in_region, next_direction, template_pos)
 
         # For non-corners, try junction-based direction
         if extremum is None and next_direction and not is_corner:
             extremum = self._find_junction_for_direction(
-                region_pixels, next_direction, template_pos, region, bbox)
+                region_pixels, next_direction, template_pos, region, self.analysis.bbox)
 
         # Fallback: direction-based extremum from region pixels
         if extremum is None:
             extremum = self._find_extremum_by_direction(region_pixels, next_direction, template_pos)
 
-        # If still None, try nearest endpoint
-        if extremum is None and info['endpoints']:
-            endpoints_in_region = [ep for ep in info['endpoints']
-                                   if self._point_in_region(ep, region, bbox)]
-            if endpoints_in_region:
-                extremum = min(endpoints_in_region, key=lambda p:
-                              (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
+        # Try nearest endpoint if still None
+        if extremum is None:
+            extremum = self._find_nearest_endpoint_in_region(region, template_pos)
 
         # Final fallback based on region position
         if extremum is None:
-            if is_corner:
-                extremum = min(region_pixels, key=lambda p:
-                              abs(p[0] - template_pos[0]) + abs(p[1] - template_pos[1]))
-            elif region == 8:
-                extremum = min(region_pixels, key=lambda p: p[1])
-            elif region == 2:
-                extremum = max(region_pixels, key=lambda p: p[1])
-            elif template_pos[0] < mid_x:
-                extremum = min(region_pixels, key=lambda p: p[0])
-            else:
-                extremum = max(region_pixels, key=lambda p: p[0])
+            extremum = self._find_region_fallback_extremum(
+                region, region_pixels, template_pos, mid_x)
 
         return ResolvedWaypoint(position=(float(extremum[0]), float(extremum[1])), region=region)
+
+    def _angle_in_direction_range(self, angle: float, direction: str) -> bool:
+        """Check if an angle falls within the range for a direction.
+
+        Args:
+            angle: Segment angle in degrees.
+            direction: Direction ('down', 'up', 'left', 'right').
+
+        Returns:
+            True if the angle is in the direction's range.
+        """
+        if direction == 'left':
+            return angle > 135 or angle < -135
+        low, high = ANGLE_RANGES[direction]
+        return low <= angle <= high
+
+    def _find_directional_segments(self, direction: str) -> list:
+        """Find segments oriented in a specific direction with sufficient length.
+
+        Args:
+            direction: Desired direction ('down', 'up', 'left', 'right').
+
+        Returns:
+            List of segment dicts that match the direction criteria.
+        """
+        segments = self.analysis.segments
+        return [seg for seg in segments
+                if seg['length'] > DISTANCE_THRESHOLD_LARGE
+                and self._angle_in_direction_range(seg['angle'], direction)]
+
+    def _collect_junction_candidates_from_segments(self, good_segments: list,
+                                                    junction_pixels: set,
+                                                    region_pixels: list,
+                                                    region: int, bbox: tuple) -> set:
+        """Collect candidate junction pixels from segment start points.
+
+        Args:
+            good_segments: List of segments in the desired direction.
+            junction_pixels: Set of known junction pixel coordinates.
+            region_pixels: List of skeleton pixels in the region.
+            region: Numpad region (1-9).
+            bbox: Bounding box as (x_min, y_min, x_max, y_max).
+
+        Returns:
+            Set of candidate junction pixel coordinates.
+        """
+        candidates = set()
+        for seg in good_segments:
+            start = seg['start']
+            if self._point_in_region(start, region, bbox):
+                candidates.add(start)
+            # Check junction pixels near segment start
+            for jp in junction_pixels:
+                if (abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_SMALL
+                        and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_SMALL
+                        and (self._point_in_region(jp, region, bbox) or jp in region_pixels)):
+                    candidates.add(jp)
+        return candidates
+
+    def _find_junction_pixels_near_segments(self, good_segments: list,
+                                             junction_pixels: set,
+                                             region_pixels: list,
+                                             region: int, bbox: tuple) -> set:
+        """Find junction pixels in region close to good segment starts.
+
+        Args:
+            good_segments: List of segments in the desired direction.
+            junction_pixels: Set of known junction pixel coordinates.
+            region_pixels: List of skeleton pixels in the region.
+            region: Numpad region (1-9).
+            bbox: Bounding box as (x_min, y_min, x_max, y_max).
+
+        Returns:
+            Set of candidate junction pixel coordinates.
+        """
+        candidates = set()
+        for jp in junction_pixels:
+            if jp not in region_pixels and not self._point_in_region(jp, region, bbox):
+                continue
+            for seg in good_segments:
+                start = seg['start']
+                if (abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_MEDIUM
+                        and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_MEDIUM):
+                    candidates.add(jp)
+                    break
+        return candidates
 
     def _find_junction_for_direction(self, region_pixels: list, direction: str,
                                      template_pos: tuple[float, float],
@@ -807,61 +1009,33 @@ class MinimalStrokePipeline:
                 - 'right': -45 to 45 degrees
                 - 'left': >135 or <-135 degrees (wraps around)
         """
-        analysis = self.analysis
-        segments = analysis.segments
-        junction_pixels = set(analysis.info.get('junction_pixels', []))
-
-        def angle_in_range(angle, direction):
-            if direction == 'left':
-                return angle > 135 or angle < -135
-            low, high = ANGLE_RANGES[direction]
-            return low <= angle <= high
-
-        # Find segments that go in the desired direction and have sufficient length
-        # (to avoid tiny stubs)
-        good_segments = []
-        for seg in segments:
-            if seg['length'] > DISTANCE_THRESHOLD_LARGE and angle_in_range(seg['angle'], direction):
-                good_segments.append(seg)
-
+        good_segments = self._find_directional_segments(direction)
         if not good_segments:
             return None
 
-        # Find junction pixels that are start points of these good segments
-        candidate_junctions = set()
-        for seg in good_segments:
-            start = seg['start']
-            # Check if start is in region or close to region
-            if self._point_in_region(start, region, bbox):
-                candidate_junctions.add(start)
-            # Also check junction pixels near segment start
-            for jp in junction_pixels:
-                if (abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_SMALL and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_SMALL
-                        and (self._point_in_region(jp, region, bbox) or jp in region_pixels)):
-                    candidate_junctions.add(jp)
+        junction_pixels = set(self.analysis.info.get('junction_pixels', []))
 
-        if not candidate_junctions:
-            # Try junction pixels in region that are close to good segment starts
-            for jp in junction_pixels:
-                if jp in region_pixels or self._point_in_region(jp, region, bbox):
-                    for seg in good_segments:
-                        start = seg['start']
-                        if abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_MEDIUM and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_MEDIUM:
-                            candidate_junctions.add(jp)
-                            break
+        # First pass: segment start points and nearby junctions
+        candidates = self._collect_junction_candidates_from_segments(
+            good_segments, junction_pixels, region_pixels, region, bbox)
 
-        if not candidate_junctions:
+        # Second pass: junction pixels in region near segment starts
+        if not candidates:
+            candidates = self._find_junction_pixels_near_segments(
+                good_segments, junction_pixels, region_pixels, region, bbox)
+
+        if not candidates:
             return None
 
         # Pick the junction closest to template position
-        return min(candidate_junctions, key=lambda p:
+        return min(candidates, key=lambda p:
                    (p[0] - template_pos[0])**2 + (p[1] - template_pos[1])**2)
 
     def _infer_direction(self, current_region: int, next_region: int) -> str | None:
         """Infer the direction of travel based on numpad region transition.
 
-        Determines the cardinal direction (up, down, left, right) when moving
-        from one numpad region to another.
+        Delegates to shared utility infer_direction_from_regions().
+        See that function for full documentation.
 
         Args:
             current_region: Starting numpad region (1-9).
@@ -870,40 +1044,8 @@ class MinimalStrokePipeline:
         Returns:
             Direction string ('down', 'up', 'left', 'right') for clear
             vertical/horizontal moves, or None for diagonal moves.
-
-        Note:
-            Numpad layout reference:
-                7 | 8 | 9   (row 0)
-                4 | 5 | 6   (row 1)
-                1 | 2 | 3   (row 2)
-
-            Diagonal moves (e.g., 7→3, 1→9) return None because skeleton
-            path tracing uses directional bias to choose branches at
-            junctions. Cardinal directions map cleanly to segment angles
-            (down=90°, up=-90°, etc.), but diagonals are ambiguous - a
-            45° move could follow either a horizontal or vertical segment.
-            Returning None tells the tracer to use distance-based routing
-            instead of directional bias for these cases.
         """
-        # Get row and column for each region (0-indexed from top-left)
-        def region_to_row_col(r):
-            row = 2 - (r - 1) // 3  # 7,8,9 -> row 0; 4,5,6 -> row 1; 1,2,3 -> row 2
-            col = (r - 1) % 3       # 7,4,1 -> col 0; 8,5,2 -> col 1; 9,6,3 -> col 2
-            return row, col
-
-        r1, c1 = region_to_row_col(current_region)
-        r2, c2 = region_to_row_col(next_region)
-
-        dr = r2 - r1  # positive = down
-        dc = c2 - c1  # positive = right
-
-        # Only return direction for clear vertical/horizontal moves
-        if abs(dr) > abs(dc) and dr != 0:
-            return 'down' if dr > 0 else 'up'
-        elif abs(dc) > abs(dr) and dc != 0:
-            return 'right' if dc > 0 else 'left'
-
-        return None
+        return infer_direction_from_regions(current_region, next_region)
 
     def _resolve_vertex(self, region: int, template_pos: tuple[float, float],
                         top_bound: float, bot_bound: float,
@@ -934,6 +1076,10 @@ class MinimalStrokePipeline:
         """
         analysis = self.analysis
         bbox, skel_list, mask = analysis.bbox, analysis.skel_list, analysis.mask
+        if bbox is None or len(bbox) < 4:
+            # Fallback to nearest skeleton point if bbox is invalid
+            nearest = self.find_nearest_skeleton((mid_x, mid_y))
+            return ResolvedWaypoint(position=(float(nearest[0]), float(nearest[1])), region=region, is_vertex=True)
         rows, cols = analysis.glyph_rows, analysis.glyph_cols
         apex_extension = None
 
@@ -997,6 +1143,9 @@ class MinimalStrokePipeline:
             return None
 
         bbox = analysis.bbox
+        if bbox is None or len(bbox) < 4:
+            return None
+
         mid_x = (bbox[0] + bbox[2]) / 2
         mid_y = (bbox[1] + bbox[3]) / 2
         h = bbox[3] - bbox[1]

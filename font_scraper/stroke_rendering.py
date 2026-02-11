@@ -684,7 +684,7 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     mismatched = []
 
     try:
-        pil_font = ImageFont.truetype(font_path, 100)
+        pil_font = _cached_font(font_path, 100)
     except OSError:
         return []
 

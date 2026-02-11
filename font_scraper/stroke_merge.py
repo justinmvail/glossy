@@ -150,10 +150,64 @@ class MergeContext:
         strokes: List of stroke paths to merge (modified in place).
         junction_clusters: Original junction cluster sets from skeleton.
         assigned: Assigned junction cluster sets.
+        _cluster_maps_valid: Flag indicating if cached cluster maps are valid.
+        _cluster_endpoint_map: Cached cluster-to-endpoint mapping.
+        _endpoint_cache: Cached endpoint-to-cluster mapping.
+        _detailed_cluster_index: Cached detailed cluster index.
+        _cluster_index: Cached cluster index (cluster_id -> stroke indices).
     """
     strokes: list[list[tuple]]
     junction_clusters: list[set] = field(default_factory=list)
     assigned: list[set] = field(default_factory=list)
+    # Cached cluster maps - invalidated when strokes change
+    _cluster_maps_valid: bool = field(default=False, repr=False)
+    _cluster_endpoint_map: dict = field(default_factory=dict, repr=False)
+    _endpoint_cache: dict = field(default_factory=dict, repr=False)
+    _detailed_cluster_index: dict = field(default_factory=dict, repr=False)
+    _cluster_index: dict = field(default_factory=dict, repr=False)
+
+    def invalidate_caches(self) -> None:
+        """Mark all cached cluster maps as invalid.
+
+        Call this after any operation that modifies the strokes list.
+        """
+        self._cluster_maps_valid = False
+
+    def get_cluster_endpoint_map(self) -> dict:
+        """Get cached cluster-to-endpoint map, building if needed."""
+        self._ensure_caches_valid()
+        return self._cluster_endpoint_map
+
+    def get_endpoint_cache(self) -> dict:
+        """Get cached endpoint-to-cluster map, building if needed."""
+        self._ensure_caches_valid()
+        return self._endpoint_cache
+
+    def get_detailed_cluster_index(self) -> dict:
+        """Get cached detailed cluster index, building if needed."""
+        self._ensure_caches_valid()
+        return self._detailed_cluster_index
+
+    def get_cluster_index(self) -> dict:
+        """Get cached cluster index, building if needed."""
+        self._ensure_caches_valid()
+        return self._cluster_index
+
+    def _ensure_caches_valid(self) -> None:
+        """Rebuild all caches if they are invalid."""
+        if self._cluster_maps_valid:
+            return
+
+        # Build all caches in a single pass
+        self._endpoint_cache = _build_endpoint_cache(self.strokes, self.assigned)
+        self._cluster_endpoint_map = _build_cluster_endpoint_map(
+            self.strokes, self.assigned, self._endpoint_cache
+        )
+        self._detailed_cluster_index = _build_detailed_cluster_index(
+            self.strokes, self.assigned
+        )
+        self._cluster_index = _build_cluster_index(self.strokes, self.assigned)
+        self._cluster_maps_valid = True
 
 
 class MergeStrategy(ABC):
@@ -262,23 +316,46 @@ class StubAbsorptionStrategy(MergeStrategy):
         self.absorb_proximity = absorb_proximity
 
     def merge(self, ctx: MergeContext) -> list[list[tuple]]:
-        """Apply stub absorption."""
+        """Apply stub absorption.
+
+        Uses cached cluster maps from context when available to avoid
+        rebuilding maps multiple times across sub-operations.
+        """
+        # Get initial cached data from context (built once, shared across sub-ops)
+        detailed_index = ctx.get_detailed_cluster_index()
+        endpoint_cache = ctx.get_endpoint_cache()
+
         if self.absorb_convergence:
             ctx.strokes = absorb_convergence_stubs(
                 ctx.strokes, ctx.junction_clusters, ctx.assigned,
-                conv_threshold=self.conv_threshold
+                conv_threshold=self.conv_threshold,
+                detailed_index=detailed_index,
+                endpoint_cache=endpoint_cache,
             )
+            # Caches may be stale after absorption, let functions rebuild as needed
+            detailed_index = None
+            endpoint_cache = None
+            ctx.invalidate_caches()
+
         if self.absorb_junction:
             ctx.strokes = absorb_junction_stubs(
                 ctx.strokes, ctx.assigned,
-                stub_threshold=self.stub_threshold
+                stub_threshold=self.stub_threshold,
+                detailed_index=detailed_index,
+                endpoint_cache=endpoint_cache,
             )
+            detailed_index = None
+            endpoint_cache = None
+            ctx.invalidate_caches()
+
         if self.absorb_proximity:
             ctx.strokes = absorb_proximity_stubs(
                 ctx.strokes,
                 stub_threshold=self.stub_threshold,
                 prox_threshold=self.prox_threshold
             )
+            ctx.invalidate_caches()
+
         return ctx.strokes
 
 
@@ -297,10 +374,15 @@ class OrphanRemovalStrategy(MergeStrategy):
         self.stub_threshold = stub_threshold
 
     def merge(self, ctx: MergeContext) -> list[list[tuple]]:
-        """Apply orphan removal."""
+        """Apply orphan removal.
+
+        Uses cached cluster maps from context when available.
+        """
         return remove_orphan_stubs(
             ctx.strokes, ctx.assigned,
-            stub_threshold=self.stub_threshold
+            stub_threshold=self.stub_threshold,
+            cluster_index=ctx.get_cluster_index(),
+            endpoint_cache=ctx.get_endpoint_cache(),
         )
 
 
@@ -421,6 +503,8 @@ class MergePipeline:
             if before != after:
                 logger.debug("%s: %d -> %d strokes",
                             strategy.__class__.__name__, before, after)
+                # Invalidate caches when stroke count changes
+                ctx.invalidate_caches()
 
         logger.debug("MergePipeline complete: %d -> %d strokes",
                     initial_count, len(ctx.strokes))

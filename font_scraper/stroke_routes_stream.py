@@ -47,7 +47,6 @@ See Also:
     - stroke_pipeline_stream: Streaming pipeline for minimal strokes
 """
 
-import json
 import logging
 import time
 from collections.abc import Generator
@@ -78,7 +77,14 @@ from stroke_affine import (
     AFFINE_STREAM_SHEAR_BOUNDS,
 )
 from stroke_core import min_strokes, skel_strokes
-from stroke_flask import app, get_font, get_font_or_error
+from stroke_flask import (
+    app,
+    error_response,
+    format_sse_event,
+    get_char_param_or_error,
+    get_font,
+    get_font_or_error,
+)
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
@@ -87,20 +93,9 @@ from stroke_shapes import adaptive_radius, make_point_cloud
 logger = logging.getLogger(__name__)
 
 
-def _sse_event(data: dict) -> str:
-    """Format a dictionary as a Server-Sent Events data line.
-
-    Args:
-        data: Dictionary to serialize as JSON event data.
-
-    Returns:
-        str: SSE-formatted string with 'data: ' prefix and double newline.
-
-    Example:
-        >>> _sse_event({'phase': 'Init', 'score': 0.5})
-        'data: {"phase": "Init", "score": 0.5}\\n\\n'
-    """
-    return f'data: {json.dumps(data)}\n\n'
+# Use the shared format_sse_event from stroke_flask
+# Alias for backward compatibility within this module
+_sse_event = format_sse_event
 
 
 def _create_sse_response(generator: Generator) -> Response:
@@ -123,15 +118,15 @@ def _create_sse_response(generator: Generator) -> Response:
 def _validate_sse_char_param() -> tuple[str | None, Response | None]:
     """Validate the ?c= query parameter for SSE endpoints.
 
+    Note:
+        This function is kept for backward compatibility within this module.
+        For new code, use get_char_param_or_error(response_format='sse') instead.
+
     Returns:
         Tuple of (char, error_response). If char is None, error_response
         contains the SSE error to return.
     """
-    c = request.args.get('c')
-    if not c:
-        return None, Response(_sse_event({'error': 'Missing ?c= parameter'}),
-                              mimetype='text/event-stream')
-    return c, None
+    return get_char_param_or_error(response_format='sse')
 
 
 def _prepare_optimization(mask: np.ndarray, strokes_raw: list) -> tuple | None:

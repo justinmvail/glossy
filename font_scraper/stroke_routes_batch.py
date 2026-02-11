@@ -51,7 +51,10 @@ from stroke_flask import (
     DIFFVG_TIMEOUT,
     STROKE_COLORS,
     app,
+    data_response,
     ensure_test_tables,
+    error_response,
+    get_char_param_or_error,
     get_db,
     get_db_context,
     get_font,
@@ -59,6 +62,7 @@ from stroke_flask import (
     get_font_or_error,
     resolve_font_path,
     send_pil_image_as_png,
+    success_response,
     test_run_repository,
 )
 from stroke_rendering import render_glyph_mask
@@ -152,7 +156,7 @@ def api_run_tests(fid: int) -> Response | tuple[str, int]:
         fid, datetime.now().isoformat(), len(res), len(ok),
         avg, avg_cov, avg_over, avg_strokes, avg_topo, json.dumps(res)
     )
-    return jsonify(ok=True, chars_tested=len(res), chars_ok=len(ok), avg_score=round(avg, 3))
+    return success_response(chars_tested=len(res), chars_ok=len(ok), avg_score=round(avg, 3))
 
 
 @app.route('/api/test-history/<int:fid>')
@@ -397,7 +401,12 @@ def api_compare_runs() -> Response:
     font_id = run1['font_id'] if run1 else (run2['font_id'] if run2 else fid)
     run1_date = run1['run_date'] if run1 else None
     run2_date = run2['run_date'] if run2 else None
-    return jsonify(ok=True, run1_id=r1, run2_id=r2, font_id=font_id, old_avg=old_avg, new_avg=new_avg, run1_date=run1_date, run2_date=run2_date, comparisons=sorted(cmp, key=lambda x: x['delta'] or 0))
+    return success_response(
+        run1_id=r1, run2_id=r2, font_id=font_id,
+        old_avg=old_avg, new_avg=new_avg,
+        run1_date=run1_date, run2_date=run2_date,
+        comparisons=sorted(cmp, key=lambda x: x['delta'] or 0)
+    )
 
 
 @app.route('/compare/<int:fid>')
@@ -503,11 +512,12 @@ def api_center_borders(fid: int) -> Response | tuple[str, int]:
     Query Parameters:
         c (str, required): Character to render for border detection.
     """
-    c, data = request.args.get('c'), request.get_json()
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
+    c, err = get_char_param_or_error()
+    if err:
+        return err
+    data = request.get_json()
     if not data or 'strokes' not in data:
-        return jsonify(error="Missing strokes data"), 400
+        return error_response("Missing strokes data", 400)
 
     _f, mask, err = get_font_and_mask(fid, c)
     if err:
@@ -582,9 +592,9 @@ def api_detect_markers(fid: int) -> Response | tuple[str, int]:
             {"error": "Could not render glyph"}
     """
     _, skel_markers, _, _ = _get_stroke_funcs()
-    c = request.args.get('c')
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
+    c, err = get_char_param_or_error()
+    if err:
+        return err
     _f, m, err = get_font_and_mask(fid, c)
     if err:
         return err
@@ -620,7 +630,7 @@ def api_clear_shape_cache(fid: int) -> Response | tuple[str, int]:
     from stroke_flask import font_repository
     c = request.args.get('c')
     font_repository.clear_shape_cache(fid, c)
-    return jsonify(ok=True)
+    return success_response()
 
 
 @app.route('/api/skeleton/<int:fid>', methods=['POST'])
@@ -673,9 +683,9 @@ def api_skeleton(fid: int) -> Response | tuple[str, int]:
             {"error": "No skeleton found"}
     """
     skel_strokes, _, _, auto_fit = _get_stroke_funcs()
-    c = request.args.get('c')
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
+    c, err = get_char_param_or_error()
+    if err:
+        return err
     f, err = get_font_or_error(fid)
     if err:
         return err
@@ -749,7 +759,7 @@ def api_minimal_strokes_batch(fid: int) -> Response | tuple[str, int]:
             continue
         font_repository.save_character_strokes(fid, c, json.dumps(st), template_variant=var)
         gen += 1
-    return jsonify(ok=True, generated=gen, skipped=skp, failed=fail)
+    return success_response(generated=gen, skipped=skp, failed=fail)
 
 
 @app.route('/api/skeleton-batch/<int:fid>', methods=['POST'])
@@ -812,7 +822,7 @@ def api_skeleton_batch(fid: int) -> Response | tuple[str, int]:
             continue
         font_repository.save_character_strokes(fid, c, json.dumps(st), point_count=sum(len(s) for s in st))
         res[c] = f'{len(st)} strokes'
-    return jsonify(ok=True, generated=sum(1 for v in res.values() if 'strokes' in v), results=res)
+    return success_response(generated=sum(1 for v in res.values() if 'strokes' in v), results=res)
 
 
 @app.route('/api/template-variants')
@@ -856,9 +866,9 @@ def api_template_variants() -> Response:
 
             {"error": "Missing ?c= parameter"}
     """
-    c = request.args.get('c')
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
+    c, err = get_char_param_or_error()
+    if err:
+        return err
     v = NUMPAD_TEMPLATE_VARIANTS.get(c, {})
     return jsonify(variants={n: {'stroke_count': len(t), 'template': [[str(wp) for wp in s] for s in t]} for n, t in v.items()}, char=c)
 
@@ -903,12 +913,13 @@ def api_minimal_strokes(fid: int) -> Response | tuple[str, int]:
             {"error": "Font not found"}
     """
     _, _, min_strokes, _ = _get_stroke_funcs()
-    c, var = request.args.get('c'), request.args.get('variant')
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
+    c, err = get_char_param_or_error()
+    if err:
+        return err
+    var = request.args.get('variant')
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
     fp = resolve_font_path(f['file_path'])
     if var:
         vs = NUMPAD_TEMPLATE_VARIANTS.get(c, {})
@@ -977,15 +988,15 @@ def api_diffvg(fid: int) -> Response | tuple[str, int]:
             {"error": "DiffVG Docker not available"}
     """
     _, _, min_strokes, _ = _get_stroke_funcs()
-    c = request.args.get('c')
-    if not c:
-        return jsonify(error="Missing ?c= parameter"), 400
+    c, err = get_char_param_or_error()
+    if err:
+        return err
     diffvg = get_diffvg()
     if diffvg is None:
-        return jsonify(error="DiffVG Docker not available"), 503
-    f = _font(fid)
-    if not f:
-        return jsonify(error="Font not found"), 404
+        return error_response("DiffVG Docker not available", 503)
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
     fp, data = resolve_font_path(f['file_path']), request.get_json() or {}
     st = [s for s in data.get('strokes', []) if len(s) >= 2]
     if st:

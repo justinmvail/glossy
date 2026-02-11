@@ -40,11 +40,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
 
-logger = logging.getLogger(__name__)
+from filter_config import DB_PATH, FONT_SIZE, SAMPLE_TEXT
 
-DB_PATH = 'fonts.db'
-SAMPLE_TEXT = "Hello World!"
-FONT_SIZE = 48
+logger = logging.getLogger(__name__)
 
 # Expected components: H,e,l,l,o, W,o,r,l,d,! = 11 base
 # Some letters have 2 parts (i,j,!,?) so allow some variance

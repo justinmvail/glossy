@@ -56,7 +56,7 @@ from pathlib import Path
 
 import requests
 
-from font_source import FontMetadata, FontSource, ScraperConfig
+from font_source import FontMetadata, FontSource, ScraperConfig, create_scrape_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,7 @@ class GoogleFontsScraper(FontSource):
         """Download a font family from Google Fonts.
 
         Fetches the font URL using the CSS API and downloads the font file
-        to the output directory.
+        to the output directory. Tracks failures in self.failed.
 
         Args:
             font: FontMetadata object or font family name string.
@@ -240,36 +240,36 @@ class GoogleFontsScraper(FontSource):
         if family in self.downloaded:
             return True
 
-        try:
-            url = self.get_font_url(family)
-            if not url:
-                logger.warning("Could not get download URL for %s", family)
-                return False
-
-            resp = self.get_with_retry(url, timeout=self.DOWNLOAD_TIMEOUT)
-            resp.raise_for_status()
-
-            # Determine extension from URL
-            if 'woff2' in url:
-                ext = '.woff2'
-            elif 'woff' in url:
-                ext = '.woff'
-            elif 'ttf' in url:
-                ext = '.ttf'
-            else:
-                ext = '.ttf'  # Default
-
-            # Save font
-            safe_name = self.safe_filename(family.replace(' ', '_'))
-            out_path = self.output_dir / f"google_{safe_name}{ext}"
-            out_path.write_bytes(resp.content)
-
-            logger.debug("Saved: %s", out_path.name)
-            return True
-
-        except Exception as e:
-            logger.error("Error downloading %s: %s", family, e)
+        url = self.get_font_url(family)
+        if not url:
+            logger.warning("Could not get download URL for %s", family)
+            self.failed.append(family)
             return False
+
+        # Use base class download method
+        content = self.download_font_file(url, family, self.DOWNLOAD_TIMEOUT)
+        if content is None:
+            self.failed.append(family)
+            return False
+
+        # Determine extension from URL
+        if 'woff2' in url:
+            ext = '.woff2'
+        elif 'woff' in url:
+            ext = '.woff'
+        elif 'ttf' in url:
+            ext = '.ttf'
+        else:
+            ext = '.ttf'  # Default
+
+        # Save font
+        safe_name = self.safe_filename(family.replace(' ', '_'))
+        out_path = self.output_dir / f"google_{safe_name}{ext}"
+        out_path.write_bytes(content)
+
+        logger.debug("Saved: %s", out_path.name)
+        self.downloaded.add(family)
+        return True
 
     def scrape_and_download(
         self,
@@ -327,23 +327,20 @@ class GoogleFontsScraper(FontSource):
         # Download
         logger.info("Downloading %d fonts...", len(fonts))
 
-        for i, family in enumerate(fonts):
-            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts), family)
-            if self.download_font(family):
-                self.downloaded.add(family)
-            else:
-                self.failed.append(family)
+        for i, family in enumerate(fonts, 1):
+            self.log_progress(i, len(fonts), family)
+            # download_font now handles adding to downloaded/failed internally
+            self.download_font(family)
             time.sleep(self.rate_limit)
 
-        # Save metadata
-        metadata = {
-            'source': 'google_fonts',
-            'fonts_requested': len(fonts),
-            'fonts_downloaded': len(self.downloaded),
-            'fonts_failed': len(self.failed),
-            'downloaded': list(self.downloaded),
-            'failed': self.failed
-        }
+        # Build standardized metadata
+        metadata = create_scrape_metadata(
+            source=self.SOURCE_NAME,
+            fonts_found=len(fonts),
+            fonts_downloaded=len(self.downloaded),
+            fonts_failed=len(self.failed),
+            output_dir=str(self.output_dir),
+        )
 
         meta_path = self.output_dir / 'google_fonts_metadata.json'
         with open(meta_path, 'w') as f:

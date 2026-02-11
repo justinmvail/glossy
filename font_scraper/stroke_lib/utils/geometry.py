@@ -253,6 +253,157 @@ def constrain_to_mask(points: list[tuple[float, float]], mask: np.ndarray) -> li
     return result
 
 
+# ---------------------------------------------------------------------------
+# Direction and distance utilities for path tracing
+# ---------------------------------------------------------------------------
+
+def point_distance_squared(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Compute squared Euclidean distance between two points.
+
+    Using squared distance avoids the sqrt computation, which is useful
+    when comparing distances (the ordering is preserved).
+
+    Args:
+        p1: First point as (x, y).
+        p2: Second point as (x, y).
+
+    Returns:
+        Squared distance between the points.
+    """
+    dx = p1[0] - p2[0]
+    dy = p1[1] - p2[1]
+    return dx * dx + dy * dy
+
+
+def point_distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Compute Euclidean distance between two points.
+
+    Args:
+        p1: First point as (x, y).
+        p2: Second point as (x, y).
+
+    Returns:
+        Distance between the points.
+    """
+    return point_distance_squared(p1, p2) ** 0.5
+
+
+def compute_direction_vector(p1: tuple[float, float], p2: tuple[float, float],
+                              normalize: bool = True) -> tuple[float, float]:
+    """Compute direction vector from p1 to p2.
+
+    Args:
+        p1: Start point as (x, y).
+        p2: End point as (x, y).
+        normalize: If True, return unit vector. If False, return raw delta.
+
+    Returns:
+        Direction vector (dx, dy). If normalize=True and length is near zero,
+        returns (0, 0).
+    """
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    if not normalize:
+        return (dx, dy)
+    length = (dx * dx + dy * dy) ** 0.5
+    if length < 0.01:
+        return (0.0, 0.0)
+    return (dx / length, dy / length)
+
+
+def compute_dot_product(d1: tuple[float, float], d2: tuple[float, float]) -> float:
+    """Compute dot product of two direction vectors.
+
+    Args:
+        d1: First direction vector (dx, dy).
+        d2: Second direction vector (dx, dy).
+
+    Returns:
+        Dot product value. For unit vectors, this is cos(angle).
+    """
+    return d1[0] * d2[0] + d1[1] * d2[1]
+
+
+def pick_straightest_neighbor(current: tuple[int, int], path: list,
+                               candidates: list, n_lookback: int = 4) -> tuple:
+    """Pick the candidate that continues most straight from current direction.
+
+    This is a shared utility for path tracing algorithms that need to choose
+    the straightest continuation when multiple neighbors are available.
+
+    Args:
+        current: Current position (x, y).
+        path: Path traced so far (list of (x, y) tuples).
+        candidates: List of (neighbor, edge) tuples to choose from.
+        n_lookback: Number of path points to look back for direction.
+
+    Returns:
+        Tuple of (next_pt, next_edge) for the straightest continuation.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    n_look = min(n_lookback, len(path))
+    dir_in = compute_direction_vector(path[-n_look], current, normalize=True)
+
+    best_dot = -2.0
+    next_pt, next_edge = candidates[0]
+    for n, e in candidates:
+        dir_out = compute_direction_vector(current, n, normalize=True)
+        dot = compute_dot_product(dir_in, dir_out)
+        if dot > best_dot:
+            best_dot = dot
+            next_pt, next_edge = n, e
+
+    return next_pt, next_edge
+
+
+def infer_direction_from_regions(current_region: int, next_region: int) -> str | None:
+    """Infer the direction of travel based on numpad region transition.
+
+    Determines the cardinal direction (up, down, left, right) when moving
+    from one numpad region to another.
+
+    Args:
+        current_region: Starting numpad region (1-9).
+        next_region: Destination numpad region (1-9).
+
+    Returns:
+        Direction string ('down', 'up', 'left', 'right') for clear
+        vertical/horizontal moves, or None for diagonal moves.
+
+    Note:
+        Numpad layout reference:
+            7 | 8 | 9   (row 0)
+            4 | 5 | 6   (row 1)
+            1 | 2 | 3   (row 2)
+
+        Diagonal moves (e.g., 7->3, 1->9) return None because skeleton
+        path tracing uses directional bias to choose branches at
+        junctions. Cardinal directions map cleanly to segment angles
+        (down=90 deg, up=-90 deg, etc.), but diagonals are ambiguous.
+    """
+    # Get row and column for each region (0-indexed from top-left)
+    def region_to_row_col(r):
+        row = 2 - (r - 1) // 3  # 7,8,9 -> row 0; 4,5,6 -> row 1; 1,2,3 -> row 2
+        col = (r - 1) % 3       # 7,4,1 -> col 0; 8,5,2 -> col 1; 9,6,3 -> col 2
+        return row, col
+
+    r1, c1 = region_to_row_col(current_region)
+    r2, c2 = region_to_row_col(next_region)
+
+    dr = r2 - r1  # positive = down
+    dc = c2 - c1  # positive = right
+
+    # Only return direction for clear vertical/horizontal moves
+    if abs(dr) > abs(dc) and dr != 0:
+        return 'down' if dr > 0 else 'up'
+    elif abs(dc) > abs(dr) and dc != 0:
+        return 'right' if dc > 0 else 'left'
+
+    return None
+
+
 def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
     """Generate points along a straight line using Bresenham's algorithm.
 

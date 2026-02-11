@@ -584,6 +584,64 @@ def run_per_stroke_refinement(best_strokes: list[np.ndarray], best_score: float,
         return best_strokes, best_score
 
 
+def _load_template_and_mask(
+    font_path: str,
+    char: str,
+    canvas_size: int,
+    template_to_strokes_fn,
+    render_glyph_mask_fn,
+    resolve_font_path_fn,
+) -> tuple | None:
+    """Load template strokes and glyph mask for optimization.
+
+    Args:
+        font_path: Path to the target font file.
+        char: The character to optimize strokes for.
+        canvas_size: Size of the square canvas in pixels.
+        template_to_strokes_fn: Callable to extract template strokes.
+        render_glyph_mask_fn: Callable to render the glyph mask.
+        resolve_font_path_fn: Callable to resolve font path.
+
+    Returns:
+        Tuple of (strokes_raw, resolved_path, mask) or None if loading fails.
+    """
+    strokes_raw = template_to_strokes_fn(font_path, char, canvas_size)
+    if not strokes_raw or len(strokes_raw) == 0:
+        return None
+
+    resolved_path = resolve_font_path_fn(font_path)
+    mask = render_glyph_mask_fn(resolved_path, char, canvas_size)
+    if mask is None:
+        return None
+
+    return strokes_raw, resolved_path, mask
+
+
+def _format_optimization_result(
+    final_strokes: list,
+    final_score: float,
+    mask,
+    glyph_bbox: tuple,
+) -> tuple:
+    """Format optimization results to the expected output format.
+
+    Args:
+        final_strokes: List of Nx2 numpy arrays with optimized stroke points.
+        final_score: Final objective function value (negative = better).
+        mask: Binary glyph mask used for optimization.
+        glyph_bbox: Bounding box tuple (x_min, y_min, x_max, y_max).
+
+    Returns:
+        Tuple of (strokes, score, mask, glyph_bbox) with strokes converted
+        to list format and coordinates rounded to 1 decimal place.
+    """
+    result_strokes = [
+        [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in s]
+        for s in final_strokes
+    ]
+    return result_strokes, float(-final_score), mask, glyph_bbox
+
+
 def optimize_affine(font_path: str, char: str, canvas_size: int,
                     template_to_strokes_fn, render_glyph_mask_fn,
                     resolve_font_path_fn, smooth_stroke_fn,
@@ -642,30 +700,32 @@ def optimize_affine(font_path: str, char: str, canvas_size: int,
         ...     strokes, score, mask, bbox = result
         ...     print(f"Optimized {len(strokes)} strokes with score {score:.2f}")
     """
-    strokes_raw = template_to_strokes_fn(font_path, char, canvas_size)
-    if not strokes_raw or len(strokes_raw) == 0:
+    # Load inputs
+    loaded = _load_template_and_mask(
+        font_path, char, canvas_size,
+        template_to_strokes_fn, render_glyph_mask_fn, resolve_font_path_fn
+    )
+    if loaded is None:
         return None
-
-    font_path = resolve_font_path_fn(font_path)
-    mask = render_glyph_mask_fn(font_path, char, canvas_size)
-    if mask is None:
-        return None
+    strokes_raw, resolved_path, mask = loaded
 
     # Setup optimization data
-    setup = prepare_affine_optimization(font_path, char, canvas_size, strokes_raw, mask,
-                                        smooth_stroke_fn, constrain_to_mask_fn)
+    setup = prepare_affine_optimization(
+        resolved_path, char, canvas_size, strokes_raw, mask,
+        smooth_stroke_fn, constrain_to_mask_fn
+    )
     if setup is None:
         return None
     stroke_arrays, centroid, glyph_bbox, score_args = setup
 
     # Stage 1: Global affine
-    best_strokes, _best_params, best_score = run_global_affine(stroke_arrays, centroid, score_args)
+    best_strokes, _best_params, best_score = run_global_affine(
+        stroke_arrays, centroid, score_args
+    )
 
     # Stage 2: Per-stroke refinement
-    final_strokes, final_score = run_per_stroke_refinement(best_strokes, best_score, score_args)
+    final_strokes, final_score = run_per_stroke_refinement(
+        best_strokes, best_score, score_args
+    )
 
-    # Convert back to list format
-    result_strokes = [[[round(float(p[0]), 1), round(float(p[1]), 1)]
-                       for p in s] for s in final_strokes]
-
-    return result_strokes, float(-final_score), mask, glyph_bbox
+    return _format_optimization_result(final_strokes, final_score, mask, glyph_bbox)

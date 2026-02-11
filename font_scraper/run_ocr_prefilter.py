@@ -46,12 +46,13 @@ from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
 from db_schema import FontDB
+from filter_config import FONT_SIZE, OCR_SAMPLE_TEXT
 
 logger = logging.getLogger(__name__)
 
 # OCR prefilter constants
-SAMPLE_TEXT = "Hello World 123"
-RENDER_FONT_SIZE = 48  # Font size for OCR sample rendering
+SAMPLE_TEXT = OCR_SAMPLE_TEXT  # Use shared config for consistency
+RENDER_FONT_SIZE = FONT_SIZE  # Font size for OCR sample rendering
 RENDER_PADDING = 20  # Padding around rendered text
 
 

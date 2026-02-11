@@ -30,17 +30,13 @@ import sqlite3
 
 from PIL import Image, ImageDraw, ImageFont
 
-# Configuration constants
-DB_PATH = 'fonts.db'
-"""str: Path to the SQLite database file."""
+from filter_config import DB_PATH, SAMPLE_TEXT
 
+# Configuration constants - inherit from shared config, override as needed
 OUTPUT_PATH = 'all_passing_fonts.png'
 """str: Path for the output visualization image."""
 
-SAMPLE_TEXT = "Hello World!"
-"""str: Sample text to render for each font."""
-
-FONT_SIZE = 36
+FONT_SIZE = 36  # Smaller than filter_config.FONT_SIZE for compact display
 """int: Point size for rendering sample text."""
 
 ROW_HEIGHT = 60

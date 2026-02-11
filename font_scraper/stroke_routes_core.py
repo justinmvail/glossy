@@ -75,12 +75,16 @@ from stroke_flask import (
     CHARS,
     STROKE_COLORS,
     app,
+    data_response,
+    error_response,
     font_repository,
+    get_char_param_or_error,
     get_font,
     get_font_and_mask,
     get_font_or_error,
     resolve_font_path,
     send_pil_image_as_png,
+    success_response,
     validate_char_param,
 )
 from stroke_rendering import (
@@ -398,7 +402,7 @@ def api_save_char(fid: int) -> Response | tuple[str, int]:
     )
     logger.info("Saved char '%s' for font %d: %d strokes, %d points",
                 c, fid, len(st), point_count)
-    return jsonify(ok=True)
+    return success_response()
 
 
 @app.route('/api/render/<int:fid>')
@@ -434,14 +438,14 @@ def api_render(fid: int) -> Response | tuple[str, int]:
 
             <img src="/api/render/42?c=A" alt="Letter A">
     """
-    c = request.args.get('c')
-    if not c:
-        return "Missing ?c= parameter", 400
-    f = get_font(fid)
-    if not f:
-        return "Font not found", 404
+    c, err = get_char_param_or_error(response_format='text')
+    if err:
+        return err
+    f, err = get_font_or_error(fid, response_format='text')
+    if err:
+        return err
     img = render_char_image(f['file_path'], c)
-    return send_file(io.BytesIO(img), mimetype='image/png') if img else ("Could not render", 500)
+    return send_file(io.BytesIO(img), mimetype='image/png') if img else error_response("Could not render", 500, 'text')
 
 
 @app.route('/api/thin-preview/<int:fid>')
@@ -485,18 +489,18 @@ def api_thin_preview(fid: int) -> Response | tuple[str, int]:
 
             GET /api/thin-preview/42?c=A&thin=10
     """
-    c = request.args.get('c')
-    if not c:
-        return "Missing ?c= parameter", 400
-    f = get_font(fid)
-    if not f:
-        return "Font not found", 404
+    c, err = get_char_param_or_error(response_format='text')
+    if err:
+        return err
+    f, err = get_font_or_error(fid, response_format='text')
+    if err:
+        return err
     m = render_glyph_mask(f['file_path'], c)
     if m is None:
-        return "Could not render glyph", 500
+        return error_response("Could not render glyph", 500, 'text')
     thin_iter = request.args.get('thin', 5, type=int)
     if thin_iter is None or thin_iter < 0 or thin_iter > 100:
-        return "Invalid thin parameter", 400
+        return error_response("Invalid thin parameter", 400, 'text')
     th = thin(m, max_num_iter=thin_iter)
     img = np.full((224, 224, 3), 255, dtype=np.uint8)
     img[m], img[th] = [200, 200, 200], [0, 0, 0]
@@ -624,7 +628,7 @@ def api_reject_connected() -> Response:
             continue
     # Batch reject all fonts in a single transaction to avoid N+1 queries
     rej = font_repository.reject_fonts_batch(to_reject)
-    return jsonify(ok=True, checked=chk, rejected=rej)
+    return success_response(checked=chk, rejected=rej)
 
 
 @app.route('/api/font-sample/<int:fid>')
@@ -735,16 +739,16 @@ def api_preview(fid: int) -> Response | tuple[str, int]:
             <img src="/api/preview/42?c=A" alt="A preview">
             <img src="/api/preview/42?c=B" alt="B preview">
     """
-    c = request.args.get('c')
-    if not c:
-        return "Missing ?c= parameter", 400
-    f = font_repository.get_font_by_id(fid)
-    if not f:
-        return "Font not found", 404
+    c, err = get_char_param_or_error(response_format='text')
+    if err:
+        return err
+    f, err = get_font_or_error(fid, response_format='text')
+    if err:
+        return err
     row = font_repository.get_character_strokes(fid, c)
     img = render_char_image(f['file_path'], c)
     if not img:
-        return "Could not render", 500
+        return error_response("Could not render", 500, 'text')
     arr = np.array(Image.open(io.BytesIO(img)).convert('L'))
     rgba = np.full((*arr.shape, 4), 255, dtype=np.uint8)
     gm = arr < 200
@@ -1051,11 +1055,16 @@ def api_reject_font(fid: int) -> Response | tuple[str, int]:
 
             {"ok": true, "status": "rejected"}
     """
+    # Note: There's a theoretical TOCTOU race condition between the existence check
+    # and the reject operation. This is benign because:
+    # 1. reject_font() handles missing fonts gracefully (returns False)
+    # 2. Database foreign key constraints prevent orphaned rejection records
+    # 3. Single-user web UI makes concurrent font deletion extremely unlikely
     if not font_repository.get_font_by_id(fid):
-        return jsonify(error="Font not found"), 404
+        return error_response("Font not found", 404)
     if font_repository.reject_font(fid, 'Rejected in stroke editor'):
-        return jsonify(ok=True, status='rejected')
-    return jsonify(ok=True, status='already_rejected')
+        return success_response(status='rejected')
+    return success_response(status='already_rejected')
 
 
 @app.route('/api/unreject/<int:fid>', methods=['POST'])
@@ -1088,7 +1097,7 @@ def api_unreject_font(fid: int) -> Response | tuple[str, int]:
             {"ok": true, "status": "unrejected"}
     """
     font_repository.unreject_font(fid)
-    return jsonify(ok=True, status='unrejected')
+    return success_response(status='unrejected')
 
 
 @app.route('/api/unreject-all', methods=['POST'])
@@ -1126,4 +1135,4 @@ def api_unreject_all() -> Response:
             {"ok": true, "restored": 23}
     """
     restored = font_repository.unreject_all_fonts()
-    return jsonify(ok=True, restored=restored)
+    return success_response(restored=restored)

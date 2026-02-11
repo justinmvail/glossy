@@ -47,6 +47,9 @@ import numpy as np
 from ..domain.geometry import Point, Stroke
 from ..domain.skeleton import Marker, MarkerType, SkeletonInfo
 
+# Import shared utilities for path tracing and geometry from sibling module
+from ..utils.geometry import pick_straightest_neighbor, point_distance
+
 # Distance threshold for suppressing termination markers near vertices
 NEAR_VERTEX_DISTANCE = 5
 
@@ -232,9 +235,7 @@ class SkeletonAnalyzer:
 
             too_close = False
             for v in vertices:
-                dx = v[0] - x
-                dy = v[1] - y
-                if (dx * dx + dy * dy) ** 0.5 < NEAR_VERTEX_DISTANCE:
+                if point_distance((v[0], v[1]), (x, y)) < NEAR_VERTEX_DISTANCE:
                     too_close = True
                     break
 
@@ -579,56 +580,14 @@ class SkeletonAnalyzer:
             if not candidates:
                 break
 
-            if len(candidates) == 1:
-                next_pt, next_edge = candidates[0]
-            else:
-                # Pick straightest path
-                next_pt, next_edge = SkeletonAnalyzer._pick_straightest_candidate(
-                    current, path, candidates
-                )
+            # Use shared utility for straightest path selection
+            next_pt, next_edge = pick_straightest_neighbor(current, path, candidates)
 
             visited_edges.add(next_edge)
             path.append(next_pt)
             prev, current = current, next_pt
 
         return path
-
-    @staticmethod
-    def _pick_straightest_candidate(current: tuple[int, int], path: list,
-                                     candidates: list) -> tuple:
-        """Pick the candidate that continues most straight from current direction.
-
-        Args:
-            current: Current position.
-            path: Path so far (used to compute incoming direction).
-            candidates: List of (neighbor, edge) tuples.
-
-        Returns:
-            Tuple of (next_pt, next_edge) for the straightest continuation.
-        """
-        n_look = min(4, len(path))
-        dx_in = current[0] - path[-n_look][0]
-        dy_in = current[1] - path[-n_look][1]
-        len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
-        if len_in > 0.01:
-            dx_in /= len_in
-            dy_in /= len_in
-
-        best_dot = -2
-        next_pt, next_edge = candidates[0]
-        for n, e in candidates:
-            dx_out = n[0] - current[0]
-            dy_out = n[1] - current[1]
-            len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
-            if len_out > 0.01:
-                dot = (dx_in * dx_out + dy_in * dy_out) / len_out
-            else:
-                dot = 0
-            if dot > best_dot:
-                best_dot = dot
-                next_pt, next_edge = n, e
-
-        return next_pt, next_edge
 
     def _trace_all_strokes(self, info: SkeletonInfo) -> list[list[tuple[int, int]]]:
         """Trace all stroke paths from the skeleton.

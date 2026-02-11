@@ -13,6 +13,18 @@ Key functionality:
     - Building guide paths from waypoint sequences
     - Finding skeleton features for waypoint targeting
 
+Data Structure Conventions:
+    This module uses tuples for coordinate pairs:
+    - Point: tuple[float, float] - A single (x, y) coordinate
+    - BoundingBox: tuple[float, float, float, float] - (x_min, y_min, x_max, y_max)
+    - Path: list[tuple[float, float]] - A sequence of connected points
+
+Error Handling Conventions:
+    - Returns None when a position cannot be computed (e.g., snap_to_glyph_edge)
+    - Returns empty list [] when no valid path can be built (e.g., build_guide_path)
+    - Raises ValueError for invalid waypoint formats (e.g., parse_waypoint)
+    - Raises ImportError when required dependencies are missing
+
 Typical usage:
     from stroke_utils import smooth_stroke, build_guide_path
 
@@ -23,15 +35,19 @@ Typical usage:
     path = build_guide_path([7, 'v(5)', 3], bbox, mask)
 """
 
-import re
-
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 # Import shared utilities from stroke_lib (canonical implementations)
 # These are re-exported for backwards compatibility
 from stroke_lib.utils.geometry import (  # noqa: F401
+    compute_direction_vector,
+    compute_dot_product,
     constrain_to_mask,
+    infer_direction_from_regions,
+    pick_straightest_neighbor,
+    point_distance,
+    point_distance_squared,
     point_in_region,
     smooth_stroke,
 )
@@ -80,38 +96,6 @@ def bbox_width_height(bbox: tuple[float, float, float, float]) -> tuple[float, f
         Tuple of (width, height).
     """
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-
-def point_distance_squared(p1: tuple[float, float], p2: tuple[float, float]) -> float:
-    """Compute squared Euclidean distance between two points.
-
-    Using squared distance avoids the sqrt computation, which is useful
-    when comparing distances (the ordering is preserved) or when the
-    actual distance isn't needed.
-
-    Args:
-        p1: First point as (x, y).
-        p2: Second point as (x, y).
-
-    Returns:
-        Squared distance between the points.
-    """
-    dx = p1[0] - p2[0]
-    dy = p1[1] - p2[1]
-    return dx * dx + dy * dy
-
-
-def point_distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
-    """Compute Euclidean distance between two points.
-
-    Args:
-        p1: First point as (x, y).
-        p2: Second point as (x, y).
-
-    Returns:
-        Distance between the points.
-    """
-    return point_distance_squared(p1, p2) ** 0.5
 
 
 def snap_inside(pos: tuple[float, float], mask: np.ndarray, snap_indices: np.ndarray) -> tuple[float, float]:
@@ -233,32 +217,48 @@ def snap_to_glyph_edge(pos: tuple[float, float], centroid: tuple[float, float], 
 def parse_waypoint(wp: int | str) -> tuple[int, str]:
     """Parse a waypoint specification into region and kind.
 
+    This is a compatibility wrapper around stroke_dataclasses._parse_waypoint_item().
+    For new code, consider using ParsedWaypoint directly from stroke_dataclasses.
+
     Waypoints can be specified as:
         - Integer (1-9): Terminal point in that numpad region
         - 'v(n)': Vertex point in region n
         - 'c(n)': Curve point in region n
+        - 'i(n)': Intersection point in region n
 
     Args:
         wp: The waypoint specification. Can be an integer or a string
-            matching 'v(digit)' or 'c(digit)'.
+            matching 'v(digit)', 'c(digit)', or 'i(digit)'.
 
     Returns:
         A tuple of (region, kind) where:
             - region is an integer 1-9 indicating the numpad region
-            - kind is one of 'terminal', 'vertex', or 'curve'
+            - kind is one of 'terminal', 'vertex', 'curve', or 'intersection'
 
     Raises:
         ValueError: If the waypoint format is not recognized.
+
+    Note:
+        The canonical waypoint parsing is in stroke_dataclasses.py which returns
+        ParsedWaypoint objects. This function provides backwards compatibility
+        by converting to (region, kind) tuples.
     """
-    if isinstance(wp, int):
-        return (wp, 'terminal')
-    m = re.match(r'^v\((\d)\)$', str(wp))
-    if m:
-        return (int(m.group(1)), 'vertex')
-    m = re.match(r'^c\((\d)\)$', str(wp))
-    if m:
-        return (int(m.group(1)), 'curve')
-    raise ValueError(f"Unknown waypoint format: {wp}")
+    # Import the canonical parser from stroke_dataclasses
+    from stroke_dataclasses import _parse_waypoint_item
+
+    parsed = _parse_waypoint_item(wp)
+    if parsed is None:
+        raise ValueError(f"Unknown waypoint format: {wp}")
+
+    # Convert ParsedWaypoint to legacy (region, kind) tuple format
+    if parsed.is_intersection:
+        return (parsed.region, 'intersection')
+    elif parsed.is_vertex:
+        return (parsed.region, 'vertex')
+    elif parsed.is_curve:
+        return (parsed.region, 'curve')
+    else:
+        return (parsed.region, 'terminal')
 
 
 def numpad_to_pixel(region: int, glyph_bbox: tuple[float, float, float, float]) -> tuple[float, float]:
@@ -405,8 +405,28 @@ def _constrain_points_to_mask(points: list[tuple[float, float]], mask: np.ndarra
     return constrained
 
 
+def compute_distance_cache(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Compute distance transform cache for a mask.
+
+    Pre-computes distance transforms that can be reused across multiple
+    calls to build_guide_path with the same mask.
+
+    Args:
+        mask: Binary numpy array where True indicates glyph pixels.
+
+    Returns:
+        Tuple of (snap_indices, dist_in) where:
+        - snap_indices: Indices for snapping outside points to inside
+        - dist_in: Distance from each pixel to nearest edge (for deep inside)
+    """
+    _dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
+    dist_in = distance_transform_edt(mask)
+    return snap_indices, dist_in
+
+
 def build_guide_path(waypoints_raw: list[int | str], glyph_bbox: tuple[float, float, float, float], mask: np.ndarray,
-                     skel_features: dict | None = None) -> list[tuple[float, float]]:
+                     skel_features: dict | None = None,
+                     dist_cache: tuple[np.ndarray, np.ndarray] | None = None) -> list[tuple[float, float]]:
     """Build a guide path from a sequence of waypoints.
 
     Creates a path of (x, y) points that passes through the specified
@@ -422,6 +442,9 @@ def build_guide_path(waypoints_raw: list[int | str], glyph_bbox: tuple[float, fl
         skel_features: Optional dict mapping region numbers to lists of
             skeleton feature positions (from find_skeleton_waypoints).
             If provided, waypoints snap to skeleton features when available.
+        dist_cache: Optional pre-computed distance transforms as
+            (snap_indices, dist_in) tuple. If provided, avoids recomputing
+            distance transforms for multiple calls with the same mask.
 
     Returns:
         A list of (x, y) points sampled along the guide path at regular
@@ -449,9 +472,12 @@ def build_guide_path(waypoints_raw: list[int | str], glyph_bbox: tuple[float, fl
     else:
         centroid = (float(cols.mean()), float(rows.mean()))
 
-    # Pre-compute distance fields for snapping
-    _dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
-    dist_in = distance_transform_edt(mask)
+    # Use cached distance fields or compute them
+    if dist_cache is not None:
+        snap_indices, dist_in = dist_cache
+    else:
+        _dist_out, snap_indices = distance_transform_edt(~mask, return_indices=True)
+        dist_in = distance_transform_edt(mask)
 
     # Resolve all waypoints to positions
     positions = []

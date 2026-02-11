@@ -264,6 +264,73 @@ class FontScorer:
         """
         self.render_size = render_size
 
+    def _calculate_coverage(self, font: ImageFont.FreeTypeFont) -> float:
+        """Calculate character set coverage for a font.
+
+        Args:
+            font: Loaded PIL font object.
+
+        Returns:
+            Fraction of ASCII chars that render (0-1).
+        """
+        covered = 0
+        img = Image.new('L', (self.render_size * 2, self.render_size * 2), 255)
+        draw = ImageDraw.Draw(img)
+
+        for char in ASCII_PRINTABLE:
+            try:
+                # Clear image by drawing white rectangle (faster than creating new)
+                draw.rectangle([0, 0, img.width, img.height], fill=255)
+                draw.text((5, 5), char, font=font, fill=0)
+                if img.getextrema() != (255, 255):
+                    covered += 1
+            except OSError as e:
+                logger.debug("Failed to render char %r: %s", char, e)
+
+        return covered / len(ASCII_PRINTABLE)
+
+    def _calculate_style_score(self, font: ImageFont.FreeTypeFont) -> float:
+        """Calculate style score based on ink coverage heuristic.
+
+        Args:
+            font: Loaded PIL font object.
+
+        Returns:
+            Style score (0-1) based on ink ratio.
+        """
+        try:
+            img = Image.new('L', (self.render_size * 5, self.render_size * 2), 255)
+            draw = ImageDraw.Draw(img)
+            draw.text((10, 10), "Hello", font=font, fill=0)
+            arr = np.array(img)
+            ink_ratio = np.sum(arr < 128) / arr.size
+
+            if INK_RATIO_IDEAL_MIN < ink_ratio < INK_RATIO_IDEAL_MAX:
+                return 0.8
+            if INK_RATIO_ACCEPTABLE_MIN < ink_ratio < INK_RATIO_ACCEPTABLE_MAX:
+                return 0.5
+            return 0.2
+        except OSError:
+            return 0.0
+
+    def _calculate_phash(self, font: ImageFont.FreeTypeFont) -> str | None:
+        """Calculate perceptual hash for font deduplication.
+
+        Args:
+            font: Loaded PIL font object.
+
+        Returns:
+            Perceptual hash string, or None on error.
+        """
+        try:
+            img = Image.new('L', (PHASH_CANVAS_WIDTH, PHASH_CANVAS_HEIGHT), 255)
+            draw = ImageDraw.Draw(img)
+            draw.text((10, 10), "The quick brown", font=font, fill=0)
+            return str(imagehash.phash(img))
+        except (OSError, ValueError) as e:
+            logger.debug("Failed to compute phash: %s", e)
+            return None
+
     def score_font(self, font_path: str) -> dict:
         """Score a font on multiple criteria.
 
@@ -299,48 +366,9 @@ class FontScorer:
             scores['error'] = str(e)
             return scores
 
-        # Character set coverage - reuse single image for efficiency
-        covered = 0
-        img = Image.new('L', (self.render_size * 2, self.render_size * 2), 255)
-        draw = ImageDraw.Draw(img)
-        for char in ASCII_PRINTABLE:
-            try:
-                # Clear image by drawing white rectangle (faster than creating new image)
-                draw.rectangle([0, 0, img.width, img.height], fill=255)
-                draw.text((5, 5), char, font=font, fill=0)
-                if img.getextrema() != (255, 255):
-                    covered += 1
-            except OSError as e:
-                logger.debug("Failed to render char %r: %s", char, e)
-        scores['charset_coverage'] = covered / len(ASCII_PRINTABLE)
-
-        # Style score (ink coverage heuristic)
-        try:
-            img = Image.new('L', (self.render_size * 5, self.render_size * 2), 255)
-            draw = ImageDraw.Draw(img)
-            draw.text((10, 10), "Hello", font=font, fill=0)
-            arr = np.array(img)
-            ink_ratio = np.sum(arr < 128) / arr.size
-
-            if INK_RATIO_IDEAL_MIN < ink_ratio < INK_RATIO_IDEAL_MAX:
-                scores['style_score'] = 0.8
-            elif INK_RATIO_ACCEPTABLE_MIN < ink_ratio < INK_RATIO_ACCEPTABLE_MAX:
-                scores['style_score'] = 0.5
-            else:
-                scores['style_score'] = 0.2
-        except OSError:
-            scores['style_score'] = 0.0
-
-        # Perceptual hash
-        try:
-            img = Image.new('L', (PHASH_CANVAS_WIDTH, PHASH_CANVAS_HEIGHT), 255)
-            draw = ImageDraw.Draw(img)
-            draw.text((10, 10), "The quick brown", font=font, fill=0)
-            scores['phash'] = str(imagehash.phash(img))
-        except (OSError, ValueError) as e:
-            logger.debug("Failed to compute phash: %s", e)
-
-        # Overall score
+        scores['charset_coverage'] = self._calculate_coverage(font)
+        scores['style_score'] = self._calculate_style_score(font)
+        scores['phash'] = self._calculate_phash(font)
         scores['overall'] = (
             scores['charset_coverage'] * COVERAGE_WEIGHT +
             scores['style_score'] * STYLE_WEIGHT
@@ -485,10 +513,24 @@ class CursiveDetector:
             return False, 0.0, {}
 
         differences = {}
+        size = DEFAULT_RENDER_SIZE
+        padding = 10
 
+        # Batch render: build all context strings first
+        context_pairs = []  # (char, context1, context2)
         for char in test_chars:
+            context_pairs.append((char, f"o{char}o", f"n{char}n"))
+
+        # Process all context pairs
+        for char, context1, context2 in context_pairs:
             try:
-                diff = self._compare_glyph_contexts(font, char)
+                img1 = self._extract_char_from_word(font, context1, 1, size, padding)
+                if img1 is None:
+                    continue
+                img2 = self._extract_char_from_word(font, context2, 1, size, padding)
+                if img2 is None:
+                    continue
+                diff = self._image_difference(img1, img2)
                 if diff is not None:
                     differences[char] = diff
             except (OSError, ValueError):
@@ -697,8 +739,9 @@ class CursiveDetector:
 
             # Hamming distance (0 = identical, 256 = completely different for hash_size=16)
             distance = hash1 - hash2
-        except Exception:
-            # Return max difference on hash computation failure
+        except Exception as e:
+            # Log and return max difference on hash computation failure
+            logger.warning("Hash comparison failed: %s", e)
             return 1.0
 
         # Normalize to 0-1 range

@@ -37,23 +37,19 @@ Command-line Arguments:
 """
 
 import argparse
-import io
 import json
 import logging
-import os
 import re
 import time
-import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
-
-logger = logging.getLogger(__name__)
 
 import requests
 from bs4 import BeautifulSoup
 
-from font_source import FontMetadata, FontSource, ScraperConfig
+from font_source import FontMetadata, FontSource, ScraperConfig, create_scrape_metadata
+
+logger = logging.getLogger(__name__)
 
 
 class FontSpaceScraper(FontSource):
@@ -84,6 +80,11 @@ class FontSpaceScraper(FontSource):
     PAGE_TIMEOUT = 30
     DOWNLOAD_TIMEOUT = 60
 
+    # Regex patterns for HTML parsing (compiled once for efficiency)
+    FONT_PAGE_PATTERN = re.compile(r'/font/[^/]+$')
+    DOWNLOAD_PATH_PATTERN = re.compile(r'/download/')
+    ZIP_FILE_PATTERN = re.compile(r'\.zip')
+
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
         """Initialize the FontSpace scraper.
 
@@ -111,32 +112,12 @@ class FontSpaceScraper(FontSource):
         """
         logger.info("Searching FontSpace for: %s", query)
 
+        url_template = f"{self.BASE_URL}/search?q={query}&p={{page}}"
+
         fonts = []
-        page = 1
-
-        while page <= max_pages:
-            url = f"{self.BASE_URL}/search?q={query}&p={page}"
-            logger.debug("Page %d: %s", page, url)
-
-            try:
-                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
-                resp.raise_for_status()
-
-                page_fonts = self._parse_search_results(resp.text)
-
-                if not page_fonts:
-                    logger.debug("No fonts found on page %d, stopping.", page)
-                    break
-
-                fonts.extend(page_fonts)
-                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
-
-                page += 1
-                time.sleep(self.rate_limit)
-
-            except requests.RequestException as e:
-                logger.warning("Error fetching page %d: %s", page, e)
-                break
+        for page_fonts in self.paginate(url_template, max_pages, self._parse_search_results, self.PAGE_TIMEOUT):
+            fonts.extend(page_fonts)
+            logger.debug("Total fonts so far: %d", len(fonts))
 
         return fonts
 
@@ -157,32 +138,12 @@ class FontSpaceScraper(FontSource):
         """
         logger.info("Scraping FontSpace category: %s", category)
 
+        url_template = f"{self.BASE_URL}/category/{category}?p={{page}}"
+
         fonts = []
-        page = 1
-
-        while page <= max_pages:
-            url = f"{self.BASE_URL}/category/{category}?p={page}"
-            logger.debug("Page %d: %s", page, url)
-
-            try:
-                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
-                resp.raise_for_status()
-
-                page_fonts = self._parse_search_results(resp.text)
-
-                if not page_fonts:
-                    logger.debug("No fonts found on page %d, stopping.", page)
-                    break
-
-                fonts.extend(page_fonts)
-                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
-
-                page += 1
-                time.sleep(self.rate_limit)
-
-            except requests.RequestException as e:
-                logger.warning("Error fetching page %d: %s", page, e)
-                break
+        for page_fonts in self.paginate(url_template, max_pages, self._parse_search_results, self.PAGE_TIMEOUT):
+            fonts.extend(page_fonts)
+            logger.debug("Total fonts so far: %d", len(fonts))
 
         return fonts
 
@@ -204,7 +165,7 @@ class FontSpaceScraper(FontSource):
 
         # FontSpace uses font cards with links
         # Look for font links - they typically have /font/ in the URL
-        for link in soup.find_all('a', href=re.compile(r'/font/[^/]+$')):
+        for link in soup.find_all('a', href=self.FONT_PAGE_PATTERN):
             try:
                 font_name = link.get_text(strip=True)
                 font_url = link.get('href', '')
@@ -264,7 +225,7 @@ class FontSpaceScraper(FontSource):
             soup = BeautifulSoup(resp.text, 'html.parser')
 
             # Look for download button/link
-            dl_link = soup.find('a', href=re.compile(r'/download/'))
+            dl_link = soup.find('a', href=self.DOWNLOAD_PATH_PATTERN)
             if dl_link:
                 url = dl_link.get('href', '')
                 if url and not url.startswith('http'):
@@ -272,7 +233,7 @@ class FontSpaceScraper(FontSource):
                 return url
 
             # Alternative: look for direct ZIP link
-            zip_link = soup.find('a', href=re.compile(r'\.zip'))
+            zip_link = soup.find('a', href=self.ZIP_FILE_PATTERN)
             if zip_link:
                 url = zip_link.get('href', '')
                 if url and not url.startswith('http'):
@@ -301,79 +262,46 @@ class FontSpaceScraper(FontSource):
         if font.name in self.downloaded:
             return True
 
-        try:
-            logger.debug("Downloading: %s", font.name)
+        # Get download URL if we don't have it
+        if not font.download_url:
+            font.download_url = self._get_download_url(font.url)
+            time.sleep(0.5)
 
-            # Get download URL if we don't have it
-            if not font.download_url:
-                font.download_url = self._get_download_url(font.url)
-                time.sleep(0.5)
-
-            if not font.download_url:
-                logger.warning("Could not find download URL for %s", font.name)
-                self.failed.append(font.name)
-                return False
-
-            resp = self.get_with_retry(font.download_url, timeout=self.DOWNLOAD_TIMEOUT)
-            resp.raise_for_status()
-
-            # Check if it's a ZIP file
-            if resp.content[:4] == b'PK\x03\x04':
-                extracted = self._extract_zip(resp.content)
-                if extracted > 0:
-                    logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
-                    self.downloaded.add(font.name)
-                    return True
-                else:
-                    logger.warning("No TTF/OTF files in ZIP for %s", font.name)
-                    return False
-            else:
-                # Might be a direct font file
-                content_type = resp.headers.get('content-type', '')
-                if 'font' in content_type or font.download_url.endswith(('.ttf', '.otf')):
-                    ext = '.ttf' if '.ttf' in font.download_url else '.otf'
-                    safe_name = self.safe_filename(font.name) + ext
-                    out_path = self.output_dir / safe_name
-                    out_path.write_bytes(resp.content)
-                    logger.debug("Saved %s", safe_name)
-                    self.downloaded.add(font.name)
-                    return True
-
-            logger.warning("Unknown file format for %s", font.name)
-            return False
-
-        except Exception as e:
-            logger.error("Error downloading %s: %s", font.name, e)
+        if not font.download_url:
+            logger.warning("Could not find download URL for %s", font.name)
             self.failed.append(font.name)
             return False
 
-    def _extract_zip(self, content: bytes) -> int:
-        """Extract font files from ZIP content.
+        # Use base class download method
+        content = self.download_font_file(font.download_url, font.name, self.DOWNLOAD_TIMEOUT)
+        if content is None:
+            self.failed.append(font.name)
+            return False
 
-        Extracts TTF and OTF files from a ZIP archive, saving them to the
-        output directory with sanitized filenames.
+        # Check if it's a ZIP file
+        if content[:4] == b'PK\x03\x04':
+            # Use base class ZIP extraction
+            extracted = self.extract_font_from_zip(content)
+            if extracted > 0:
+                logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
+                self.downloaded.add(font.name)
+                return True
+            else:
+                logger.warning("No TTF/OTF files in ZIP for %s", font.name)
+                return False
+        else:
+            # Might be a direct font file
+            if font.download_url.endswith(('.ttf', '.otf')):
+                ext = '.ttf' if '.ttf' in font.download_url else '.otf'
+                safe_name = self.safe_filename(font.name) + ext
+                out_path = self.output_dir / safe_name
+                out_path.write_bytes(content)
+                logger.debug("Saved %s", safe_name)
+                self.downloaded.add(font.name)
+                return True
 
-        Args:
-            content: The raw bytes of the ZIP file.
-
-        Returns:
-            The number of font files successfully extracted.
-        """
-        extracted = 0
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                for name in zf.namelist():
-                    lower_name = name.lower()
-                    if lower_name.endswith(('.ttf', '.otf')):
-                        safe_name = self.safe_filename(os.path.basename(name))
-                        out_path = self.output_dir / safe_name
-                        if not out_path.exists():
-                            with zf.open(name) as src, open(out_path, 'wb') as dst:
-                                dst.write(src.read())
-                            extracted += 1
-        except zipfile.BadZipFile as e:
-            logger.debug("Bad zip file: %s", e)
-        return extracted
+        logger.warning("Unknown file format for %s", font.name)
+        return False
 
     def scrape_fonts(self, config: ScraperConfig) -> list[FontMetadata]:
         """Discover fonts from FontSpace.
@@ -462,20 +390,21 @@ class FontSpaceScraper(FontSource):
         # Download
         logger.info("Downloading %d fonts...", len(fonts))
 
-        for i, font in enumerate(fonts):
-            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts), font.name)
+        for i, font in enumerate(fonts, 1):
+            self.log_progress(i, len(fonts), font.name)
             self.download_font(font)
             time.sleep(self.rate_limit)
 
-        # Save metadata
-        metadata = {
-            'source': 'fontspace',
-            'query': query,
-            'fonts_found': len(self.fonts_found),
-            'fonts_downloaded': len(self.downloaded),
-            'fonts_failed': len(self.failed),
-            'font_list': [f.to_dict() for f in fonts]
-        }
+        # Build standardized metadata
+        metadata = create_scrape_metadata(
+            source=self.SOURCE_NAME,
+            fonts_found=len(self.fonts_found),
+            fonts_downloaded=len(self.downloaded),
+            fonts_failed=len(self.failed),
+            output_dir=str(self.output_dir),
+            fonts=[f.to_dict() for f in fonts],
+            query=query,
+        )
 
         meta_path = self.output_dir / 'fontspace_metadata.json'
         with open(meta_path, 'w') as f:
