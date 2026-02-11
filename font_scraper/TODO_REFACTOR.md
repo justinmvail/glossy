@@ -14,7 +14,7 @@ Generated: 2026-02-11
 4. [x] `stroke_pipeline_stream.py` - `stream_minimal_strokes()` 131 lines → extract phases
 5. [x] `inksight_vectorizer.py` - `main()` 125 lines → extract CLI subcommands
 6. [x] `stroke_routes_stream.py` - `optimize_stream_generator()` 117 lines → extract phases
-7. [ ] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
+7. [x] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
 8. [ ] `setup_database.py:256` - SQL injection risk → validate table names
 9. [ ] `stroke_flask` -> `stroke_rendering` circular import → review/fix
 10. [ ] Add docstrings to 53 functions (Shape subclasses, strategies)
@@ -41,7 +41,7 @@ Functions that should be broken down into smaller pieces:
 | `stroke_pipeline_stream.py:516` | `stream_minimal_strokes()` | 107 | ✓ DONE - extracted 2 phase helpers |
 | `inksight_vectorizer.py:1349` | `main()` | 24 | ✓ DONE - extracted 3 command handlers |
 | `stroke_routes_stream.py:476` | `optimize_stream_generator()` | 90 | ✓ DONE - extracted 3 helpers |
-| `stroke_routes_stream.py:616` | `api_minimal_strokes_stream()` | 102 | Extract SSE helpers |
+| `stroke_routes_stream.py:680` | `api_minimal_strokes_stream()` | 95 | ✓ DONE - extracted 2 shared helpers |
 
 **Approach:** Extract helper functions, use strategy pattern for phases.
 

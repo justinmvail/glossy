@@ -111,6 +111,37 @@ def _sse_event(data: dict) -> str:
     return f'data: {json.dumps(data)}\n\n'
 
 
+def _create_sse_response(generator: Generator) -> Response:
+    """Create an SSE Response with standard headers.
+
+    Args:
+        generator: Generator that yields SSE event strings.
+
+    Returns:
+        Flask Response configured for SSE streaming.
+    """
+    return Response(generator, mimetype='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'X-Accel-Buffering': 'no',
+                        'Connection': 'keep-alive'
+                    })
+
+
+def _validate_sse_char_param() -> tuple[str | None, Response | None]:
+    """Validate the ?c= query parameter for SSE endpoints.
+
+    Returns:
+        Tuple of (char, error_response). If char is None, error_response
+        contains the SSE error to return.
+    """
+    c = request.args.get('c')
+    if not c:
+        return None, Response(_sse_event({'error': 'Missing ?c= parameter'}),
+                              mimetype='text/event-stream')
+    return c, None
+
+
 def _prepare_optimization(mask: np.ndarray, strokes_raw: list) -> tuple | None:
     """Prepare data structures needed for stroke optimization.
 
@@ -629,10 +660,9 @@ def api_optimize_stream(fid: int) -> Response:
                 if (data.done) es.close();
             };
     """
-    c = request.args.get('c')
-    if not c:
-        return Response(_sse_event({'error': 'Missing ?c= parameter'}),
-                        mimetype='text/event-stream')
+    c, err = _validate_sse_char_param()
+    if err:
+        return err
 
     f, err = get_font_or_error(fid, response_type='sse')
     if err:
@@ -644,12 +674,7 @@ def api_optimize_stream(fid: int) -> Response:
         except Exception:
             yield _sse_event({'error': 'Optimization failed'})
 
-    return Response(generate(), mimetype='text/event-stream',
-                    headers={
-                        'Cache-Control': 'no-cache',
-                        'X-Accel-Buffering': 'no',  # Disable nginx buffering
-                        'Connection': 'keep-alive'
-                    })
+    return _create_sse_response(generate())
 
 
 @app.route('/api/minimal-strokes-stream/<int:fid>')
@@ -728,10 +753,9 @@ def api_minimal_strokes_stream(fid: int) -> Response:
     """
     from stroke_pipeline_stream import stream_minimal_strokes
 
-    c = request.args.get('c')
-    if not c:
-        return Response(_sse_event({'error': 'Missing ?c= parameter'}),
-                        mimetype='text/event-stream')
+    c, err = _validate_sse_char_param()
+    if err:
+        return err
 
     f, err = get_font_or_error(fid, response_type='sse')
     if err:
@@ -749,9 +773,4 @@ def api_minimal_strokes_stream(fid: int) -> Response:
         except Exception:
             yield _sse_event({'error': 'Stroke generation failed', 'done': True})
 
-    return Response(generate(), mimetype='text/event-stream',
-                    headers={
-                        'Cache-Control': 'no-cache',
-                        'X-Accel-Buffering': 'no',
-                        'Connection': 'keep-alive'
-                    })
+    return _create_sse_response(generate())
