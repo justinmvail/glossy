@@ -437,6 +437,80 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
     return strokes
 
 
+def _get_stub_touching_clusters(sc: int, ec: int) -> set[int]:
+    """Get the set of cluster IDs that a stub's endpoints touch.
+
+    Args:
+        sc: Start cluster ID (-1 if not at a cluster).
+        ec: End cluster ID (-1 if not at a cluster).
+
+    Returns:
+        Set of valid cluster IDs (excluding -1).
+    """
+    clusters = set()
+    if sc >= 0:
+        clusters.add(sc)
+    if ec >= 0:
+        clusters.add(ec)
+    return clusters
+
+
+def _find_best_junction_target(strokes: list, stub_idx: int, sc: int,
+                                clusters_touching: set, detailed_index: dict
+                                ) -> tuple[int, str, str]:
+    """Find the best target stroke for absorbing a junction stub.
+
+    Args:
+        strokes: List of stroke paths.
+        stub_idx: Index of the stub stroke.
+        sc: Start cluster ID of the stub.
+        clusters_touching: Set of cluster IDs the stub touches.
+        detailed_index: Mapping from cluster ID to list of (stroke_idx, is_end).
+
+    Returns:
+        Tuple of (target_idx, target_side, stub_side) or (-1, None, None) if none.
+    """
+    best_target = -1
+    best_len = 0
+    best_target_side = None
+    best_stub_side = None
+
+    for cid in clusters_touching:
+        endpoints_at_cluster = detailed_index.get(cid, [])
+        for sj, is_end in endpoints_at_cluster:
+            if sj == stub_idx:
+                continue
+            if len(strokes[sj]) > best_len:
+                best_target = sj
+                best_len = len(strokes[sj])
+                best_target_side = 'end' if is_end else 'start'
+                best_stub_side = 'start' if sc == cid else 'end'
+
+    return best_target, best_target_side, best_stub_side
+
+
+def _merge_stub_into_target(strokes: list, stub_idx: int, target_idx: int,
+                             stub_side: str, target_side: str) -> None:
+    """Merge a stub stroke into a target stroke.
+
+    Args:
+        strokes: List of stroke paths (modified in place).
+        stub_idx: Index of the stub to merge.
+        target_idx: Index of the target stroke.
+        stub_side: Which side of stub connects ('start' or 'end').
+        target_side: Which side of target to extend ('start' or 'end').
+    """
+    stub = strokes[stub_idx] if stub_side == 'end' else list(reversed(strokes[stub_idx]))
+    target = strokes[target_idx]
+
+    if target_side == 'end':
+        strokes[target_idx] = target + stub[1:]
+    else:
+        strokes[target_idx] = list(reversed(stub[1:])) + target
+
+    strokes.pop(stub_idx)
+
+
 def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
                           stub_threshold: int = 20) -> list[list[tuple]]:
     """Absorb short stubs into neighboring strokes at junction clusters.
@@ -456,53 +530,28 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
-        # Build detailed cluster index once per iteration (O(n) instead of O(n²))
         detailed_index = _build_detailed_cluster_index(strokes, assigned)
-        # Build endpoint cache for O(1) cluster lookups
         endpoint_cache = _build_endpoint_cache(strokes, assigned)
 
         for si in range(len(strokes)):
-            s = strokes[si]
-            if len(s) >= stub_threshold:
+            if len(strokes[si]) >= stub_threshold:
                 continue
+
             sc = _get_cached_cluster(endpoint_cache, si, False)
             ec = _get_cached_cluster(endpoint_cache, si, True)
-            clusters_touching = set()
-            if sc >= 0:
-                clusters_touching.add(sc)
-            if ec >= 0:
-                clusters_touching.add(ec)
+            clusters_touching = _get_stub_touching_clusters(sc, ec)
+
             if not clusters_touching:
                 continue
 
-            best_target = -1
-            best_len = 0
-            best_target_side = None
-            best_stub_side = None
+            target_idx, target_side, stub_side = _find_best_junction_target(
+                strokes, si, sc, clusters_touching, detailed_index)
 
-            # Use index to find strokes at each cluster (O(k) instead of O(n))
-            for cid in clusters_touching:
-                endpoints_at_cluster = detailed_index.get(cid, [])
-                for sj, is_end in endpoints_at_cluster:
-                    if sj == si:
-                        continue
-                    s2 = strokes[sj]
-                    if len(s2) > best_len:
-                        best_target = sj
-                        best_len = len(s2)
-                        best_target_side = 'end' if is_end else 'start'
-                        best_stub_side = 'start' if sc == cid else 'end'
-
-            if best_target >= 0:
-                stub = s if best_stub_side == 'end' else list(reversed(s))
-                target = strokes[best_target]
-                if best_target_side == 'end':
-                    strokes[best_target] = target + stub[1:]
-                else:
-                    strokes[best_target] = list(reversed(stub[1:])) + target
-                strokes.pop(si)
+            if target_idx >= 0:
+                _merge_stub_into_target(strokes, si, target_idx, stub_side, target_side)
                 changed = True
                 break
+
     return strokes
 
 

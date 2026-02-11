@@ -62,7 +62,7 @@ Generated: 2026-02-11
 ### MEDIUM - Deep Nesting (4+ levels)
 36. [x] stroke_merge.py:551-610 - _find_best_merge_pair has 6 nesting levels
 37. [x] stroke_merge.py:958-1013 - absorb_convergence_stubs has 7 nesting levels
-38. [ ] stroke_merge.py:1038-1087 - absorb_junction_stubs similar pattern
+38. [x] stroke_merge.py:1038-1087 - absorb_junction_stubs similar pattern
 
 ### MEDIUM - Long Functions (>50 lines)
 39. [ ] stroke_merge.py - absorb_convergence_stubs (86 lines) - extract helpers
