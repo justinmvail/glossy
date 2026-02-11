@@ -98,25 +98,30 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 3. Missing Error Handling
 
-- [ ] **stroke_flask.py:269-290** - `get_font()` doesn't use context manager
-  - Connection not closed on fetchone() failure
-  - Refactor to use `get_db_context()`
+- [x] **stroke_flask.py:269-290** - `get_font()` doesn't use context manager
+  - ✅ Refactored to use `get_db_context()` with try/except
 
-- [ ] **stroke_pipeline.py:382-392** - `resolve_waypoint()` no region validation
-  - Add check that `wp.region` is 1-9
+- [x] **stroke_pipeline.py:382-392** - `resolve_waypoint()` no region validation
+  - ✅ Added validation that wp.region is 1-9, raises ValueError if invalid
 
-- [ ] **stroke_affine.py:320-404** - `optimize_affine()` no exception handling
-  - Add try-except for invalid fonts, missing glyphs
+- [x] **stroke_affine.py:320-404** - `optimize_affine()` no exception handling
+  - ✅ Reviewed: Already has proper None checks for failures
+  - Inner functions have exception handling, main function returns None on error
 
-- [ ] **stroke_routes_stream.py:217-223, 247-254** - Generic `except Exception`
-  - Replace with specific exceptions, add logging
+- [x] **stroke_routes_stream.py:217-223, 247-254** - Generic `except Exception`
+  - ✅ Added logging module and _logger
+  - ✅ Catch specific exceptions (ValueError, RuntimeError, LinAlgError) first
+  - ✅ Log warnings for expected failures, errors for unexpected ones
 
-- [ ] **stroke_lib/api/services.py:324-427** - Bare `except Exception` (3 instances)
-  - Distinguish between "not found" and "error"
-  - Add logging for debugging
+- [x] **stroke_lib/api/services.py:324-427** - Bare `except Exception` (3 instances)
+  - ✅ Added logging module and _logger
+  - ✅ Catch sqlite3.Error and json.JSONDecodeError specifically
+  - ✅ Added proper finally blocks for connection cleanup
+  - ✅ Log with context (font_id, char) for debugging
 
-- [ ] **stroke_routes_batch.py:706-710** - `ALTER TABLE` silently catches error
-  - Validate column was actually added
+- [x] **stroke_routes_batch.py:706-710** - `ALTER TABLE` silently catches error
+  - ✅ Check if column exists using PRAGMA table_info before ALTER
+  - ✅ Log warning if ALTER still fails (race condition)
 
 ### 4. Testability Issues
 
@@ -357,6 +362,12 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_routes_core.py: Extracted _check_font_quality() with quality constants
   - stroke_pipeline.py: Moved extract_region() to module level
   - stroke_merge.py stub functions: Reviewed, kept separate for clarity
+- [x] Error handling improvements (2026-02-10)
+  - stroke_flask.py: get_font() now uses context manager
+  - stroke_pipeline.py: resolve_waypoint() validates region 1-9
+  - stroke_routes_stream.py: Added logging, specific exception handling
+  - stroke_lib/api/services.py: Added logging, proper connection cleanup
+  - stroke_routes_batch.py: Check column exists before ALTER TABLE
 
 ### In Progress
 - [ ] None currently

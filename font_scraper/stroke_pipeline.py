@@ -391,7 +391,14 @@ class MinimalStrokePipeline:
 
         Returns:
             ResolvedWaypoint with the computed pixel position and metadata.
+
+        Raises:
+            ValueError: If wp.region is not a valid numpad region (1-9).
         """
+        # Validate region is in valid range
+        if not isinstance(wp.region, int) or wp.region < 1 or wp.region > 9:
+            raise ValueError(f"Invalid waypoint region: {wp.region}. Must be 1-9.")
+
         analysis = self.analysis
         bbox = analysis.bbox
         skel_list = analysis.skel_list

@@ -703,11 +703,19 @@ def api_minimal_strokes_batch(fid):
     if not f:
         db.close()
         return jsonify(error="Font not found"), 404
-    try:
-        db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
-        db.commit()
-    except sqlite3.OperationalError:
-        pass
+    # Ensure template_variant column exists
+    cursor = db.execute("PRAGMA table_info(characters)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'template_variant' not in columns:
+        try:
+            db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
+            db.commit()
+        except sqlite3.OperationalError as e:
+            # Log but continue - column might have been added by another process
+            import logging
+            logging.getLogger(__name__).warning(
+                "Could not add template_variant column: %s", e
+            )
     gen, skp, fail, force = 0, 0, 0, request.args.get('force', '').lower() == 'true'
     for c in CHARS:
         if not force and db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL", (fid, c)).fetchone():

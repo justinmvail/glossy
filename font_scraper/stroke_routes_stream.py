@@ -48,6 +48,7 @@ See Also:
 """
 
 import json
+import logging
 import time
 from collections.abc import Generator
 
@@ -61,6 +62,9 @@ from stroke_flask import app, get_db, get_font, resolve_font_path
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
+
+# Logger for optimization errors
+_logger = logging.getLogger(__name__)
 
 
 # Alias for backward compatibility
@@ -219,7 +223,11 @@ def _run_nm_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
                       options={'maxfev': 400, 'xatol': 0.2, 'fatol': 0.005, 'adaptive': True})
         best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
         return nm.x, nm.fun, best_strokes
-    except Exception:
+    except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
+        _logger.warning("Nelder-Mead optimization failed: %s", e)
+        return x0, float('inf'), stroke_arrays
+    except Exception as e:
+        _logger.error("Unexpected error in NM optimization: %s", e, exc_info=True)
         return x0, float('inf'), stroke_arrays
 
 
@@ -250,8 +258,10 @@ def _run_de_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
                                     tol=0.01, polish=False)
         if de.fun < best_score:
             return de.fun, _affine_transform(stroke_arrays, tuple(de.x), centroid)
-    except Exception:
-        pass
+    except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
+        _logger.warning("Differential evolution optimization failed: %s", e)
+    except Exception as e:
+        _logger.error("Unexpected error in DE optimization: %s", e, exc_info=True)
 
     return best_score, _affine_transform(stroke_arrays, tuple(initial_x), centroid)
 

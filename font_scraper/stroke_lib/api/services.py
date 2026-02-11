@@ -38,6 +38,8 @@ Example usage:
 """
 
 from __future__ import annotations
+import logging
+import sqlite3
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import numpy as np
@@ -47,6 +49,9 @@ from ..domain.skeleton import Marker
 from ..analysis.skeleton import SkeletonAnalyzer
 from ..analysis.segments import SegmentClassifier
 from ..utils.rendering import render_glyph_mask, get_glyph_bbox
+
+# Logger for service errors
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -321,8 +326,7 @@ class FontService:
             >>> print(path)
             '/fonts/Arial-Regular.ttf'
         """
-        import sqlite3
-
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
@@ -331,10 +335,16 @@ class FontService:
                 (font_id,)
             )
             row = cursor.fetchone()
-            conn.close()
             return row['file_path'] if row else None
-        except Exception:
+        except sqlite3.Error as e:
+            _logger.warning("Database error getting font path for id=%s: %s", font_id, e)
             return None
+        except Exception as e:
+            _logger.error("Unexpected error getting font path: %s", e, exc_info=True)
+            return None
+        finally:
+            if conn:
+                conn.close()
 
     def get_character_strokes(
         self,
@@ -361,9 +371,9 @@ class FontService:
             >>> if strokes:
             ...     print(f"Found {len(strokes)} strokes")
         """
-        import sqlite3
         import json
 
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
@@ -372,13 +382,24 @@ class FontService:
                 (font_id, char)
             )
             row = cursor.fetchone()
-            conn.close()
 
             if row and row['strokes']:
                 return json.loads(row['strokes'])
             return None
-        except Exception:
+        except sqlite3.Error as e:
+            _logger.warning("Database error getting strokes for font=%s char=%s: %s",
+                           font_id, char, e)
             return None
+        except json.JSONDecodeError as e:
+            _logger.warning("Invalid JSON in strokes for font=%s char=%s: %s",
+                           font_id, char, e)
+            return None
+        except Exception as e:
+            _logger.error("Unexpected error getting strokes: %s", e, exc_info=True)
+            return None
+        finally:
+            if conn:
+                conn.close()
 
     def save_character_strokes(
         self,
@@ -408,9 +429,9 @@ class FontService:
             >>> print(success)
             True
         """
-        import sqlite3
         import json
 
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(
@@ -421,7 +442,18 @@ class FontService:
                 (font_id, char, json.dumps(strokes))
             )
             conn.commit()
-            conn.close()
             return True
-        except Exception:
+        except sqlite3.Error as e:
+            _logger.warning("Database error saving strokes for font=%s char=%s: %s",
+                           font_id, char, e)
             return False
+        except (TypeError, ValueError) as e:
+            _logger.warning("Invalid stroke data for font=%s char=%s: %s",
+                           font_id, char, e)
+            return False
+        except Exception as e:
+            _logger.error("Unexpected error saving strokes: %s", e, exc_info=True)
+            return False
+        finally:
+            if conn:
+                conn.close()

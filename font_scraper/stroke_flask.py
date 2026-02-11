@@ -274,7 +274,8 @@ def get_font(fid):
 
     Returns:
         sqlite3.Row: A row object with font data (id, name, source, file_path,
-            etc.) if found, or None if no font exists with the given ID.
+            etc.) if found, or None if no font exists with the given ID or
+            if a database error occurs.
 
     Example:
         Fetching a font::
@@ -284,10 +285,11 @@ def get_font(fid):
                 print(f"Font name: {font['name']}")
                 print(f"File path: {font['file_path']}")
     """
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
-    db.close()
-    return f
+    with get_db_context() as db:
+        try:
+            return db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
+        except Exception:
+            return None
 
 
 def validate_char_param(char):
