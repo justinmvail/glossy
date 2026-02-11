@@ -317,6 +317,72 @@ def merge_t_junctions(strokes: list[list[tuple]], junction_clusters: list[set],
     return strokes
 
 
+def _identify_convergence_stub(stroke: list[tuple], sc: int, ec: int,
+                                junction_clusters: list[set]) -> tuple[int, list[tuple]] | None:
+    """Identify if a stroke is a convergence stub and determine its orientation.
+
+    A convergence stub has one endpoint at a junction cluster and one free end,
+    or both endpoints at the same cluster (loop-like stub).
+
+    Args:
+        stroke: The stroke path to check.
+        sc: Start cluster ID (-1 if not at a cluster).
+        ec: End cluster ID (-1 if not at a cluster).
+        junction_clusters: List of junction cluster sets.
+
+    Returns:
+        Tuple of (cluster_id, stub_path) where stub_path is oriented with the
+        free end last, or None if not a convergence stub.
+    """
+    if sc >= 0 and ec < 0:
+        return sc, list(stroke)
+    elif ec >= 0 and sc < 0:
+        return ec, list(reversed(stroke))
+    elif sc >= 0 and ec >= 0 and sc == ec:
+        # Both ends at same cluster - orient based on distance to cluster center
+        cluster = junction_clusters[sc]
+        cx = sum(p[0] for p in cluster) / len(cluster)
+        cy = sum(p[1] for p in cluster) / len(cluster)
+        d_start = ((stroke[0][0] - cx) ** 2 + (stroke[0][1] - cy) ** 2) ** 0.5
+        d_end = ((stroke[-1][0] - cx) ** 2 + (stroke[-1][1] - cy) ** 2) ** 0.5
+        stub_path = list(reversed(stroke)) if d_start > d_end else list(stroke)
+        return sc, stub_path
+    return None
+
+
+def _extend_strokes_to_stub_tip(strokes: list, endpoints_at_cluster: list,
+                                 stub_idx: int, stub_tip: tuple, cluster: set,
+                                 cluster_id: int, endpoint_cache: dict) -> None:
+    """Extend all strokes at a cluster toward a stub's tip point.
+
+    Args:
+        strokes: List of stroke paths (modified in place).
+        endpoints_at_cluster: List of (stroke_idx, is_end) at the cluster.
+        stub_idx: Index of the stub stroke (to skip).
+        stub_tip: The tip point to extend toward.
+        cluster: The junction cluster set.
+        cluster_id: ID of the cluster.
+        endpoint_cache: Cache for cluster lookups.
+    """
+    strokes_extended = set()
+    for sj, is_end in endpoints_at_cluster:
+        if sj == stub_idx or sj in strokes_extended:
+            continue
+        strokes_extended.add(sj)
+
+        s2 = strokes[sj]
+        at_end = is_end
+
+        # Check if the other endpoint is also at this cluster
+        if not at_end:
+            other_end_cid = _get_cached_cluster(endpoint_cache, sj, True)
+            if other_end_cid == cluster_id:
+                at_end = True  # Prefer extending from the end
+
+        tail, leg_end = get_stroke_tail(s2, at_end, cluster)
+        extend_stroke_to_tip(s2, at_end, tail, leg_end, stub_tip)
+
+
 def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list[set],
                              assigned: list[set], conv_threshold: int = 18) -> list[list[tuple]]:
     """Absorb short convergence stubs into longer strokes at junction clusters.
@@ -337,69 +403,37 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
     changed = True
     while changed:
         changed = False
-        # Build detailed cluster index once per iteration (O(n) instead of O(n²))
         detailed_index = _build_detailed_cluster_index(strokes, assigned)
-        # Build endpoint cache for O(1) cluster lookups
         endpoint_cache = _build_endpoint_cache(strokes, assigned)
 
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) < 2 or len(s) >= conv_threshold:
                 continue
+
             sc = _get_cached_cluster(endpoint_cache, si, False)
             ec = _get_cached_cluster(endpoint_cache, si, True)
 
-            if sc >= 0 and ec < 0:
-                cluster_id = sc
-                stub_path = list(s)
-            elif ec >= 0 and sc < 0:
-                cluster_id = ec
-                stub_path = list(reversed(s))
-            elif sc >= 0 and ec >= 0 and sc == ec:
-                cluster_id = sc
-                cluster = junction_clusters[sc]
-                cx = sum(p[0] for p in cluster) / len(cluster)
-                cy = sum(p[1] for p in cluster) / len(cluster)
-                d_start = ((s[0][0] - cx) ** 2 + (s[0][1] - cy) ** 2) ** 0.5
-                d_end = ((s[-1][0] - cx) ** 2 + (s[-1][1] - cy) ** 2) ** 0.5
-                stub_path = list(reversed(s)) if d_start > d_end else list(s)
-            else:
+            stub_info = _identify_convergence_stub(s, sc, ec, junction_clusters)
+            if stub_info is None:
                 continue
 
-            # Count other endpoints at cluster using index (O(k) instead of O(n))
+            cluster_id, stub_path = stub_info
             endpoints_at_cluster = detailed_index.get(cluster_id, [])
             others_at_cluster = sum(1 for (idx, _) in endpoints_at_cluster if idx != si)
+
             if others_at_cluster < 2:
                 continue
 
             stub_tip = stub_path[-1]
             cluster = junction_clusters[cluster_id]
-
-            # Extend only strokes at this cluster using index (O(k) instead of O(n))
-            strokes_extended = set()
-            for sj, is_end in endpoints_at_cluster:
-                if sj == si or sj in strokes_extended:
-                    continue
-                strokes_extended.add(sj)
-                s2 = strokes[sj]
-                at_end = is_end
-                # Check if the other endpoint is also at this cluster
-                if not at_end:
-                    other_end_cid = _get_cached_cluster(endpoint_cache, sj, True)
-                    if other_end_cid == cluster_id:
-                        at_end = True  # Prefer extending from the end
-                        at_start = False
-                    else:
-                        at_start = True
-                else:
-                    at_start = False
-
-                tail, leg_end = get_stroke_tail(s2, at_end, cluster)
-                extend_stroke_to_tip(s2, at_end, tail, leg_end, stub_tip)
+            _extend_strokes_to_stub_tip(strokes, endpoints_at_cluster, si, stub_tip,
+                                        cluster, cluster_id, endpoint_cache)
 
             strokes.pop(si)
             changed = True
             break
+
     return strokes
 
 
