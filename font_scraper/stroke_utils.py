@@ -70,6 +70,38 @@ def bbox_width_height(bbox: tuple[float, float, float, float]) -> tuple[float, f
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
+def point_distance_squared(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Compute squared Euclidean distance between two points.
+
+    Using squared distance avoids the sqrt computation, which is useful
+    when comparing distances (the ordering is preserved) or when the
+    actual distance isn't needed.
+
+    Args:
+        p1: First point as (x, y).
+        p2: Second point as (x, y).
+
+    Returns:
+        Squared distance between the points.
+    """
+    dx = p1[0] - p2[0]
+    dy = p1[1] - p2[1]
+    return dx * dx + dy * dy
+
+
+def point_distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Compute Euclidean distance between two points.
+
+    Args:
+        p1: First point as (x, y).
+        p2: Second point as (x, y).
+
+    Returns:
+        Distance between the points.
+    """
+    return point_distance_squared(p1, p2) ** 0.5
+
+
 def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to the nearest mask pixel if outside.
 
