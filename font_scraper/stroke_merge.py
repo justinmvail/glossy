@@ -1047,6 +1047,9 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
+        # Build detailed cluster index once per iteration (O(n) instead of O(n²))
+        detailed_index = _build_detailed_cluster_index(strokes, assigned)
+
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) >= stub_threshold:
@@ -1065,22 +1068,18 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
             best_len = 0
             best_target_side = None
             best_stub_side = None
+
+            # Use index to find strokes at each cluster (O(k) instead of O(n))
             for cid in clusters_touching:
-                for sj in range(len(strokes)):
+                endpoints_at_cluster = detailed_index.get(cid, [])
+                for sj, is_end in endpoints_at_cluster:
                     if sj == si:
                         continue
                     s2 = strokes[sj]
-                    tc_start = endpoint_cluster(s2, False, assigned)
-                    tc_end = endpoint_cluster(s2, True, assigned)
-                    if tc_start == cid and len(s2) > best_len:
+                    if len(s2) > best_len:
                         best_target = sj
                         best_len = len(s2)
-                        best_target_side = 'start'
-                        best_stub_side = 'start' if sc == cid else 'end'
-                    if tc_end == cid and len(s2) > best_len:
-                        best_target = sj
-                        best_len = len(s2)
-                        best_target_side = 'end'
+                        best_target_side = 'end' if is_end else 'start'
                         best_stub_side = 'start' if sc == cid else 'end'
 
             if best_target >= 0:
