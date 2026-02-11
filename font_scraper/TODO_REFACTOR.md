@@ -6,7 +6,28 @@ Generated: 2026-02-11
 
 ---
 
-## Priority: HIGH
+## Ordered Refactoring List
+
+1. [ ] `run_prefilters.py` - `run_pipeline()` 273 lines → split into stage handlers
+2. [ ] `run_ocr_prefilter.py` - `run_prefilter()` 197 lines → extract validation logic
+3. [ ] `run_ocr_prefilter.py` - `run_batch_ocr()` 140 lines → extract batch helpers
+4. [ ] `stroke_pipeline_stream.py` - `stream_minimal_strokes()` 131 lines → extract phases
+5. [ ] `inksight_vectorizer.py` - `main()` 125 lines → extract CLI subcommands
+6. [ ] `stroke_routes_stream.py` - `optimize_stream_generator()` 117 lines → extract phases
+7. [ ] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
+8. [ ] `setup_database.py:256` - SQL injection risk → validate table names
+9. [ ] `stroke_flask` -> `stroke_rendering` circular import → review/fix
+10. [ ] Add docstrings to 53 functions (Shape subclasses, strategies)
+11. [ ] Add return type hints to 37 functions
+12. [ ] Extract magic numbers to constants
+13. [ ] Add logging to `stroke_merge.py`, `stroke_scoring.py`
+14. [ ] Review `pass` in exception handlers
+15. [ ] Split `inksight_vectorizer.py` into 3 modules
+16. [ ] Add unit tests for design pattern classes
+
+---
+
+## Details
 
 ### 1. Long Functions (76 functions over 60 lines)
 

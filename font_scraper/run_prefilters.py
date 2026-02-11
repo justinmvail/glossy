@@ -111,6 +111,225 @@ def detect_source(font_path: Path) -> tuple:
     return 'unknown', None
 
 
+def _process_single_font(font_path: Path, db, completeness_checker,
+                         cursive_detector, scorer) -> dict | None:
+    """Process a single font through all checks.
+
+    Args:
+        font_path: Path to the font file.
+        db: FontDB database connection.
+        completeness_checker: CompletenessChecker instance.
+        cursive_detector: CursiveDetector instance.
+        scorer: FontScorer instance.
+
+    Returns:
+        Dict with font data for deduplication, or None if processing failed.
+    """
+    # Detect source and add to database
+    source, url = detect_source(font_path)
+    font_id = db.add_font(
+        name=font_path.stem,
+        file_path=str(font_path),
+        source=source,
+        url=url
+    )
+
+    # Run all checks
+    completeness_score, missing = completeness_checker.check(str(font_path))
+    cursive_result = cursive_detector.check_all(str(font_path))
+    score_result = scorer.score_font(str(font_path))
+
+    # Update database with check results
+    db.update_checks(
+        font_id,
+        completeness_score=completeness_score,
+        missing_glyphs=json.dumps(missing) if missing else None,
+        connectivity_score=cursive_result['connectivity_score'],
+        is_cursive=cursive_result['is_cursive']
+    )
+
+    # Store contextual score
+    cursor = db.conn.cursor()
+    cursor.execute(
+        "UPDATE font_checks SET contextual_score = ? WHERE font_id = ?",
+        (cursive_result['contextual_score'], font_id)
+    )
+    db.conn.commit()
+
+    # Record removal if cursive
+    if cursive_result['is_cursive']:
+        methods = ', '.join(cursive_result['methods'])
+        details = f"ctx={cursive_result['contextual_score']:.3f}, conn={cursive_result['connectivity_score']:.2f}, methods={methods}"
+        reason = 'contextual' if 'contextual' in cursive_result['methods'] else 'cursive'
+        db.remove_font(font_id, reason, details)
+
+    # Record removal if incomplete (< 90%)
+    if completeness_score < 0.9:
+        db.remove_font(font_id, 'incomplete',
+                       f"score={completeness_score:.1%}, missing={len(missing)}")
+
+    # Return data for deduplication if phash available
+    if score_result.get('phash'):
+        return {
+            'font_id': font_id,
+            'path': str(font_path),
+            'name': font_path.stem,
+            'phash': score_result['phash'],
+            'overall': score_result['overall'],
+            'completeness': completeness_score,
+            'connectivity': cursive_result['connectivity_score'],
+            'contextual': cursive_result['contextual_score'],
+            'is_cursive': cursive_result['is_cursive'],
+        }
+    return None
+
+
+def _run_deduplication(db, font_scores: list, deduplicator) -> None:
+    """Find and mark duplicate fonts in the database.
+
+    Args:
+        db: FontDB database connection.
+        font_scores: List of font score dicts from processing.
+        deduplicator: FontDeduplicator instance.
+    """
+    print(f"Finding duplicates among {len(font_scores)} fonts...")
+    duplicate_groups = deduplicator.find_duplicates(font_scores)
+    print(f"Found {len(duplicate_groups)} duplicate groups")
+
+    keep_fonts, remove_fonts = deduplicator.select_best_from_groups(duplicate_groups)
+    print(f"Keeping {len(keep_fonts)}, removing {len(remove_fonts)} duplicates")
+
+    # Update database with dedup results
+    for group_id, group in enumerate(duplicate_groups, start=1):
+        sorted_group = sorted(group, key=lambda x: x.get('overall', 0), reverse=True)
+
+        for i, font in enumerate(sorted_group):
+            is_best = (i == 0)
+            db.update_checks(
+                font['font_id'],
+                is_duplicate=not is_best,
+                duplicate_group_id=group_id,
+                keep_in_group=is_best
+            )
+
+            if not is_best:
+                db.remove_font(font['font_id'], 'duplicate',
+                               f"duplicate of {sorted_group[0]['name']} (group {group_id})")
+
+
+def _print_summary_stats(db) -> None:
+    """Print summary statistics for the pipeline run.
+
+    Args:
+        db: FontDB database connection.
+    """
+    cursor = db.conn.cursor()
+
+    # Gather all stats
+    cursor.execute("SELECT COUNT(*) FROM fonts")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM font_checks WHERE completeness_score >= 0.9")
+    complete = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM font_checks WHERE completeness_score < 0.9")
+    incomplete = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_cursive = 1")
+    cursive = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_cursive = 0")
+    not_cursive = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_duplicate = 1")
+    duplicates = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT COUNT(*) FROM font_checks
+        WHERE completeness_score >= 0.9
+          AND is_cursive = 0
+          AND (is_duplicate = 0 OR is_duplicate IS NULL)
+    """)
+    passing = cursor.fetchone()[0]
+
+    # Print summary
+    print(f"\nTotal fonts loaded: {total}")
+    print(f"  Complete (≥90%): {complete}")
+    print(f"  Incomplete (<90%): {incomplete}")
+    print(f"  Cursive/contextual: {cursive}")
+    print(f"  Not cursive: {not_cursive}")
+    print(f"  Duplicates removed: {duplicates}")
+    print(f"  ✓ Passing all checks: {passing}")
+
+    # Removal breakdown
+    print("\nRemoval breakdown:")
+    stats = db.get_removal_stats()
+    for code, info in stats.items():
+        if info['count'] > 0:
+            print(f"  {code}: {info['count']}")
+
+
+def _print_cursive_report(db) -> None:
+    """Print detailed cursive detection report.
+
+    Args:
+        db: FontDB database connection.
+    """
+    cursor = db.conn.cursor()
+
+    # Contextual scores
+    print("\n" + "-"*40)
+    print("CURSIVE SCORES (contextual)")
+    print("-"*40)
+
+    cursor.execute("""
+        SELECT f.name, fc.contextual_score, fc.connectivity_score, fc.is_cursive
+        FROM fonts f
+        JOIN font_checks fc ON f.id = fc.font_id
+        WHERE fc.contextual_score IS NOT NULL
+        ORDER BY fc.contextual_score DESC
+        LIMIT 10
+    """)
+    print("\nHighest contextual scores (most likely cursive):")
+    for row in cursor.fetchall():
+        flag = "CURSIVE" if row['is_cursive'] else ""
+        print(f"  {row['contextual_score']:.3f} | {row['name'][:40]:40} {flag}")
+
+    cursor.execute("""
+        SELECT f.name, fc.contextual_score, fc.connectivity_score, fc.is_cursive
+        FROM fonts f
+        JOIN font_checks fc ON f.id = fc.font_id
+        WHERE fc.contextual_score IS NOT NULL
+        ORDER BY fc.contextual_score ASC
+        LIMIT 10
+    """)
+    print("\nLowest contextual scores (most likely print):")
+    for row in cursor.fetchall():
+        flag = "CURSIVE" if row['is_cursive'] else ""
+        print(f"  {row['contextual_score']:.3f} | {row['name'][:40]:40} {flag}")
+
+    # Connectivity scores
+    print("\n" + "-"*40)
+    print("CONNECTIVITY SCORES")
+    print("-"*40)
+
+    cursor.execute("""
+        SELECT f.name, fc.connectivity_score, fc.contextual_score
+        FROM fonts f
+        JOIN font_checks fc ON f.id = fc.font_id
+        WHERE fc.connectivity_score > 0
+        ORDER BY fc.connectivity_score DESC
+        LIMIT 10
+    """)
+    rows = cursor.fetchall()
+    if rows:
+        print("\nHighest connectivity scores:")
+        for row in rows:
+            print(f"  {row['connectivity_score']:.3f} | {row['name'][:40]}")
+    else:
+        print("\nNo fonts with connectivity > 0 (no truly connected cursive found)")
+
+
 def run_pipeline(db_path: str, fonts_dir: str):
     """Run all pre-AI pipeline steps on fonts.
 
@@ -167,223 +386,34 @@ def run_pipeline(db_path: str, fonts_dir: str):
     font_scores = []
 
     with FontDB(db_path) as db:
-        # ========================================
-        # STEP 1: Load fonts into database
-        # STEP 2: Completeness check
-        # STEP 4: Cursive detection
-        # ========================================
+        # STEP 1-2-4: Load fonts, completeness check, cursive detection
         print("\n" + "="*60)
         print("STEP 1-2-4: Loading fonts, completeness, and cursive detection")
         print("="*60)
 
         for font_path in tqdm(font_files, desc="Processing fonts"):
             try:
-                # Detect source
-                source, url = detect_source(font_path)
-
-                # Add to database
-                font_id = db.add_font(
-                    name=font_path.stem,
-                    file_path=str(font_path),
-                    source=source,
-                    url=url
+                result = _process_single_font(
+                    font_path, db, completeness_checker, cursive_detector, scorer
                 )
-
-                # Completeness check
-                completeness_score, missing = completeness_checker.check(str(font_path))
-
-                # Cursive detection (both methods)
-                cursive_result = cursive_detector.check_all(str(font_path))
-
-                # Font scoring (for dedup)
-                score_result = scorer.score_font(str(font_path))
-
-                # Update database
-                db.update_checks(
-                    font_id,
-                    completeness_score=completeness_score,
-                    missing_glyphs=json.dumps(missing) if missing else None,
-                    connectivity_score=cursive_result['connectivity_score'],
-                    is_cursive=cursive_result['is_cursive']
-                )
-
-                # Also store contextual score (need to add to update_checks or do raw SQL)
-                cursor = db.conn.cursor()
-                cursor.execute(
-                    "UPDATE font_checks SET contextual_score = ? WHERE font_id = ?",
-                    (cursive_result['contextual_score'], font_id)
-                )
-                db.conn.commit()
-
-                # Track for deduplication
-                if score_result.get('phash'):
-                    font_scores.append({
-                        'font_id': font_id,
-                        'path': str(font_path),
-                        'name': font_path.stem,
-                        'phash': score_result['phash'],
-                        'overall': score_result['overall'],
-                        'completeness': completeness_score,
-                        'connectivity': cursive_result['connectivity_score'],
-                        'contextual': cursive_result['contextual_score'],
-                        'is_cursive': cursive_result['is_cursive'],
-                    })
-
-                # Record removal if cursive
-                if cursive_result['is_cursive']:
-                    methods = ', '.join(cursive_result['methods'])
-                    details = f"ctx={cursive_result['contextual_score']:.3f}, conn={cursive_result['connectivity_score']:.2f}, methods={methods}"
-
-                    reason = 'contextual' if 'contextual' in cursive_result['methods'] else 'cursive'
-                    db.remove_font(font_id, reason, details)
-
-                # Record removal if incomplete (< 90%)
-                if completeness_score < 0.9:
-                    db.remove_font(font_id, 'incomplete',
-                                   f"score={completeness_score:.1%}, missing={len(missing)}")
-
+                if result:
+                    font_scores.append(result)
             except Exception as e:
                 tqdm.write(f"Error processing {font_path.name}: {e}")
                 continue
 
-        # ========================================
         # STEP 3: Deduplication
-        # ========================================
         print("\n" + "="*60)
         print("STEP 3: Deduplication")
         print("="*60)
+        _run_deduplication(db, font_scores, deduplicator)
 
-        print(f"Finding duplicates among {len(font_scores)} fonts...")
-        duplicate_groups = deduplicator.find_duplicates(font_scores)
-        print(f"Found {len(duplicate_groups)} duplicate groups")
-
-        keep_fonts, remove_fonts = deduplicator.select_best_from_groups(duplicate_groups)
-        print(f"Keeping {len(keep_fonts)}, removing {len(remove_fonts)} duplicates")
-
-        # Update database with dedup results
-        for group_id, group in enumerate(duplicate_groups, start=1):
-            sorted_group = sorted(group, key=lambda x: x.get('overall', 0), reverse=True)
-
-            for i, font in enumerate(sorted_group):
-                is_best = (i == 0)
-                db.update_checks(
-                    font['font_id'],
-                    is_duplicate=not is_best,
-                    duplicate_group_id=group_id,
-                    keep_in_group=is_best
-                )
-
-                if not is_best:
-                    db.remove_font(font['font_id'], 'duplicate',
-                                   f"duplicate of {sorted_group[0]['name']} (group {group_id})")
-
-        # ========================================
         # REPORT RESULTS
-        # ========================================
         print("\n" + "="*60)
         print("RESULTS")
         print("="*60)
-
-        # Get stats
-        cursor = db.conn.cursor()
-
-        # Total fonts
-        cursor.execute("SELECT COUNT(*) FROM fonts")
-        total = cursor.fetchone()[0]
-
-        # Completeness stats
-        cursor.execute("SELECT COUNT(*) FROM font_checks WHERE completeness_score >= 0.9")
-        complete = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM font_checks WHERE completeness_score < 0.9")
-        incomplete = cursor.fetchone()[0]
-
-        # Cursive stats
-        cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_cursive = 1")
-        cursive = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_cursive = 0")
-        not_cursive = cursor.fetchone()[0]
-
-        # Duplicate stats
-        cursor.execute("SELECT COUNT(*) FROM font_checks WHERE is_duplicate = 1")
-        duplicates = cursor.fetchone()[0]
-
-        # Fonts passing all checks
-        cursor.execute("""
-            SELECT COUNT(*) FROM font_checks
-            WHERE completeness_score >= 0.9
-              AND is_cursive = 0
-              AND (is_duplicate = 0 OR is_duplicate IS NULL)
-        """)
-        passing = cursor.fetchone()[0]
-
-        print(f"\nTotal fonts loaded: {total}")
-        print(f"  Complete (≥90%): {complete}")
-        print(f"  Incomplete (<90%): {incomplete}")
-        print(f"  Cursive/contextual: {cursive}")
-        print(f"  Not cursive: {not_cursive}")
-        print(f"  Duplicates removed: {duplicates}")
-        print(f"  ✓ Passing all checks: {passing}")
-
-        # Removal stats
-        print("\nRemoval breakdown:")
-        stats = db.get_removal_stats()
-        for code, info in stats.items():
-            if info['count'] > 0:
-                print(f"  {code}: {info['count']}")
-
-        # Cursive scores - highest and lowest
-        print("\n" + "-"*40)
-        print("CURSIVE SCORES (contextual)")
-        print("-"*40)
-
-        cursor.execute("""
-            SELECT f.name, fc.contextual_score, fc.connectivity_score, fc.is_cursive
-            FROM fonts f
-            JOIN font_checks fc ON f.id = fc.font_id
-            WHERE fc.contextual_score IS NOT NULL
-            ORDER BY fc.contextual_score DESC
-            LIMIT 10
-        """)
-        print("\nHighest contextual scores (most likely cursive):")
-        for row in cursor.fetchall():
-            flag = "CURSIVE" if row['is_cursive'] else ""
-            print(f"  {row['contextual_score']:.3f} | {row['name'][:40]:40} {flag}")
-
-        cursor.execute("""
-            SELECT f.name, fc.contextual_score, fc.connectivity_score, fc.is_cursive
-            FROM fonts f
-            JOIN font_checks fc ON f.id = fc.font_id
-            WHERE fc.contextual_score IS NOT NULL
-            ORDER BY fc.contextual_score ASC
-            LIMIT 10
-        """)
-        print("\nLowest contextual scores (most likely print):")
-        for row in cursor.fetchall():
-            flag = "CURSIVE" if row['is_cursive'] else ""
-            print(f"  {row['contextual_score']:.3f} | {row['name'][:40]:40} {flag}")
-
-        # Also show connectivity scores
-        print("\n" + "-"*40)
-        print("CONNECTIVITY SCORES")
-        print("-"*40)
-
-        cursor.execute("""
-            SELECT f.name, fc.connectivity_score, fc.contextual_score
-            FROM fonts f
-            JOIN font_checks fc ON f.id = fc.font_id
-            WHERE fc.connectivity_score > 0
-            ORDER BY fc.connectivity_score DESC
-            LIMIT 10
-        """)
-        rows = cursor.fetchall()
-        if rows:
-            print("\nHighest connectivity scores:")
-            for row in rows:
-                print(f"  {row['connectivity_score']:.3f} | {row['name'][:40]}")
-        else:
-            print("\nNo fonts with connectivity > 0 (no truly connected cursive found)")
+        _print_summary_stats(db)
+        _print_cursive_report(db)
 
 
 def main():
