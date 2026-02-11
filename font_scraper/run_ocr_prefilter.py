@@ -36,6 +36,7 @@ Note:
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -45,6 +46,8 @@ from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
 from db_schema import FontDB
+
+logger = logging.getLogger(__name__)
 
 # OCR prefilter constants
 SAMPLE_TEXT = "Hello World 123"
@@ -68,7 +71,8 @@ def render_sample(font_path: str, output_path: str) -> bool:
     """
     try:
         font = ImageFont.truetype(font_path, RENDER_FONT_SIZE)
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load font %s: %s", font_path, e)
         return False
 
     # Calculate size

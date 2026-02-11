@@ -33,11 +33,14 @@ Attributes:
 """
 
 import argparse
+import logging
 import sqlite3
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = 'fonts.db'
 SAMPLE_TEXT = "Hello World!"
