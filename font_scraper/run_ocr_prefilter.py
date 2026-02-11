@@ -46,7 +46,10 @@ from tqdm import tqdm
 
 from db_schema import FontDB
 
+# OCR prefilter constants
 SAMPLE_TEXT = "Hello World 123"
+RENDER_FONT_SIZE = 48  # Font size for OCR sample rendering
+RENDER_PADDING = 20  # Padding around rendered text
 
 
 def render_sample(font_path: str, output_path: str) -> bool:
@@ -63,11 +66,8 @@ def render_sample(font_path: str, output_path: str) -> bool:
         True if the image was successfully rendered and saved, False if
         the font could not be loaded or any error occurred.
     """
-    font_size = 48
-    padding = 20
-
     try:
-        font = ImageFont.truetype(font_path, font_size)
+        font = ImageFont.truetype(font_path, RENDER_FONT_SIZE)
     except Exception:
         return False
 
@@ -75,13 +75,13 @@ def render_sample(font_path: str, output_path: str) -> bool:
     temp_img = Image.new('RGB', (1, 1), 'white')
     temp_draw = ImageDraw.Draw(temp_img)
     bbox = temp_draw.textbbox((0, 0), SAMPLE_TEXT, font=font)
-    width = bbox[2] - bbox[0] + padding * 2
-    height = bbox[3] - bbox[1] + padding * 2
+    width = bbox[2] - bbox[0] + RENDER_PADDING * 2
+    height = bbox[3] - bbox[1] + RENDER_PADDING * 2
 
     # Create final image
     img = Image.new('RGB', (width, height), 'white')
     draw = ImageDraw.Draw(img)
-    draw.text((padding - bbox[0], padding - bbox[1]), SAMPLE_TEXT,
+    draw.text((RENDER_PADDING - bbox[0], RENDER_PADDING - bbox[1]), SAMPLE_TEXT,
               font=font, fill='black')
 
     img.save(output_path)

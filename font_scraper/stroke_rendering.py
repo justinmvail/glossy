@@ -39,6 +39,8 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Default rendering parameters
 DEFAULT_CANVAS_SIZE = 224
 DEFAULT_FONT_SIZE = 200
+SMALLCAPS_NORM_SIZE = 64  # Normalization size for small-caps detection
+HOLE_ANALYSIS_CANVAS = 400  # Canvas size for hole analysis rendering
 
 
 def resolve_font_path(font_path: str) -> str:
@@ -273,8 +275,6 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     except OSError:
         return []
 
-    norm_size = 64
-
     for lower in letters_to_check:
         upper = lower.upper()
 
@@ -304,8 +304,8 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
             u_draw.text((5 - u_bbox[0], 5 - u_bbox[1]), upper, fill=0, font=pil_font)
 
             # Scale both to same normalized size
-            l_scaled = l_img.resize((norm_size, norm_size), Image.Resampling.BILINEAR)
-            u_scaled = u_img.resize((norm_size, norm_size), Image.Resampling.BILINEAR)
+            l_scaled = l_img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
+            u_scaled = u_img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
 
             l_arr = np.array(l_scaled) < 128
             u_arr = np.array(u_scaled) < 128
@@ -345,8 +345,7 @@ def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | 
         - Text is centered based on its bounding box.
         - Exceptions during rendering are caught and result in None return.
     """
-    canvas = 400
-    img = Image.new('L', (canvas, canvas), 255)
+    img = Image.new('L', (HOLE_ANALYSIS_CANVAS, HOLE_ANALYSIS_CANVAS), 255)
     draw = ImageDraw.Draw(img)
 
     try:
@@ -355,8 +354,8 @@ def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | 
             return None
         w = bbox[2] - bbox[0]
         h = bbox[3] - bbox[1]
-        x = (canvas - w) // 2 - bbox[0]
-        y = (canvas - h) // 2 - bbox[1]
+        x = (HOLE_ANALYSIS_CANVAS - w) // 2 - bbox[0]
+        y = (HOLE_ANALYSIS_CANVAS - h) // 2 - bbox[1]
         draw.text((x, y), text, fill=0, font=pil_font)
     except Exception:
         return None

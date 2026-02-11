@@ -19,7 +19,7 @@ Generated: 2026-02-11
 9. [x] `stroke_flask` -> `stroke_rendering` circular import → review/fix
 10. [x] Add docstrings to 53 functions (Shape subclasses, strategies)
 11. [x] Add return type hints to 37 functions
-12. [ ] Extract magic numbers to constants
+12. [x] Extract magic numbers to constants
 13. [ ] Add logging to `stroke_merge.py`, `stroke_scoring.py`
 14. [ ] Review `pass` in exception handlers
 15. [ ] Split `inksight_vectorizer.py` into 3 modules
@@ -124,17 +124,17 @@ Worst offenders:
 
 Found hardcoded values that could be constants:
 
-| File | Value | Context |
-|------|-------|---------|
-| `run_ocr_prefilter.py:66` | `font_size = 48` | Rendering config |
-| `run_ocr_prefilter.py:67` | `padding = 20` | Rendering config |
-| `stroke_skeleton.py:602` | `max_steps = 500` | Path tracing limit |
-| `stroke_scoring.py:716` | `radius = 6.0` | Stroke half-width |
-| `stroke_rendering.py:253` | `norm_size = 64` | Normalization size |
-| `stroke_rendering.py:325` | `canvas = 400` | Canvas size |
-| `template_morph.py:864-867` | `cols=6, rows=5, cell=300` | Grid layout |
+| File | Value | Context | Status |
+|------|-------|---------|--------|
+| `run_ocr_prefilter.py` | `font_size = 48` | Rendering config | ✓ RENDER_FONT_SIZE |
+| `run_ocr_prefilter.py` | `padding = 20` | Rendering config | ✓ RENDER_PADDING |
+| `stroke_skeleton.py` | `max_steps = 500` | Path tracing limit | ✓ PATH_TRACE_MAX_STEPS |
+| `stroke_scoring.py` | `radius = 6.0` | Stroke half-width | ✓ DEFAULT_STROKE_HALF_WIDTH |
+| `stroke_rendering.py` | `norm_size = 64` | Normalization size | ✓ SMALLCAPS_NORM_SIZE |
+| `stroke_rendering.py` | `canvas = 400` | Canvas size | ✓ HOLE_ANALYSIS_CANVAS |
+| `template_morph.py` | `cols=6, rows=5, cell=300` | Grid layout | N/A (not found) |
 
-**Action:** Extract to named constants at module level or config dataclass.
+**Action:** ✓ Extracted to named constants at module level.
 
 ---
 

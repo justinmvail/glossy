@@ -43,6 +43,7 @@ MIN_STROKE_LENGTH = 5
 DIRECTION_BIAS_STEPS = 15  # Apply direction bias only for first N steps
 DIRECTION_BIAS_WEIGHT = 10  # Multiplier for direction matching bonus
 AVOID_PENALTY = 1000  # Penalty score for stepping on avoided pixels
+PATH_TRACE_MAX_STEPS = 500  # Maximum steps in path tracing BFS
 
 # Direction vectors for path tracing
 DIRECTION_VECTORS = {
@@ -599,12 +600,11 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
     # BFS to find path to region
     queue = deque([(start, [start])])
     visited = {start}
-    max_steps = 500
 
     while queue:
         current, path = queue.popleft()
 
-        if len(path) >= max_steps:
+        if len(path) >= PATH_TRACE_MAX_STEPS:
             continue
 
         # Check if we've reached the target region

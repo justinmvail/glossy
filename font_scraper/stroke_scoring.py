@@ -65,6 +65,9 @@ from stroke_shapes import (
     param_vector_to_shapes as _param_vector_to_shapes,
 )
 
+# Scoring constants
+DEFAULT_STROKE_HALF_WIDTH = 6.0  # Approximate stroke half-width for coverage
+
 
 @dataclass
 class ScoringContext:
@@ -712,10 +715,8 @@ def quick_stroke_score(strokes: list[list[list[float]]], mask: np.ndarray) -> fl
 
     # Dilate stroke mask using distance transform
     dist = distance_transform_edt(~stroke_mask)
-    # Coverage radius based on average stroke width
-    radius = 6.0  # Approximate stroke half-width
 
-    covered = dist <= radius
+    covered = dist <= DEFAULT_STROKE_HALF_WIDTH
     glyph_pixels = np.sum(mask)
     if glyph_pixels == 0:
         return 0.0
