@@ -35,6 +35,43 @@ from stroke_merge_utils import (
 )
 
 
+def _is_valid_merge_candidate(strokes: list, stroke_idx: int, min_len: int,
+                               cluster_cache: dict) -> bool:
+    """Check if a stroke is a valid candidate for merging.
+
+    Args:
+        strokes: List of stroke paths.
+        stroke_idx: Index of the stroke to check.
+        min_len: Minimum stroke length requirement.
+        cluster_cache: Cache for loop stroke detection.
+
+    Returns:
+        True if the stroke can be considered for merging.
+    """
+    if len(strokes[stroke_idx]) < min_len:
+        return False
+    if _is_loop_stroke_cached(stroke_idx, cluster_cache):
+        return False
+    return True
+
+
+def _compute_merge_angle(strokes: list, si: int, side_i: str,
+                         sj: int, side_j: str) -> float:
+    """Compute the merge angle between two strokes.
+
+    Args:
+        strokes: List of stroke paths.
+        si, sj: Indices of the two strokes.
+        side_i, side_j: Which side ('start' or 'end') of each stroke.
+
+    Returns:
+        Angle in radians (0 = perfectly aligned, pi = opposite directions).
+    """
+    dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
+    dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
+    return np.pi - angle_between(dir_i, dir_j)
+
+
 def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
                            assigned: list[set], min_len: int, max_angle: float,
                            max_ratio: float, cluster_cache: dict) -> tuple | None:
@@ -65,27 +102,20 @@ def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
 
         for i in range(len(entries)):
             si, side_i = entries[i]
-            if len(strokes[si]) < min_len:
+            if not _is_valid_merge_candidate(strokes, si, min_len, cluster_cache):
                 continue
-            if _is_loop_stroke_cached(si, cluster_cache):
-                continue
-
-            dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
 
             for j in range(i + 1, len(entries)):
                 sj, side_j = entries[j]
-                if len(strokes[sj]) < min_len:
-                    continue
-                if _is_loop_stroke_cached(sj, cluster_cache):
+                if not _is_valid_merge_candidate(strokes, sj, min_len, cluster_cache):
                     continue
 
-                len_ratio = min(len(strokes[si]), len(strokes[sj])) / max(len(strokes[si]), len(strokes[sj]))
-                if len_ratio < max_ratio:
+                # Check length ratio constraint
+                len_i, len_j = len(strokes[si]), len(strokes[sj])
+                if min(len_i, len_j) / max(len_i, len_j) < max_ratio:
                     continue
 
-                dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
-                angle = np.pi - angle_between(dir_i, dir_j)
-
+                angle = _compute_merge_angle(strokes, si, side_i, sj, side_j)
                 if angle < best_angle:
                     best_angle = angle
                     best_merge = (si, side_i, sj, side_j)

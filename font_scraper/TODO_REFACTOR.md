@@ -60,7 +60,7 @@ Generated: 2026-02-11
 35. [x] Extract binarize_image() utility (appears 6+ times)
 
 ### MEDIUM - Deep Nesting (4+ levels)
-36. [ ] stroke_merge.py:551-610 - _find_best_merge_pair has 6 nesting levels
+36. [x] stroke_merge.py:551-610 - _find_best_merge_pair has 6 nesting levels
 37. [ ] stroke_merge.py:958-1013 - absorb_convergence_stubs has 7 nesting levels
 38. [ ] stroke_merge.py:1038-1087 - absorb_junction_stubs similar pattern
 
