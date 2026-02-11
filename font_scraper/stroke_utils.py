@@ -40,6 +40,19 @@ from stroke_lib.utils.geometry import (  # noqa: F401
 # Note: smooth_stroke and constrain_to_mask are imported from
 # stroke_lib.utils.geometry (canonical implementations) at the top of this file.
 
+# ---------------------------------------------------------------------------
+# Snap Function Constants
+# ---------------------------------------------------------------------------
+
+# Minimum depth (distance from edge in pixels) for a point to be considered
+# "deep inside" the glyph. Points closer to edges than this threshold will
+# be moved deeper inside along a ray toward the centroid.
+SNAP_DEEP_INSIDE_MIN_DEPTH = 5
+
+# Default step size (in pixels) for generating evenly-spaced points along
+# line segments. Smaller values produce denser point distributions.
+LINEAR_SEGMENT_STEP = 2.0
+
 
 def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to the nearest mask pixel if outside.
@@ -85,19 +98,20 @@ def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
 
     Returns:
         A position (x, y) that is well inside the glyph. If the original
-        position is already at least 5 pixels from the edge, it is returned
-        unchanged. Otherwise, the deepest point along the ray to the centroid
-        is returned.
+        position is already at least SNAP_DEEP_INSIDE_MIN_DEPTH pixels from
+        the edge, it is returned unchanged. Otherwise, the deepest point
+        along the ray to the centroid is returned.
 
     Notes:
-        - The search stops early once it finds a point deeper than 5 pixels
-          and the depth starts decreasing, to avoid overshooting.
+        - The search stops early once it finds a point deeper than
+          SNAP_DEEP_INSIDE_MIN_DEPTH pixels and the depth starts decreasing,
+          to avoid overshooting.
         - Falls back to snap_inside if the ray length is less than 1 pixel.
     """
     h, w = mask.shape
     ix = int(round(min(max(pos[0], 0), w - 1)))
     iy = int(round(min(max(pos[1], 0), h - 1)))
-    if mask[iy, ix] and dist_in[iy, ix] >= 5:
+    if mask[iy, ix] and dist_in[iy, ix] >= SNAP_DEEP_INSIDE_MIN_DEPTH:
         return pos
 
     dx = centroid[0] - pos[0]
@@ -118,7 +132,7 @@ def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
         if mask[jy, jx] and dist_in[jy, jx] > best_depth:
             best_depth = dist_in[jy, jx]
             best_pos = (x, y)
-        if best_depth > 5 and dist_in[jy, jx] < best_depth * 0.5:
+        if best_depth > SNAP_DEEP_INSIDE_MIN_DEPTH and dist_in[jy, jx] < best_depth * 0.5:
             break
     return best_pos
 
@@ -214,13 +228,14 @@ def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
             y_min + frac_y * (y_max - y_min))
 
 
-def linear_segment(p0: tuple, p1: tuple, step: float = 2.0) -> list[tuple]:
+def linear_segment(p0: tuple, p1: tuple, step: float = LINEAR_SEGMENT_STEP) -> list[tuple]:
     """Generate evenly-spaced points along a line segment.
 
     Args:
         p0: Starting point as (x, y).
         p1: Ending point as (x, y).
-        step: Approximate distance between consecutive points. Defaults to 2.0.
+        step: Approximate distance between consecutive points.
+            Defaults to LINEAR_SEGMENT_STEP (2.0).
 
     Returns:
         A list of (x, y) tuples evenly distributed along the line from
