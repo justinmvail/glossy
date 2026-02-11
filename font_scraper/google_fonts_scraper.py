@@ -29,6 +29,13 @@ Example:
         # Or download specific fonts
         scraper.scrape_and_download(fonts=['Caveat', 'Dancing Script', 'Pacifico'])
 
+    Using the common FontSource interface::
+
+        from font_source import ScraperConfig
+        scraper = GoogleFontsScraper('./output')
+        config = ScraperConfig(max_fonts=50)
+        metadata = scraper.scrape_and_download(config)
+
 Attributes:
     HANDWRITING_FONTS (list): Curated list of handwriting and script font
         family names available on Google Fonts.
@@ -49,57 +56,34 @@ from pathlib import Path
 
 import requests
 
+from font_source import FontMetadata, FontSource, ScraperConfig
+
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class FontInfo:
-    """Information about a font from Google Fonts.
-
-    Attributes:
-        name: The display name of the font (same as family).
-        family: The font family name as used in Google Fonts API.
-        category: The font category (e.g., 'handwriting', 'script').
-        variants: List of available font variants (e.g., ['regular', 'bold']).
-        download_urls: Mapping of variant names to their download URLs.
-    """
-    name: str
-    family: str
-    category: str
-    variants: list[str]
-    download_urls: dict[str, str]  # variant -> url
-
-    def to_dict(self):
-        """Convert the FontInfo to a dictionary for JSON serialization.
-
-        Returns:
-            dict: A dictionary containing all font information fields.
-        """
-        return {
-            'name': self.name,
-            'family': self.family,
-            'category': self.category,
-            'variants': self.variants,
-            'download_urls': self.download_urls
-        }
-
-
-class GoogleFontsScraper:
+class GoogleFontsScraper(FontSource):
     """Download handwriting fonts from Google Fonts.
 
     This class handles downloading fonts from Google Fonts using the CSS API.
     It maintains a curated list of handwriting and script fonts and can
     download them without requiring an API key.
 
+    Inherits from FontSource to provide a consistent interface with other
+    font scrapers (DaFont, FontSpace).
+
     Attributes:
+        SOURCE_NAME (str): Identifier for this source ('google').
         HANDWRITING_FONTS (list): Class-level list of known handwriting and
             script font family names on Google Fonts.
         output_dir (Path): Directory where downloaded fonts are saved.
         rate_limit (float): Delay in seconds between HTTP requests.
         session (requests.Session): HTTP session for making requests.
+        fonts_found (list): List of discovered FontMetadata objects.
         downloaded (Set[str]): Set of font families successfully downloaded.
         failed (List[str]): List of font families that failed to download.
     """
+
+    SOURCE_NAME = "google"
 
     # Known handwriting/script fonts on Google Fonts
     # This list can be expanded
@@ -157,18 +141,12 @@ class GoogleFontsScraper:
                 Defaults to 0.5 seconds (faster than other scrapers since
                 Google's servers handle high traffic well).
         """
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.rate_limit = rate_limit
+        super().__init__(output_dir, rate_limit)
 
-        self.session = requests.Session()
+        # Override User-Agent to get TTF instead of WOFF2
         self.session.headers.update({
-            # Use a browser user-agent to get TTF instead of WOFF2
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; rv:60.0) Gecko/20100101 Firefox/60.0',
         })
-
-        self.downloaded: set[str] = set()
-        self.failed: list[str] = []
 
     def get_font_url(self, family: str, variant: str = 'regular') -> str:
         """Get the download URL for a font from the Google Fonts CSS API.
@@ -210,28 +188,58 @@ class GoogleFontsScraper:
 
         return ''
 
-    def download_font(self, family: str) -> bool:
+    def scrape_fonts(self, config: ScraperConfig) -> list[FontMetadata]:
+        """Discover fonts from Google Fonts.
+
+        For Google Fonts, this creates FontMetadata objects from either
+        the provided fonts list or the curated HANDWRITING_FONTS list.
+
+        Args:
+            config: ScraperConfig with options. Uses config.fonts if provided,
+                otherwise defaults to HANDWRITING_FONTS.
+
+        Returns:
+            List of FontMetadata objects for discovered fonts.
+        """
+        # Use provided fonts list or default to curated list
+        font_names = config.fonts if config.fonts else self.HANDWRITING_FONTS
+
+        fonts = []
+        for family in font_names:
+            fonts.append(FontMetadata(
+                name=family,
+                family=family,
+                source=self.SOURCE_NAME,
+                category='handwriting',
+                url=f"https://fonts.google.com/specimen/{family.replace(' ', '+')}",
+            ))
+        return fonts
+
+    def download_font(self, font: FontMetadata | str) -> bool:
         """Download a font family from Google Fonts.
 
         Fetches the font URL using the CSS API and downloads the font file
         to the output directory.
 
         Args:
-            family: The font family name to download (e.g., 'Caveat').
+            font: FontMetadata object or font family name string.
 
         Returns:
             True if the font was successfully downloaded, False otherwise.
         """
+        # Support both FontMetadata and string (backward compatibility)
+        if isinstance(font, FontMetadata):
+            family = font.family or font.name
+        else:
+            family = font
+
         if family in self.downloaded:
             return True
 
         try:
-            print(f"  Downloading: {family}")
-
             url = self.get_font_url(family)
             if not url:
                 print("    Could not get download URL")
-                self.failed.append(family)
                 return False
 
             resp = self.session.get(url, timeout=60)
@@ -248,21 +256,20 @@ class GoogleFontsScraper:
                 ext = '.ttf'  # Default
 
             # Save font
-            safe_name = family.replace(' ', '_')
+            safe_name = self.safe_filename(family.replace(' ', '_'))
             out_path = self.output_dir / f"google_{safe_name}{ext}"
             out_path.write_bytes(resp.content)
 
             print(f"    Saved: {out_path.name}")
-            self.downloaded.add(family)
             return True
 
         except Exception as e:
             print(f"    Error: {e}")
-            self.failed.append(family)
             return False
 
     def scrape_and_download(
         self,
+        config: ScraperConfig | None = None,
         fonts: list[str] = None,
         max_fonts: int = None
     ) -> dict:
@@ -272,7 +279,12 @@ class GoogleFontsScraper:
         from the provided list or defaults to the curated HANDWRITING_FONTS
         list.
 
+        Supports both the new ScraperConfig interface and the legacy
+        keyword arguments for backward compatibility.
+
         Args:
+            config: ScraperConfig with options. If provided, fonts and
+                max_fonts arguments are ignored.
             fonts: List of font family names to download. If None, uses
                 the built-in HANDWRITING_FONTS list containing curated
                 handwriting and script fonts.
@@ -281,13 +293,19 @@ class GoogleFontsScraper:
 
         Returns:
             A dictionary containing download statistics and metadata:
-                - source (str): Always "google_fonts".
-                - fonts_requested (int): Number of fonts in the download list.
-                - fonts_downloaded (int): Number of fonts successfully downloaded.
-                - fonts_failed (int): Number of fonts that failed to download.
+                - source (str): Always "google" or "google_fonts".
+                - fonts_requested/fonts_found (int): Number of fonts in the download list.
+                - fonts_downloaded/downloaded (int): Number of fonts successfully downloaded.
+                - fonts_failed/failed (int): Number of fonts that failed to download.
                 - downloaded (list): List of successfully downloaded font names.
                 - failed (list): List of font names that failed to download.
         """
+        # Support both ScraperConfig and legacy arguments
+        if config is not None:
+            # Use the base class implementation
+            return super().scrape_and_download(config)
+
+        # Legacy interface
         print("=" * 60)
         print("Google Fonts Scraper")
         print("=" * 60)
@@ -307,7 +325,10 @@ class GoogleFontsScraper:
 
         for i, family in enumerate(fonts):
             print(f"[{i+1}/{len(fonts)}]", end='')
-            self.download_font(family)
+            if self.download_font(family):
+                self.downloaded.add(family)
+            else:
+                self.failed.append(family)
             time.sleep(self.rate_limit)
 
         # Save metadata
