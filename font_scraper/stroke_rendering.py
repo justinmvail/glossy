@@ -659,6 +659,79 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     return mismatched
 
 
+def render_text_to_image(pil_font: FreeTypeFont, text: str,
+                         canvas_size: tuple[int, int] | int = None,
+                         padding: int = 10,
+                         background: int = 255,
+                         fill: int = 0,
+                         center: bool = True) -> Image.Image | None:
+    """Render text to a PIL Image with configurable options.
+
+    A general-purpose utility for rendering text using a loaded font.
+    Handles bounding box computation and optional centering automatically.
+
+    Args:
+        pil_font: A PIL ImageFont object (already loaded).
+        text: The text string to render.
+        canvas_size: Canvas dimensions. Can be:
+            - tuple (width, height): Use exact dimensions
+            - int: Use as both width and height (square canvas)
+            - None: Auto-size to fit text with padding
+        padding: Padding around text when auto-sizing or for positioning.
+        background: Background color (0-255). Default 255 (white).
+        fill: Text color (0-255). Default 0 (black).
+        center: If True and canvas_size is specified, center the text.
+
+    Returns:
+        PIL Image with the rendered text, or None on failure.
+
+    Example:
+        >>> font = ImageFont.truetype("font.ttf", 48)
+        >>> img = render_text_to_image(font, "Hello", canvas_size=100)
+        >>> img = render_text_to_image(font, "A", canvas_size=(64, 64))
+        >>> img = render_text_to_image(font, "Test")  # Auto-sized
+    """
+    try:
+        bbox = pil_font.getbbox(text)
+        if not bbox:
+            return None
+
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        # Determine canvas size
+        if canvas_size is None:
+            # Auto-size to fit text
+            img_w = text_w + padding * 2
+            img_h = text_h + padding * 2
+            x = padding - bbox[0]
+            y = padding - bbox[1]
+        elif isinstance(canvas_size, int):
+            img_w = img_h = canvas_size
+            if center:
+                x = (canvas_size - text_w) // 2 - bbox[0]
+                y = (canvas_size - text_h) // 2 - bbox[1]
+            else:
+                x = padding - bbox[0]
+                y = padding - bbox[1]
+        else:
+            img_w, img_h = canvas_size
+            if center:
+                x = (img_w - text_w) // 2 - bbox[0]
+                y = (img_h - text_h) // 2 - bbox[1]
+            else:
+                x = padding - bbox[0]
+                y = padding - bbox[1]
+
+        img = Image.new('L', (img_w, img_h), background)
+        draw = ImageDraw.Draw(img)
+        draw.text((x, y), text, fill=fill, font=pil_font)
+        return img
+
+    except OSError:
+        return None
+
+
 def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | None:
     """Render text and return as a numpy array for shape analysis.
 
@@ -679,21 +752,9 @@ def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | 
         - Text is centered based on its bounding box.
         - Exceptions during rendering are caught and result in None return.
     """
-    img = Image.new('L', (HOLE_ANALYSIS_CANVAS, HOLE_ANALYSIS_CANVAS), 255)
-    draw = ImageDraw.Draw(img)
-
-    try:
-        bbox = pil_font.getbbox(text)
-        if not bbox:
-            return None
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        x = (HOLE_ANALYSIS_CANVAS - w) // 2 - bbox[0]
-        y = (HOLE_ANALYSIS_CANVAS - h) // 2 - bbox[1]
-        draw.text((x, y), text, fill=0, font=pil_font)
-    except Exception:
+    img = render_text_to_image(pil_font, text, canvas_size=HOLE_ANALYSIS_CANVAS)
+    if img is None:
         return None
-
     return np.array(img)
 
 

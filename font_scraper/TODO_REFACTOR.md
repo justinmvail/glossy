@@ -56,7 +56,7 @@ Generated: 2026-02-11
 ### MEDIUM - Code Duplication
 32. [x] Extract bbox_width_height() utility (appears 5+ times)
 33. [x] Extract point_distance_squared() utility (appears 6+ times)
-34. [ ] Extract render_text_on_image() utility (appears 4+ times)
+34. [x] Extract render_text_to_image() utility (appears 4+ times)
 35. [ ] Extract binarize_image() utility (appears 6+ times)
 
 ### MEDIUM - Deep Nesting (4+ levels)
