@@ -71,15 +71,17 @@ from stroke_dataclasses import (
     VariantResult,
     parse_stroke_template,
 )
+from stroke_pipeline_core import (
+    VERTICAL_ANGLE_MIN,
+    VERTICAL_ANGLE_MAX,
+    WAIST_TOLERANCE_RATIO,
+    WAIST_MARGIN_RATIO,
+    extract_region_from_waypoint,
+    infer_direction as core_infer_direction,
+    is_vertical_stroke as core_is_vertical_stroke,
+)
 from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
-
-# Angle range for classifying segments as vertical (degrees from horizontal)
-VERTICAL_ANGLE_MIN = 60
-VERTICAL_ANGLE_MAX = 120
-
-# Waist region calculation ratios (fraction of glyph height)
-WAIST_TOLERANCE_RATIO = 0.15  # For detecting waist pixels near mid_y
-WAIST_MARGIN_RATIO = 0.05  # Margin for middle-third region detection
+from stroke_variant_evaluator import VariantEvaluator, try_skeleton_method
 
 
 @dataclass
@@ -243,24 +245,6 @@ class PipelineFactory:
             adjust_stroke_paths_fn=lambda st, c, m: st,
             quick_stroke_score_fn=quick_stroke_score,
         )
-
-
-def extract_region_from_waypoint(wp) -> int | None:
-    """Extract the region number from a waypoint definition.
-
-    Waypoints can be specified as plain integers, tuples like (region, modifier),
-    or other formats. This function extracts just the region number.
-
-    Args:
-        wp: Waypoint definition - can be int, tuple with int first element,
-            or other format.
-
-    Returns:
-        The region number (1-9) if extractable, None otherwise.
-    """
-    if isinstance(wp, tuple):
-        return wp[0] if isinstance(wp[0], int) else None
-    return wp if isinstance(wp, int) else None
 
 
 class MinimalStrokePipeline:
@@ -1266,99 +1250,35 @@ class MinimalStrokePipeline:
     def try_skeleton_method(self) -> VariantResult:
         """Try pure skeleton method and return result with score.
 
-        Attempts to extract strokes directly from the skeleton structure without
-        using templates. This method is useful for characters without predefined
-        templates or as a fallback when template-based methods fail.
+        Delegates to stroke_variant_evaluator.try_skeleton_method().
+        See that function for full documentation.
 
         Returns:
-            VariantResult containing:
-                - strokes: List of stroke paths, or None if extraction failed
-                - score: Quality score (higher is better), -1 on failure
-                - variant_name: Always 'skeleton' for this method
-
-        Note:
-            The method compares raw skeleton strokes against merged/adjusted
-            strokes and keeps the version with the better score. This prevents
-            over-merging from degrading stroke quality.
+            VariantResult with strokes, score, and variant_name='skeleton'.
         """
-        if self.analysis is None:
-            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
-
-        mask = self.analysis.mask
-        skel_strokes = self._skeleton_to_strokes(mask, min_stroke_len=5)
-
-        if not skel_strokes:
-            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
-
-        # Score raw strokes before any merging
-        raw_score = self._quick_stroke_score(skel_strokes, mask)
-        raw_strokes = skel_strokes
-
-        # Apply merge/template adjustments
-        skel_strokes = self._apply_stroke_template(skel_strokes, self.char)
-        skel_strokes = self._adjust_stroke_paths(skel_strokes, self.char, mask)
-
-        if not skel_strokes:
-            return VariantResult(strokes=None, score=-1, variant_name='skeleton')
-
-        merged_score = self._quick_stroke_score(skel_strokes, mask)
-
-        # Keep raw strokes if merge degraded the score
-        if merged_score < raw_score - 0.01:
-            return VariantResult(strokes=raw_strokes, score=raw_score, variant_name='skeleton')
-
-        return VariantResult(strokes=skel_strokes, score=merged_score, variant_name='skeleton')
+        return try_skeleton_method(
+            analysis=self.analysis,
+            char=self.char,
+            skeleton_to_strokes_fn=self._skeleton_to_strokes,
+            apply_stroke_template_fn=self._apply_stroke_template,
+            adjust_stroke_paths_fn=self._adjust_stroke_paths,
+            quick_stroke_score_fn=self._quick_stroke_score,
+        )
 
     def evaluate_all_variants(self) -> VariantResult:
         """Evaluate all template variants and skeleton, return best result.
 
-        Tries all predefined template variants for the character (if any exist)
-        as well as the pure skeleton method. Returns the variant that produces
-        the highest quality score.
+        Delegates to VariantEvaluator for the evaluation logic.
+        See VariantEvaluator.evaluate_all_variants() for full documentation.
 
         Returns:
-            VariantResult containing:
-                - strokes: Best stroke paths found, or None if all methods failed
-                - score: Quality score of the best result
-                - variant_name: Name of the winning variant ('skeleton' or template name)
-
-        Note:
-            Skeleton results are penalized if their stroke count differs from
-            the expected count (based on template definitions). This helps
-            prefer template-based results when they produce the correct
-            number of strokes.
-
-            When scores are tied, skeleton results are preferred since they
-            are derived from the actual glyph structure rather than templates.
+            VariantResult with best strokes, score, and variant_name.
         """
-        variants = NUMPAD_TEMPLATE_VARIANTS.get(self.char)
-
-        if not variants:
-            return self.try_skeleton_method()
-
-        if self.analysis is None:
-            return VariantResult(strokes=None, score=-1, variant_name=None)
-
-        mask = self.analysis.mask
-        best = VariantResult(strokes=None, score=-1, variant_name=None)
-
-        for var_name, variant_template in variants.items():
-            strokes = self.run(variant_template, trace_paths=True)
-            if strokes:
-                score = self._quick_stroke_score(strokes, mask)
-                if score > best.score:
-                    best = VariantResult(strokes=strokes, score=score, variant_name=var_name)
-
-        skel_result = self.try_skeleton_method()
-        if skel_result.strokes:
-            expected_counts = [len(t) for t in variants.values()]
-            if expected_counts:
-                expected_count = min(expected_counts)
-                if len(skel_result.strokes) != expected_count:
-                    skel_result.score -= 0.3 * abs(len(skel_result.strokes) - expected_count)
-
-            # Prefer skeleton when scores are tied (skeleton is derived from actual glyph)
-            if skel_result.score >= best.score:
-                best = skel_result
-
-        return best
+        evaluator = VariantEvaluator(
+            char=self.char,
+            run_fn=self.run,
+            try_skeleton_fn=self.try_skeleton_method,
+            quick_score_fn=self._quick_stroke_score,
+            get_mask_fn=lambda: self.analysis.mask if self.analysis else None,
+        )
+        return evaluator.evaluate_all_variants()

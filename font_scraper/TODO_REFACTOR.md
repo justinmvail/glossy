@@ -22,7 +22,7 @@ Generated: 2026-02-11
 9. [x] stroke_merge.py:452-490 - endpoint_cluster() called 100+ times without caching
 
 ### CRITICAL - God Modules (>1000 lines, mixed concerns)
-10. [ ] Split stroke_pipeline.py (1364 lines) into pipeline + variant evaluator + path tracing
+10. [x] Split stroke_pipeline.py (1364 lines) into pipeline + variant evaluator + path tracing
 11. [ ] Split stroke_merge.py (1234 lines) into strategies + utilities + legacy
 12. [ ] Split stroke_routes_core.py (1115 lines) into routes + handlers + services
 13. [ ] Split stroke_routes_batch.py (1018 lines) into routes + handlers + services
