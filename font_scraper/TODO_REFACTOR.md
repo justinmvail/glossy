@@ -9,7 +9,7 @@ Generated: 2026-02-11
 ## Ordered Refactoring List
 
 ### CRITICAL - Security & Reliability
-1. [ ] Add input validation bounds for text parameter in stroke_routes_core.py:661
+1. [x] Add input validation bounds for text parameter in stroke_routes_core.py:661
 2. [ ] Add input validation bounds for limit parameter in stroke_routes_batch.py:199
 3. [ ] Fix database connection handling in run_ocr_prefilter.py (use context managers)
 4. [ ] Add thread-safe initialization to stroke_routes_batch.py _diffvg (use Lock)

@@ -659,6 +659,8 @@ def api_font_sample(fid: int) -> Response | tuple[str, int]:
             <img src="/api/font-sample/42?text=Preview" alt="Font preview">
     """
     txt = request.args.get('text', 'Hello World!')
+    if len(txt) > 500:
+        return "Text parameter too long (max 500 characters)", 400
     h = request.args.get('h', 40, type=int)
     if h is None or h < 10 or h > 500:
         return "Invalid height parameter", 400
