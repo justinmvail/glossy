@@ -583,3 +583,87 @@ class FontRepository:
 
 # Default repository instance for convenience
 font_repository = FontRepository()
+
+
+class TestRunRepository:
+    """Repository for test run data (test_runs table).
+
+    Encapsulates database operations for storing and retrieving
+    stroke generation test results.
+    """
+
+    def __init__(self, connection_factory=None):
+        """Initialize the repository.
+
+        Args:
+            connection_factory: Callable that returns a DB context manager.
+                Defaults to get_db_context.
+        """
+        self._connection_factory = connection_factory or get_db_context
+
+    def save_run(self, font_id: int, run_date: str, chars_tested: int,
+                 chars_ok: int, avg_score: float, avg_coverage: float,
+                 avg_overshoot: float, avg_stroke_count: float,
+                 avg_topology: float, results_json: str) -> int:
+        """Save a test run result.
+
+        Returns:
+            The ID of the inserted run.
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                """INSERT INTO test_runs
+                   (font_id, run_date, chars_tested, chars_ok, avg_score,
+                    avg_coverage, avg_overshoot, avg_stroke_count, avg_topology, results_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (font_id, run_date, chars_tested, chars_ok, avg_score,
+                 avg_coverage, avg_overshoot, avg_stroke_count, avg_topology, results_json)
+            )
+            return cursor.lastrowid
+
+    def get_history(self, font_id: int, limit: int = 10) -> list:
+        """Get test run history for a font.
+
+        Args:
+            font_id: The font ID.
+            limit: Maximum number of runs to return.
+
+        Returns:
+            List of test run records, most recent first.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                """SELECT id, run_date, chars_tested, chars_ok, avg_score,
+                          avg_coverage, avg_overshoot, avg_stroke_count, avg_topology
+                   FROM test_runs WHERE font_id = ?
+                   ORDER BY run_date DESC LIMIT ?""",
+                (font_id, limit)
+            ).fetchall()
+
+    def get_run(self, run_id: int):
+        """Get a specific test run by ID.
+
+        Returns:
+            Test run record or None.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                "SELECT * FROM test_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+
+    def get_recent_runs(self, font_id: int, count: int = 2) -> list:
+        """Get the most recent N run IDs for a font.
+
+        Returns:
+            List of run IDs.
+        """
+        with self._connection_factory() as db:
+            rows = db.execute(
+                "SELECT id FROM test_runs WHERE font_id = ? ORDER BY run_date DESC LIMIT ?",
+                (font_id, count)
+            ).fetchall()
+            return [r['id'] for r in rows]
+
+
+# Default test run repository instance
+test_run_repository = TestRunRepository()

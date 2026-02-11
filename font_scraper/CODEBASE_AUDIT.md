@@ -33,11 +33,19 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 2. Architecture
 
-- [ ] Circular dependencies - import cycles
-- [ ] God classes/modules - files with too many responsibilities
-- [ ] Tight coupling - excessive cross-module dependencies
-- [ ] Missing abstraction layers - direct DB/API calls scattered
-- [ ] Inconsistent patterns - mixed approaches to same problem
+- [x] Circular dependencies - import cycles
+  - **Status:** FIXED - stroke_core ↔ stroke_pipeline cycle broken
+  - Fix: Moved MinimalStrokePipeline import to lazy (inside function)
+- [x] God classes/modules - files with too many responsibilities
+  - **Status:** Noted - inksight_vectorizer.py (1364 lines), stroke_pipeline.py (1198 lines)
+  - These are complex but cohesive - no immediate action needed
+- [x] Tight coupling - excessive cross-module dependencies
+  - **Status:** Acceptable - stroke_flask imported by 9 files (it's the Flask app core)
+- [x] Missing abstraction layers - direct DB/API calls scattered
+  - **Status:** FIXED - Added TestRunRepository for test_runs table
+  - Migrated 6 direct DB calls in stroke_routes_batch.py to use repository
+- [x] Inconsistent patterns - mixed approaches to same problem
+  - **Status:** PASS - consistent repository pattern now used for DB access
 
 ## 3. Performance
 
@@ -149,4 +157,9 @@ Systematic review of font_scraper codebase for quality improvements.
 - Extracted `_process_qcurve()` from `extract_contours()` - reduced nesting depth 8→4
 - Extracted `_find_waist_height()` from `find_vertices()` - reduced duplication for B/P/R chars
 - Removed dead code: `catmull_rom_point()`, `catmull_rom_segment()` from stroke_utils.py
+
+### Session 1: Architecture Fixes
+- Fixed circular dependency: stroke_core ↔ stroke_pipeline (lazy import)
+- Added TestRunRepository class to stroke_flask.py
+- Migrated stroke_routes_batch.py to use TestRunRepository (6 DB calls)
 

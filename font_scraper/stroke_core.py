@@ -51,7 +51,6 @@ from stroke_merge import (
     remove_orphan_stubs,
     run_merge_pass,
 )
-from stroke_pipeline import MinimalStrokePipeline
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import quick_stroke_score
 from stroke_skeleton import (
@@ -339,6 +338,9 @@ def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
         variants defined in NUMPAD_TEMPLATE_VARIANTS for the character
         and returns the one with the best score.
     """
+    # Lazy import to avoid circular dependency with stroke_pipeline
+    from stroke_pipeline import MinimalStrokePipeline
+
     pipe = MinimalStrokePipeline(
         fp, c, cs,
         resolve_font_path_fn=resolve_font_path,

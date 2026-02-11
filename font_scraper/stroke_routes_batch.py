@@ -50,6 +50,7 @@ from stroke_flask import (
     get_db_context,
     get_font,
     resolve_font_path,
+    test_run_repository,
 )
 from stroke_rendering import render_glyph_mask
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
@@ -143,11 +144,10 @@ def api_run_tests(fid):
     avg_over = sum(r['overshoot'] for r in ok) / n
     avg_strokes = sum(r['stroke_count_score'] for r in ok) / n
     avg_topo = sum(r['topology_score'] for r in ok) / n
-    db = get_db()
-    db.execute("INSERT INTO test_runs (font_id, run_date, chars_tested, chars_ok, avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology, results_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-               (fid, datetime.now().isoformat(), len(res), len(ok), avg, avg_cov, avg_over, avg_strokes, avg_topo, json.dumps(res)))
-    db.commit()
-    db.close()
+    test_run_repository.save_run(
+        fid, datetime.now().isoformat(), len(res), len(ok),
+        avg, avg_cov, avg_over, avg_strokes, avg_topo, json.dumps(res)
+    )
     return jsonify(ok=True, chars_tested=len(res), chars_ok=len(ok), avg_score=round(avg, 3))
 
 
@@ -191,9 +191,8 @@ def api_test_history(fid):
             }
     """
     ensure_test_tables()
-    db = get_db()
-    runs = db.execute("SELECT id, run_date, chars_tested, chars_ok, avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology FROM test_runs WHERE font_id = ? ORDER BY run_date DESC LIMIT ?", (fid, request.args.get('limit', 10, type=int))).fetchall()
-    db.close()
+    limit = request.args.get('limit', 10, type=int)
+    runs = test_run_repository.get_history(fid, limit)
     return jsonify(runs=[dict(r) for r in runs])
 
 
@@ -243,9 +242,7 @@ def api_test_run_detail(rid):
             {"error": "Run not found"}
     """
     ensure_test_tables()
-    db = get_db()
-    run = db.execute("SELECT * FROM test_runs WHERE id = ?", (rid,)).fetchone()
-    db.close()
+    run = test_run_repository.get_run(rid)
     if not run:
         return jsonify(error="Run not found"), 404
     r = dict(run)
@@ -289,23 +286,20 @@ def api_preview_from_run(rid):
     """
     c, fid = request.args.get('c', 'A'), request.args.get('font_id', type=int)
     ensure_test_tables()
-    db = get_db()
-    run = db.execute("SELECT * FROM test_runs WHERE id = ?", (rid,)).fetchone()
+    run = test_run_repository.get_run(rid)
     if not run:
-        db.close()
         return "Run not found", 404
     res = json.loads(run['results_json']) if run['results_json'] else []
     cr = next((r for r in res if r.get('char') == c), None)
     if not cr or 'strokes' not in cr:
-        db.close()
         img = Image.new('RGB', (224, 224), (26, 26, 46))
         ImageDraw.Draw(img).text((60, 100), "No stroke data", fill=(100, 100, 100))
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
         return send_file(buf, mimetype='image/png')
-    f = db.execute("SELECT file_path FROM fonts WHERE id = ?", (fid or run['font_id'],)).fetchone()
-    db.close()
+    from stroke_flask import font_repository
+    f = font_repository.get_font_by_id(fid or run['font_id'])
     if not f:
         return "Font not found", 404
     m = render_glyph_mask(f['file_path'], c, 224)
@@ -381,19 +375,15 @@ def api_compare_runs():
         Characters that failed in either run will have null scores/delta.
     """
     ensure_test_tables()
-    db = get_db()
     r1, r2, fid = request.args.get('run1', type=int), request.args.get('run2', type=int), request.args.get('font_id', type=int)
     if fid and not (r1 and r2):
-        runs = db.execute("SELECT id FROM test_runs WHERE font_id = ? ORDER BY run_date DESC LIMIT 2", (fid,)).fetchall()
-        if len(runs) < 2:
-            db.close()
+        recent = test_run_repository.get_recent_runs(fid, 2)
+        if len(recent) < 2:
             return jsonify(error="Need at least 2 runs to compare"), 400
-        r2, r1 = runs[0]['id'], runs[1]['id']
+        r2, r1 = recent[0], recent[1]
     if not r1 or not r2:
-        db.close()
         return jsonify(error="Must specify run1 & run2, or font_id"), 400
-    run1, run2 = db.execute("SELECT * FROM test_runs WHERE id = ?", (r1,)).fetchone(), db.execute("SELECT * FROM test_runs WHERE id = ?", (r2,)).fetchone()
-    db.close()
+    run1, run2 = test_run_repository.get_run(r1), test_run_repository.get_run(r2)
     if not run1 or not run2:
         return jsonify(error="Run not found"), 404
     m1 = {r['char']: r for r in (json.loads(run1['results_json']) if run1['results_json'] else [])}
