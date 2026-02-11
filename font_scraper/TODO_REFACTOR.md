@@ -38,7 +38,7 @@ Generated: 2026-02-11
 19. [x] stroke_merge.py - Extract magic thresholds (18, 20, 15, 25) to constants
 20. [x] font_utils.py - Extract PHASH_FONT_SIZE, PHASH_IMG_WIDTH constants
 21. [x] stroke_utils.py - Extract SNAP_DEEP_INSIDE_MIN_DEPTH, LINEAR_SEGMENT_STEP constants
-22. [ ] stroke_rendering.py - Extract SMALLCAPS_MIN_SIZE = 5 constant
+22. [x] stroke_rendering.py - Extract SMALLCAPS_MIN_SIZE, SMALLCAPS_PADDING constants
 23. [ ] Replace broad `except Exception:` in font_utils.py (8 occurrences)
 
 ### HIGH - Testing Gaps

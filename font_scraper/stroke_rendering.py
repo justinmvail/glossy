@@ -49,6 +49,8 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CANVAS_SIZE = 224
 DEFAULT_FONT_SIZE = 200
 SMALLCAPS_NORM_SIZE = 64  # Normalization size for small-caps detection
+SMALLCAPS_MIN_SIZE = 5  # Minimum glyph size (pixels) for small-caps detection
+SMALLCAPS_PADDING = 5  # Padding around glyphs for small-caps rendering
 HOLE_ANALYSIS_CANVAS = 400  # Canvas size for hole analysis rendering
 
 
@@ -619,18 +621,18 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
             u_w = u_bbox[2] - u_bbox[0]
             u_h = u_bbox[3] - u_bbox[1]
 
-            if l_w < 5 or l_h < 5 or u_w < 5 or u_h < 5:
+            if l_w < SMALLCAPS_MIN_SIZE or l_h < SMALLCAPS_MIN_SIZE or u_w < SMALLCAPS_MIN_SIZE or u_h < SMALLCAPS_MIN_SIZE:
                 continue
 
             # Render lowercase at its natural size
-            l_img = Image.new('L', (l_w + 10, l_h + 10), 255)
+            l_img = Image.new('L', (l_w + SMALLCAPS_PADDING * 2, l_h + SMALLCAPS_PADDING * 2), 255)
             l_draw = ImageDraw.Draw(l_img)
-            l_draw.text((5 - l_bbox[0], 5 - l_bbox[1]), lower, fill=0, font=pil_font)
+            l_draw.text((SMALLCAPS_PADDING - l_bbox[0], SMALLCAPS_PADDING - l_bbox[1]), lower, fill=0, font=pil_font)
 
             # Render uppercase at its natural size
-            u_img = Image.new('L', (u_w + 10, u_h + 10), 255)
+            u_img = Image.new('L', (u_w + SMALLCAPS_PADDING * 2, u_h + SMALLCAPS_PADDING * 2), 255)
             u_draw = ImageDraw.Draw(u_img)
-            u_draw.text((5 - u_bbox[0], 5 - u_bbox[1]), upper, fill=0, font=pil_font)
+            u_draw.text((SMALLCAPS_PADDING - u_bbox[0], SMALLCAPS_PADDING - u_bbox[1]), upper, fill=0, font=pil_font)
 
             # Scale both to same normalized size
             l_scaled = l_img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
