@@ -4,6 +4,16 @@ This module contains the implementation functions for each merge strategy.
 These are called by the MergeStrategy subclasses in stroke_merge.py.
 
 Extracted from stroke_merge.py to improve code organization.
+
+Default Thresholds:
+    The magic number defaults in this module match the named constants in
+    stroke_merge.py. When calling these functions via MergeStrategy classes,
+    the constants are passed explicitly. For direct calls, these defaults
+    provide sensible behavior.
+
+    - conv_threshold=18: DEFAULT_CONV_THRESHOLD (convergence stub max length)
+    - stub_threshold=20: DEFAULT_STUB_THRESHOLD (junction stub max length)
+    - prox_threshold=20: DEFAULT_PROX_THRESHOLD (proximity merge distance)
 """
 
 from __future__ import annotations

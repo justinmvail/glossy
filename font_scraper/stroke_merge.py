@@ -45,11 +45,17 @@ Key Concepts:
 
 Typical usage:
     # Using the Strategy Pattern:
+    from stroke_merge import (
+        DEFAULT_CONV_THRESHOLD, DEFAULT_STUB_THRESHOLD
+    )
     pipeline = MergePipeline([
         DirectionMergeStrategy(max_angle=np.pi/4),
         TJunctionMergeStrategy(),
-        StubAbsorptionStrategy(conv_threshold=18, stub_threshold=20),
-        OrphanRemovalStrategy(stub_threshold=20),
+        StubAbsorptionStrategy(
+            conv_threshold=DEFAULT_CONV_THRESHOLD,
+            stub_threshold=DEFAULT_STUB_THRESHOLD
+        ),
+        OrphanRemovalStrategy(stub_threshold=DEFAULT_STUB_THRESHOLD),
     ])
     strokes = pipeline.run(strokes, junction_clusters, assigned_clusters)
 
@@ -98,6 +104,35 @@ from stroke_merge_strategies import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Merge Threshold Constants
+# ---------------------------------------------------------------------------
+
+# Default thresholds for merge operations
+# These control when strokes are considered for merging or absorption
+
+# Convergence stub threshold: Maximum length for a stroke to be absorbed
+# at a convergence point (where multiple strokes meet at an apex, like top of 'A')
+DEFAULT_CONV_THRESHOLD = 18
+
+# Junction stub threshold: Maximum length for a stroke to be absorbed
+# at a junction cluster (where strokes meet)
+DEFAULT_STUB_THRESHOLD = 20
+
+# Proximity threshold: Maximum distance for proximity-based stub absorption
+DEFAULT_PROX_THRESHOLD = 20
+
+# Conservative thresholds (less merging, preserves more strokes)
+CONSERVATIVE_CONV_THRESHOLD = 12
+CONSERVATIVE_STUB_THRESHOLD = 15
+CONSERVATIVE_PROX_THRESHOLD = 15
+
+# Aggressive thresholds (more merging, simplifies more)
+AGGRESSIVE_CONV_THRESHOLD = 25
+AGGRESSIVE_STUB_THRESHOLD = 25
+AGGRESSIVE_PROX_THRESHOLD = 25
 
 
 # ---------------------------------------------------------------------------
@@ -203,16 +238,21 @@ class StubAbsorptionStrategy(MergeStrategy):
     into a single strategy for convenience.
 
     Attributes:
-        conv_threshold: Max length for convergence stubs. Default 18.
-        stub_threshold: Max length for junction/proximity stubs. Default 20.
-        prox_threshold: Max distance for proximity merging. Default 20.
+        conv_threshold: Max length for convergence stubs.
+            Default DEFAULT_CONV_THRESHOLD (18).
+        stub_threshold: Max length for junction/proximity stubs.
+            Default DEFAULT_STUB_THRESHOLD (20).
+        prox_threshold: Max distance for proximity merging.
+            Default DEFAULT_PROX_THRESHOLD (20).
         absorb_convergence: Whether to absorb convergence stubs. Default True.
         absorb_junction: Whether to absorb junction stubs. Default True.
         absorb_proximity: Whether to absorb proximity stubs. Default True.
     """
 
-    def __init__(self, conv_threshold: int = 18, stub_threshold: int = 20,
-                 prox_threshold: int = 20, absorb_convergence: bool = True,
+    def __init__(self, conv_threshold: int = DEFAULT_CONV_THRESHOLD,
+                 stub_threshold: int = DEFAULT_STUB_THRESHOLD,
+                 prox_threshold: int = DEFAULT_PROX_THRESHOLD,
+                 absorb_convergence: bool = True,
                  absorb_junction: bool = True, absorb_proximity: bool = True):
         self.conv_threshold = conv_threshold
         self.stub_threshold = stub_threshold
@@ -249,10 +289,11 @@ class OrphanRemovalStrategy(MergeStrategy):
     strokes have endpoints.
 
     Attributes:
-        stub_threshold: Max length for a stroke to be considered. Default 20.
+        stub_threshold: Max length for a stroke to be considered.
+            Default DEFAULT_STUB_THRESHOLD (20).
     """
 
-    def __init__(self, stub_threshold: int = 20):
+    def __init__(self, stub_threshold: int = DEFAULT_STUB_THRESHOLD):
         self.stub_threshold = stub_threshold
 
     def merge(self, ctx: MergeContext) -> list[list[tuple]]:
@@ -296,47 +337,59 @@ class MergePipeline:
         """Create the default merge pipeline.
 
         Returns:
-            MergePipeline with standard strategy sequence.
+            MergePipeline with standard strategy sequence using
+            DEFAULT_CONV_THRESHOLD, DEFAULT_STUB_THRESHOLD.
         """
         return cls([
             DirectionMergeStrategy(max_angle=np.pi/4),
             TJunctionMergeStrategy(),
-            StubAbsorptionStrategy(conv_threshold=18, stub_threshold=20),
-            OrphanRemovalStrategy(stub_threshold=20),
+            StubAbsorptionStrategy(
+                conv_threshold=DEFAULT_CONV_THRESHOLD,
+                stub_threshold=DEFAULT_STUB_THRESHOLD,
+            ),
+            OrphanRemovalStrategy(stub_threshold=DEFAULT_STUB_THRESHOLD),
         ])
 
     @classmethod
     def create_aggressive(cls) -> 'MergePipeline':
         """Create an aggressive merge pipeline.
 
-        Uses wider angle tolerance and lower thresholds for more merging.
+        Uses wider angle tolerance and higher thresholds for more merging.
 
         Returns:
-            MergePipeline with aggressive settings.
+            MergePipeline with aggressive settings using
+            AGGRESSIVE_CONV_THRESHOLD, AGGRESSIVE_STUB_THRESHOLD.
         """
         return cls([
             DirectionMergeStrategy(max_angle=np.pi/3),  # 60 degrees
             TJunctionMergeStrategy(),
-            StubAbsorptionStrategy(conv_threshold=25, stub_threshold=25,
-                                   prox_threshold=25),
-            OrphanRemovalStrategy(stub_threshold=25),
+            StubAbsorptionStrategy(
+                conv_threshold=AGGRESSIVE_CONV_THRESHOLD,
+                stub_threshold=AGGRESSIVE_STUB_THRESHOLD,
+                prox_threshold=AGGRESSIVE_PROX_THRESHOLD,
+            ),
+            OrphanRemovalStrategy(stub_threshold=AGGRESSIVE_STUB_THRESHOLD),
         ])
 
     @classmethod
     def create_conservative(cls) -> 'MergePipeline':
         """Create a conservative merge pipeline.
 
-        Uses stricter angle tolerance and higher thresholds for less merging.
+        Uses stricter angle tolerance and lower thresholds for less merging.
 
         Returns:
-            MergePipeline with conservative settings.
+            MergePipeline with conservative settings using
+            CONSERVATIVE_CONV_THRESHOLD, CONSERVATIVE_STUB_THRESHOLD.
         """
         return cls([
             DirectionMergeStrategy(max_angle=np.pi/6),  # 30 degrees
             TJunctionMergeStrategy(),
-            StubAbsorptionStrategy(conv_threshold=12, stub_threshold=15,
-                                   prox_threshold=15),
-            OrphanRemovalStrategy(stub_threshold=15),
+            StubAbsorptionStrategy(
+                conv_threshold=CONSERVATIVE_CONV_THRESHOLD,
+                stub_threshold=CONSERVATIVE_STUB_THRESHOLD,
+                prox_threshold=CONSERVATIVE_PROX_THRESHOLD,
+            ),
+            OrphanRemovalStrategy(stub_threshold=CONSERVATIVE_STUB_THRESHOLD),
         ])
 
     def run(self, strokes: list[list[tuple]],
