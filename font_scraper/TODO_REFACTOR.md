@@ -8,7 +8,7 @@ Generated: 2026-02-11
 
 ## Ordered Refactoring List
 
-1. [ ] `run_prefilters.py` - `run_pipeline()` 273 lines → split into stage handlers
+1. [x] `run_prefilters.py` - `run_pipeline()` 273 lines → split into stage handlers
 2. [ ] `run_ocr_prefilter.py` - `run_prefilter()` 197 lines → extract validation logic
 3. [ ] `run_ocr_prefilter.py` - `run_batch_ocr()` 140 lines → extract batch helpers
 4. [ ] `stroke_pipeline_stream.py` - `stream_minimal_strokes()` 131 lines → extract phases
@@ -35,7 +35,7 @@ Functions that should be broken down into smaller pieces:
 
 | File | Function | Lines | Action |
 |------|----------|-------|--------|
-| `run_prefilters.py:114` | `run_pipeline()` | 273 | Split into stage handlers |
+| `run_prefilters.py:333` | `run_pipeline()` | 84 | ✓ DONE - split into 4 helpers |
 | `run_ocr_prefilter.py:351` | `run_prefilter()` | 197 | Extract validation logic |
 | `run_ocr_prefilter.py:209` | `run_batch_ocr()` | 140 | Extract batch processing helpers |
 | `stroke_pipeline_stream.py:451` | `stream_minimal_strokes()` | 131 | Extract phase handlers |
