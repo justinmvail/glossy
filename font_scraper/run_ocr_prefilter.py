@@ -348,56 +348,16 @@ print("RESULTS_END", flush=True)
         os.unlink(script_path)
 
 
-def run_prefilter(db_path: str, threshold: float = 0.7):
-    """Run OCR prefilter on all passing fonts.
-
-    This is the main orchestration function that:
-        1. Queries the database for fonts to process
-        2. Renders sample images for each font
-        3. Runs batch OCR via Docker
-        4. Calculates confidence scores
-        5. Updates the database with results
-        6. Prints summary statistics
+def _render_all_samples(fonts: list, temp_dir: str) -> tuple[dict, list]:
+    """Render sample images for all fonts.
 
     Args:
-        db_path: Path to the SQLite fonts database.
-        threshold: Minimum confidence score (0.0-1.0) for a font to pass.
-            Defaults to 0.7 (70% match required).
+        fonts: List of font dicts with 'id' and 'file_path' keys.
+        temp_dir: Directory to save rendered images.
 
     Returns:
-        None. Results are printed to stdout and written to the database.
-
-    Note:
-        Fonts that fail the prefilter are recorded in the font_removals
-        table with reason 'ocr_prefilter' and details including the
-        expected text, recognized text, and confidence score.
+        Tuple of (font_to_file dict, render_errors list).
     """
-    print("=" * 60)
-    print("OCR PREFILTER - BATCH MODE")
-    print("=" * 60)
-
-    total_start = time.perf_counter()
-    timings = {}
-
-    # Step 1: Get fonts
-    print("\n[1] Getting fonts from database...")
-    t0 = time.perf_counter()
-    fonts = get_passing_fonts(db_path)
-    timings['db_query'] = time.perf_counter() - t0
-    print(f"  Found {len(fonts)} fonts to process ({timings['db_query']:.2f}s)")
-
-    if not fonts:
-        print("  No fonts to process!")
-        return
-
-    # Step 2: Render all samples
-    print("\n[2] Rendering sample images...")
-    t0 = time.perf_counter()
-
-    # Create temp directory for images
-    temp_dir = tempfile.mkdtemp(prefix='ocr_prefilter_')
-    print(f"  Temp dir: {temp_dir}")
-
     font_to_file = {}  # font_id -> filename
     render_errors = []
 
@@ -413,29 +373,22 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
         else:
             render_errors.append(font['id'])
 
-    timings['render'] = time.perf_counter() - t0
-    print(f"  Rendered {len(font_to_file)} images ({timings['render']:.2f}s)")
-    if render_errors:
-        print(f"  Render errors: {len(render_errors)}")
+    return font_to_file, render_errors
 
-    # Step 3: Run batch OCR
-    print("\n[3] Running TrOCR (batch mode)...")
-    t0 = time.perf_counter()
 
-    image_files = list(font_to_file.values())
-    results = run_batch_ocr(temp_dir, image_files)
+def _process_ocr_results(db_path: str, results: dict, font_to_file: dict,
+                         threshold: float) -> dict:
+    """Process OCR results and update database.
 
-    timings['ocr'] = time.perf_counter() - t0
-    print(f"  OCR complete ({timings['ocr']:.2f}s)")
+    Args:
+        db_path: Path to SQLite database.
+        results: OCR results dict from run_batch_ocr().
+        font_to_file: Mapping of font_id to filename.
+        threshold: Confidence threshold for passing.
 
-    if not results:
-        print("  ERROR: OCR failed!")
-        return
-
-    # Step 4: Process results and update database
-    print("\n[4] Processing results and updating database...")
-    t0 = time.perf_counter()
-
+    Returns:
+        Dict with 'passed', 'failed', 'errors' counts.
+    """
     passed = 0
     failed = 0
     errors = 0
@@ -478,24 +431,27 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
                     f"confidence={confidence:.1%}, expected='{SAMPLE_TEXT}', got='{ocr_text}'"
                 )
 
-    timings['db_update'] = time.perf_counter() - t0
-    print(f"  Database updated ({timings['db_update']:.2f}s)")
+    return {'passed': passed, 'failed': failed, 'errors': errors}
 
-    # Cleanup temp directory
-    import shutil
-    shutil.rmtree(temp_dir)
 
-    # Summary
-    total_time = time.perf_counter() - total_start
-    timings['total'] = total_time
+def _print_summary(fonts: list, counts: dict, render_errors: list,
+                   timings: dict, threshold: float) -> None:
+    """Print results and timing summary.
 
+    Args:
+        fonts: List of processed fonts.
+        counts: Dict with 'passed', 'failed', 'errors' counts.
+        render_errors: List of font IDs that failed to render.
+        timings: Dict of timing measurements.
+        threshold: Confidence threshold used.
+    """
     print("\n" + "=" * 60)
     print("RESULTS")
     print("=" * 60)
     print(f"  Total fonts processed: {len(fonts)}")
-    print(f"  Passed (>={threshold:.0%}): {passed}")
-    print(f"  Failed (<{threshold:.0%}): {failed}")
-    print(f"  Errors: {errors}")
+    print(f"  Passed (>={threshold:.0%}): {counts['passed']}")
+    print(f"  Failed (<{threshold:.0%}): {counts['failed']}")
+    print(f"  Errors: {counts['errors']}")
     print(f"  Render errors: {len(render_errors)}")
 
     print("\n" + "=" * 60)
@@ -508,15 +464,22 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
     print("  ─────────────────────────")
     print(f"  TOTAL:      {timings['total']:>7.2f}s ({timings['total']/60:.1f} min)")
 
-    # Show some examples
-    print("\n" + "=" * 60)
-    print("SAMPLE RESULTS")
-    print("=" * 60)
 
+def _print_sample_results(db_path: str, threshold: float) -> None:
+    """Print sample OCR results from database.
+
+    Args:
+        db_path: Path to SQLite database.
+        threshold: Confidence threshold for pass/fail display.
+    """
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
+    print("\n" + "=" * 60)
+    print("SAMPLE RESULTS")
+    print("=" * 60)
 
     print("\nHighest confidence (best OCR):")
     cursor.execute("""
@@ -545,6 +508,96 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
         print(f"  {row['prefilter_confidence']:.1%} [{status}] {row['name'][:30]:30} -> '{row['prefilter_ocr_text']}'")
 
     conn.close()
+
+
+def run_prefilter(db_path: str, threshold: float = 0.7):
+    """Run OCR prefilter on all passing fonts.
+
+    This is the main orchestration function that:
+        1. Queries the database for fonts to process
+        2. Renders sample images for each font
+        3. Runs batch OCR via Docker
+        4. Calculates confidence scores
+        5. Updates the database with results
+        6. Prints summary statistics
+
+    Args:
+        db_path: Path to the SQLite fonts database.
+        threshold: Minimum confidence score (0.0-1.0) for a font to pass.
+            Defaults to 0.7 (70% match required).
+
+    Returns:
+        None. Results are printed to stdout and written to the database.
+
+    Note:
+        Fonts that fail the prefilter are recorded in the font_removals
+        table with reason 'ocr_prefilter' and details including the
+        expected text, recognized text, and confidence score.
+    """
+    import shutil
+
+    print("=" * 60)
+    print("OCR PREFILTER - BATCH MODE")
+    print("=" * 60)
+
+    total_start = time.perf_counter()
+    timings = {}
+
+    # Step 1: Get fonts
+    print("\n[1] Getting fonts from database...")
+    t0 = time.perf_counter()
+    fonts = get_passing_fonts(db_path)
+    timings['db_query'] = time.perf_counter() - t0
+    print(f"  Found {len(fonts)} fonts to process ({timings['db_query']:.2f}s)")
+
+    if not fonts:
+        print("  No fonts to process!")
+        return
+
+    # Step 2: Render all samples
+    print("\n[2] Rendering sample images...")
+    t0 = time.perf_counter()
+    temp_dir = tempfile.mkdtemp(prefix='ocr_prefilter_')
+    print(f"  Temp dir: {temp_dir}")
+
+    font_to_file, render_errors = _render_all_samples(fonts, temp_dir)
+
+    timings['render'] = time.perf_counter() - t0
+    print(f"  Rendered {len(font_to_file)} images ({timings['render']:.2f}s)")
+    if render_errors:
+        print(f"  Render errors: {len(render_errors)}")
+
+    # Step 3: Run batch OCR
+    print("\n[3] Running TrOCR (batch mode)...")
+    t0 = time.perf_counter()
+
+    image_files = list(font_to_file.values())
+    results = run_batch_ocr(temp_dir, image_files)
+
+    timings['ocr'] = time.perf_counter() - t0
+    print(f"  OCR complete ({timings['ocr']:.2f}s)")
+
+    if not results:
+        print("  ERROR: OCR failed!")
+        shutil.rmtree(temp_dir)
+        return
+
+    # Step 4: Process results and update database
+    print("\n[4] Processing results and updating database...")
+    t0 = time.perf_counter()
+
+    counts = _process_ocr_results(db_path, results, font_to_file, threshold)
+
+    timings['db_update'] = time.perf_counter() - t0
+    print(f"  Database updated ({timings['db_update']:.2f}s)")
+
+    # Cleanup temp directory
+    shutil.rmtree(temp_dir)
+
+    # Summary
+    timings['total'] = time.perf_counter() - total_start
+    _print_summary(fonts, counts, render_errors, timings, threshold)
+    _print_sample_results(db_path, threshold)
 
 
 def main():
