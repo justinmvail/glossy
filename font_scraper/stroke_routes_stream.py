@@ -399,6 +399,75 @@ def _determine_completion_reason(score: float, elapsed: float) -> str:
         return 'converged'
 
 
+def _initialize_optimization(font_path: str, char: str,
+                              canvas_size: int) -> tuple[list, np.ndarray, tuple | None]:
+    """Initialize optimization by getting strokes and preparing state.
+
+    Args:
+        font_path: Path to font file.
+        char: Character to optimize.
+        canvas_size: Canvas size in pixels.
+
+    Returns:
+        Tuple of (strokes_raw, mask, setup) where setup is None if optimization
+        not needed, or (stroke_arrays, centroid, score_args, w, h).
+    """
+    strokes_raw, error = _get_initial_strokes(font_path, char, canvas_size)
+    if strokes_raw is None:
+        return None, None, ('error', error)
+
+    mask = render_glyph_mask(font_path, char, canvas_size)
+    if mask is None:
+        return None, None, ('error', 'Could not render glyph mask')
+
+    setup = _prepare_optimization(mask, strokes_raw)
+    return strokes_raw, mask, setup
+
+
+def _emit_phase_result(strokes: list[np.ndarray], frame: int,
+                       score: float, phase: str) -> str:
+    """Create SSE event for phase completion.
+
+    Args:
+        strokes: Current stroke arrays.
+        frame: Current frame number.
+        score: Current score (negative internally, displayed positive).
+        phase: Phase name for display.
+
+    Returns:
+        SSE event string.
+    """
+    return _sse_event({
+        'strokes': _strokes_to_list(strokes),
+        'frame': frame, 'score': round(-score, 3), 'phase': phase
+    })
+
+
+def _emit_final_result(strokes: list[np.ndarray], frame: int,
+                       score: float, start_time: float) -> str:
+    """Create SSE event for final completion.
+
+    Args:
+        strokes: Final stroke arrays.
+        frame: Final frame number.
+        score: Final score (negative internally).
+        start_time: Start timestamp.
+
+    Returns:
+        SSE event string.
+    """
+    elapsed = round(time.time() - start_time, 2)
+    final_score_display = round(-score, 3)
+    reason = _determine_completion_reason(final_score_display, elapsed)
+
+    return _sse_event({
+        'strokes': _strokes_to_list(strokes),
+        'frame': frame, 'score': final_score_display,
+        'phase': 'Complete', 'done': True, 'reason': reason,
+        'elapsed': elapsed, 'cycles': frame
+    })
+
+
 def optimize_stream_generator(font_path: str, char: str,
                               canvas_size: int = 224) -> Generator[str, None, None]:
     """Generator that yields SSE events during multi-phase stroke optimization.
@@ -428,23 +497,16 @@ def optimize_stream_generator(font_path: str, char: str,
           positive values (higher = better)
     """
     start_time = time.time()
-    frame = 0
 
-    # Phase 0: Get initial strokes
-    yield _sse_event({'phase': 'Initializing', 'frame': frame, 'score': 0})
+    # Phase 0: Initialize
+    yield _sse_event({'phase': 'Initializing', 'frame': 0, 'score': 0})
 
-    strokes_raw, error = _get_initial_strokes(font_path, char, canvas_size)
+    strokes_raw, mask, setup = _initialize_optimization(font_path, char, canvas_size)
+
     if strokes_raw is None:
-        yield _sse_event({'error': error})
+        yield _sse_event({'error': setup[1]})
         return
 
-    # Prepare optimization
-    mask = render_glyph_mask(font_path, char, canvas_size)
-    if mask is None:
-        yield _sse_event({'error': 'Could not render glyph mask'})
-        return
-
-    setup = _prepare_optimization(mask, strokes_raw)
     if setup is None:
         yield _sse_event({
             'strokes': strokes_raw, 'frame': 1, 'score': 0.5,
@@ -456,13 +518,9 @@ def optimize_stream_generator(font_path: str, char: str,
     stroke_arrays, centroid, score_args, _w, _h = setup
 
     # Emit initial strokes
-    frame += 1
+    frame = 1
     initial_score = -score_raw_strokes(stroke_arrays, *score_args)
-    yield _sse_event({
-        'strokes': _strokes_to_list(stroke_arrays),
-        'frame': frame, 'score': round(initial_score, 3), 'phase': 'Initial'
-    })
-
+    yield _emit_phase_result(stroke_arrays, frame, -initial_score, 'Initial')
     best_score = -initial_score
 
     # Phase 1: Nelder-Mead optimization
@@ -472,10 +530,7 @@ def optimize_stream_generator(font_path: str, char: str,
     if nm_score < best_score:
         best_score = nm_score
         frame += 1
-        yield _sse_event({
-            'strokes': _strokes_to_list(best_strokes),
-            'frame': frame, 'score': round(-best_score, 3), 'phase': 'NM complete'
-        })
+        yield _emit_phase_result(best_strokes, frame, best_score, 'NM complete')
 
     # Phase 2: Differential Evolution refinement
     yield _sse_event({'phase': 'Global affine (DE)', 'frame': frame, 'score': round(-best_score, 3)})
@@ -486,10 +541,7 @@ def optimize_stream_generator(font_path: str, char: str,
         best_strokes = de_strokes
 
     frame += 1
-    yield _sse_event({
-        'strokes': _strokes_to_list(best_strokes),
-        'frame': frame, 'score': round(-best_score, 3), 'phase': 'DE complete'
-    })
+    yield _emit_phase_result(best_strokes, frame, best_score, 'DE complete')
 
     # Phase 3: Per-stroke refinement
     yield _sse_event({'phase': 'Per-stroke refine', 'frame': frame, 'score': round(-best_score, 3)})
@@ -500,22 +552,10 @@ def optimize_stream_generator(font_path: str, char: str,
         best_strokes = final_strokes
 
     frame += 1
-    yield _sse_event({
-        'strokes': _strokes_to_list(best_strokes),
-        'frame': frame, 'score': round(-best_score, 3), 'phase': 'Per-stroke complete'
-    })
+    yield _emit_phase_result(best_strokes, frame, best_score, 'Per-stroke complete')
 
     # Final result
-    elapsed = round(time.time() - start_time, 2)
-    final_score_display = round(-best_score, 3)
-    reason = _determine_completion_reason(final_score_display, elapsed)
-
-    yield _sse_event({
-        'strokes': _strokes_to_list(best_strokes),
-        'frame': frame, 'score': final_score_display,
-        'phase': 'Complete', 'done': True, 'reason': reason,
-        'elapsed': elapsed, 'cycles': frame
-    })
+    yield _emit_final_result(best_strokes, frame, best_score, start_time)
 
 
 @app.route('/api/optimize-stream/<int:fid>')
