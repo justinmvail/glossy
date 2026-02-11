@@ -239,7 +239,7 @@ class GoogleFontsScraper(FontSource):
         try:
             url = self.get_font_url(family)
             if not url:
-                print("    Could not get download URL")
+                logger.warning("Could not get download URL for %s", family)
                 return False
 
             resp = self.session.get(url, timeout=60)
@@ -260,11 +260,11 @@ class GoogleFontsScraper(FontSource):
             out_path = self.output_dir / f"google_{safe_name}{ext}"
             out_path.write_bytes(resp.content)
 
-            print(f"    Saved: {out_path.name}")
+            logger.debug("Saved: %s", out_path.name)
             return True
 
         except Exception as e:
-            print(f"    Error: {e}")
+            logger.error("Error downloading %s: %s", family, e)
             return False
 
     def scrape_and_download(
@@ -306,25 +306,25 @@ class GoogleFontsScraper(FontSource):
             return super().scrape_and_download(config)
 
         # Legacy interface
-        print("=" * 60)
-        print("Google Fonts Scraper")
-        print("=" * 60)
-        print(f"Output directory: {self.output_dir}")
+        logger.info("=" * 60)
+        logger.info("Google Fonts Scraper")
+        logger.info("=" * 60)
+        logger.info("Output directory: %s", self.output_dir)
 
         if fonts is None:
             fonts = self.HANDWRITING_FONTS.copy()
 
-        print(f"Fonts to download: {len(fonts)}")
+        logger.info("Fonts to download: %d", len(fonts))
 
         if max_fonts:
             fonts = fonts[:max_fonts]
-            print(f"Limiting to {max_fonts} fonts")
+            logger.info("Limiting to %d fonts", max_fonts)
 
         # Download
-        print(f"\nDownloading {len(fonts)} fonts...")
+        logger.info("Downloading %d fonts...", len(fonts))
 
         for i, family in enumerate(fonts):
-            print(f"[{i+1}/{len(fonts)}]", end='')
+            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts), family)
             if self.download_font(family):
                 self.downloaded.add(family)
             else:
@@ -345,11 +345,11 @@ class GoogleFontsScraper(FontSource):
         with open(meta_path, 'w') as f:
             json.dump(metadata, f, indent=2)
 
-        print("\n" + "=" * 60)
-        print("COMPLETE")
-        print("=" * 60)
-        print(f"Fonts downloaded: {len(self.downloaded)}")
-        print(f"Failed: {len(self.failed)}")
+        logger.info("=" * 60)
+        logger.info("COMPLETE")
+        logger.info("=" * 60)
+        logger.info("Fonts downloaded: %d", len(self.downloaded))
+        logger.info("Failed: %d", len(self.failed))
 
         return metadata
 

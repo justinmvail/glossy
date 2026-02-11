@@ -33,12 +33,13 @@ Example usage:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
 
-from ..domain.geometry import BBox, Stroke
+from ..domain.geometry import BBox, Point, Stroke
 
 
 @dataclass
@@ -235,8 +236,32 @@ class AffineStrategy:
         Returns:
             Coverage score from 0.0 to 1.0.
         """
-        # Simplified coverage computation
-        return 0.5  # Placeholder
+        strokes = self._params_to_strokes(params, templates, bbox)
+        if not strokes:
+            return 0.0
+
+        # Count glyph pixels
+        glyph_pixels = np.count_nonzero(mask)
+        if glyph_pixels == 0:
+            return 0.0
+
+        # Count how many glyph pixels are near stroke points
+        h, w = mask.shape
+        covered = set()
+        radius = 3  # Coverage radius in pixels
+
+        for stroke in strokes:
+            for point in stroke.points:
+                x, y = int(round(point.x)), int(round(point.y))
+                # Check pixels in radius around this point
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        if dx * dx + dy * dy <= radius * radius:
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx]:
+                                covered.add((ny, nx))
+
+        return len(covered) / glyph_pixels
 
     def _params_to_strokes(
         self,
@@ -257,8 +282,49 @@ class AffineStrategy:
         Returns:
             List of transformed Stroke objects.
         """
-        # Placeholder - would transform template shapes
-        return []
+        # Import shapes registry from main codebase
+        try:
+            from stroke_shapes import SHAPES
+        except ImportError:
+            return []
+
+        tx, ty, rot, sx, sy, shear = params[:6]
+        strokes = []
+        bbox_tuple = bbox.to_tuple()
+
+        for template in templates:
+            if template not in SHAPES:
+                continue
+
+            shape = SHAPES[template]
+            # Use default parameters for shape
+            default_params = tuple([0.5] * shape.param_count)
+            points_arr = shape.generate(default_params, bbox_tuple)
+
+            if len(points_arr) == 0:
+                continue
+
+            # Apply affine transformation
+            cos_r, sin_r = math.cos(rot), math.sin(rot)
+            cx, cy = bbox.center.x, bbox.center.y
+
+            transformed = []
+            for pt in points_arr:
+                # Center, then rotate/scale/shear, then translate
+                x, y = pt[0] - cx, pt[1] - cy
+                # Shear
+                x, y = x + shear * y, y
+                # Scale
+                x, y = x * sx, y * sy
+                # Rotate
+                x, y = x * cos_r - y * sin_r, x * sin_r + y * cos_r
+                # Translate
+                x, y = x + tx, y + ty
+                transformed.append(Point(x, y))
+
+            strokes.append(Stroke(transformed))
+
+        return strokes
 
 
 @dataclass
@@ -354,8 +420,63 @@ class GreedyStrategy:
         Returns:
             Tuple of (optimized Stroke or None, score for this shape).
         """
-        # Placeholder - would do actual optimization
-        return None, 0.0
+        from scipy.optimize import minimize
+
+        try:
+            from stroke_shapes import SHAPES
+        except ImportError:
+            return None, 0.0
+
+        if template not in SHAPES:
+            return None, 0.0
+
+        shape = SHAPES[template]
+        bbox_tuple = bbox.to_tuple()
+        h, w = mask.shape
+        radius = 3
+
+        # Initialize with default params
+        initial_params = np.array([0.5] * shape.param_count)
+        bounds = shape.get_bounds()
+
+        def objective(params):
+            points_arr = shape.generate(tuple(params), bbox_tuple)
+            if len(points_arr) == 0:
+                return 1.0  # Worst score
+
+            # Compute coverage (higher is better, so negate)
+            covered = 0
+            glyph_pixels = np.count_nonzero(mask)
+            if glyph_pixels == 0:
+                return 1.0
+
+            covered_set = set()
+            for pt in points_arr:
+                x, y = int(round(pt[0])), int(round(pt[1]))
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        if dx * dx + dy * dy <= radius * radius:
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx]:
+                                covered_set.add((ny, nx))
+
+            coverage = len(covered_set) / glyph_pixels
+            return -coverage  # Negate for minimization
+
+        result = minimize(
+            objective,
+            initial_params,
+            method='Nelder-Mead',
+            options={'maxiter': self.max_iterations_per_shape}
+        )
+
+        # Generate final stroke
+        points_arr = shape.generate(tuple(result.x), bbox_tuple)
+        if len(points_arr) == 0:
+            return None, 0.0
+
+        points = [Point(pt[0], pt[1]) for pt in points_arr]
+        return Stroke(points), -result.fun
 
 
 @dataclass
@@ -462,8 +583,23 @@ class JointRefinementStrategy:
         Returns:
             List of (min, max) tuples for each parameter.
         """
-        # Placeholder bounds
-        return [(0, 224)] * n_params
+        # First 6 params are affine: tx, ty, rotation, scale_x, scale_y, shear
+        # Remaining are shape parameters (typically 0-1 normalized)
+        bounds = []
+        for i in range(n_params):
+            if i == 0:  # tx
+                bounds.append((bbox.x_min, bbox.x_max))
+            elif i == 1:  # ty
+                bounds.append((bbox.y_min, bbox.y_max))
+            elif i == 2:  # rotation
+                bounds.append((-math.pi / 4, math.pi / 4))
+            elif i == 3 or i == 4:  # scale_x, scale_y
+                bounds.append((0.5, 2.0))
+            elif i == 5:  # shear
+                bounds.append((-0.3, 0.3))
+            else:  # Shape parameters
+                bounds.append((0.0, 1.0))
+        return bounds
 
     def _compute_score(
         self,
@@ -485,7 +621,29 @@ class JointRefinementStrategy:
         Returns:
             Score from 0.0 to 1.0.
         """
-        return 0.5  # Placeholder
+        strokes = self._params_to_strokes(params, templates, bbox)
+        if not strokes:
+            return 0.0
+
+        glyph_pixels = np.count_nonzero(mask)
+        if glyph_pixels == 0:
+            return 0.0
+
+        h, w = mask.shape
+        covered = set()
+        radius = 3
+
+        for stroke in strokes:
+            for point in stroke.points:
+                x, y = int(round(point.x)), int(round(point.y))
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        if dx * dx + dy * dy <= radius * radius:
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx]:
+                                covered.add((ny, nx))
+
+        return len(covered) / glyph_pixels
 
     def _params_to_strokes(
         self,
@@ -505,4 +663,52 @@ class JointRefinementStrategy:
         Returns:
             List of Stroke objects.
         """
-        return []  # Placeholder
+        try:
+            from stroke_shapes import SHAPES
+        except ImportError:
+            return []
+
+        # First 6 params are affine transformation
+        if len(params) < 6:
+            return []
+
+        tx, ty, rot, sx, sy, shear = params[:6]
+        strokes = []
+        bbox_tuple = bbox.to_tuple()
+
+        # Remaining params are distributed across shapes
+        param_offset = 6
+        for template in templates:
+            if template not in SHAPES:
+                continue
+
+            shape = SHAPES[template]
+            n_shape_params = shape.param_count
+
+            # Extract shape params from vector
+            if param_offset + n_shape_params <= len(params):
+                shape_params = tuple(params[param_offset:param_offset + n_shape_params])
+                param_offset += n_shape_params
+            else:
+                shape_params = tuple([0.5] * n_shape_params)
+
+            points_arr = shape.generate(shape_params, bbox_tuple)
+            if len(points_arr) == 0:
+                continue
+
+            # Apply affine transformation
+            cos_r, sin_r = math.cos(rot), math.sin(rot)
+            cx, cy = bbox.center.x, bbox.center.y
+
+            transformed = []
+            for pt in points_arr:
+                x, y = pt[0] - cx, pt[1] - cy
+                x, y = x + shear * y, y
+                x, y = x * sx, y * sy
+                x, y = x * cos_r - y * sin_r, x * sin_r + y * cos_r
+                x, y = x + tx, y + ty
+                transformed.append(Point(x, y))
+
+            strokes.append(Stroke(transformed))
+
+        return strokes

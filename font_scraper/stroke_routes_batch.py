@@ -31,6 +31,7 @@ Attributes:
 
 import io
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime
@@ -38,6 +39,8 @@ from typing import Any
 
 import numpy as np
 from flask import Response, jsonify, render_template, request, send_file
+
+logger = logging.getLogger(__name__)
 from PIL import Image, ImageDraw
 
 from stroke_flask import (
@@ -998,4 +1001,8 @@ def api_diffvg(fid: int) -> Response | tuple[str, int]:
     r = diffvg.optimize(font_path=fp, char=c, initial_strokes=cst, canvas_size=DEFAULT_CANVAS_SIZE,
                         num_iterations=DIFFVG_ITERATIONS, stroke_width=DEFAULT_STROKE_WIDTH,
                         thin_iterations=request.args.get('thin', 0, type=int) or 0, timeout=DIFFVG_TIMEOUT)
-    return (jsonify(error=r['error']), 500) if 'error' in r else jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0), source=src)
+    if 'error' in r:
+        # Log detailed error but return generic message to avoid information disclosure
+        logger.error("DiffVG optimization failed for font %d char '%s': %s", fid, c, r['error'])
+        return jsonify(error="Optimization failed"), 500
+    return jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0), source=src)

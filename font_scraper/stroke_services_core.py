@@ -118,7 +118,7 @@ def get_character_data(font_id: int, char: str, include_image: bool = True) -> C
     Returns:
         CharacterData or None if font not found.
     """
-    font_row = font_repository.get_by_id(font_id)
+    font_row = font_repository.get_font_by_id(font_id)
     if not font_row:
         return None
 
@@ -152,7 +152,7 @@ def save_character_data(font_id: int, char: str, strokes: list, markers: list = 
     Returns:
         True if saved successfully.
     """
-    font_row = font_repository.get_by_id(font_id)
+    font_row = font_repository.get_font_by_id(font_id)
     if not font_row:
         return False
 

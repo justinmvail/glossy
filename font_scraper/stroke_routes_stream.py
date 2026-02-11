@@ -366,8 +366,8 @@ def _run_per_stroke_refinement(best_strokes: list[np.ndarray],
                 pts[:, 1] = c[1] + sy * (pts[:, 1] - c[1]) + dy
                 final_strokes.append(pts)
             return nm2.fun, final_strokes
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Per-stroke Nelder-Mead optimization failed: %s", e)
 
     return best_score, best_strokes
 
@@ -406,8 +406,8 @@ def _get_initial_strokes(font_path: str, char: str,
             strokes = skel_strokes(mask, min_len=5)
             if strokes:
                 return strokes, None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Skeleton stroke extraction failed for %s '%s': %s", font_path, char, e)
 
     return None, 'No strokes generated'
 
@@ -671,7 +671,8 @@ def api_optimize_stream(fid: int) -> Response:
     def generate():
         try:
             yield from optimize_stream_generator(f['file_path'], c)
-        except Exception:
+        except Exception as e:
+            logger.error("Optimization stream failed for font %d char '%s': %s", fid, c, e)
             yield _sse_event({'error': 'Optimization failed'})
 
     return _create_sse_response(generate())
@@ -770,7 +771,8 @@ def api_minimal_strokes_stream(fid: int) -> Response:
                 step['frame'] = frame
                 step['elapsed'] = round(time.time() - start_time, 2)
                 yield _sse_event(step)
-        except Exception:
+        except Exception as e:
+            logger.error("Minimal strokes stream failed for font %d char '%s': %s", fid, c, e)
             yield _sse_event({'error': 'Stroke generation failed', 'done': True})
 
     return _create_sse_response(generate())

@@ -106,6 +106,7 @@ from stroke_services_core import (
     MIN_SHAPE_COUNT,
     MAX_SHAPE_COUNT,
     MAX_WIDTH_RATIO,
+    EXPECTED_EXCLAMATION_SHAPES,
 )
 
 # Alias for backward compatibility
@@ -564,7 +565,8 @@ def api_check_connected(fid: int) -> Response | tuple[str, int]:
         if shape_count == 0:
             return jsonify(error="Could not render"), 500
         return jsonify(shapes=shape_count, bad=is_bad, case_mismatches=case_mismatches)
-    except Exception:
+    except Exception as e:
+        logger.warning("Font quality check failed for font %d: %s", fid, e)
         return jsonify(error="Could not check font"), 500
 
 
@@ -687,7 +689,8 @@ def api_font_sample(fid: int) -> Response | tuple[str, int]:
         img.save(buf, format='PNG')
         buf.seek(0)
         return send_file(buf, mimetype='image/png')
-    except Exception:
+    except Exception as e:
+        logger.warning("Font sample render failed for font %d: %s", fid, e)
         return "Could not render font sample", 500
 
 
