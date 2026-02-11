@@ -42,6 +42,14 @@ DIRECTION_BIAS_STEPS = 15  # Apply direction bias only for first N steps
 DIRECTION_BIAS_WEIGHT = 10  # Multiplier for direction matching bonus
 AVOID_PENALTY = 1000  # Penalty score for stepping on avoided pixels
 
+# Direction vectors for path tracing
+DIRECTION_VECTORS = {
+    'down': (0, 1),
+    'up': (0, -1),
+    'left': (-1, 0),
+    'right': (1, 0),
+}
+
 
 def analyze_skeleton(mask: np.ndarray, merge_dist: int = SKELETON_MERGE_DISTANCE) -> dict | None:
     """Analyze a glyph skeleton to find topological features.
@@ -368,6 +376,87 @@ def snap_to_skeleton(point: tuple, skel_set: set) -> tuple:
     return nearest
 
 
+def _compute_neighbor_score(neighbor: tuple, current: tuple, end: tuple,
+                            dir_vec: tuple | None, steps: int,
+                            avoid_pixels: set) -> float:
+    """Compute priority score for a neighbor pixel in BFS path finding.
+
+    Lower scores are preferred. The score combines distance to target,
+    optional direction bias, and avoidance penalties.
+
+    Args:
+        neighbor: The neighbor pixel position (x, y).
+        current: The current pixel position (x, y).
+        end: The target position (x, y).
+        dir_vec: Optional direction vector for bias, or None.
+        steps: Current step count in the path.
+        avoid_pixels: Set of pixels to penalize.
+
+    Returns:
+        Priority score (lower = better).
+    """
+    # Base score: distance to end
+    to_end = ((end[0] - neighbor[0])**2 + (end[1] - neighbor[1])**2)**0.5
+    score = to_end
+
+    # Direction bias (only for first few pixels)
+    if dir_vec and steps < DIRECTION_BIAS_STEPS:
+        dx, dy = neighbor[0] - current[0], neighbor[1] - current[1]
+        dot = dx * dir_vec[0] + dy * dir_vec[1]
+        score -= dot * DIRECTION_BIAS_WEIGHT
+
+    # Penalty for avoid_pixels
+    if neighbor in avoid_pixels:
+        score += AVOID_PENALTY
+
+    return score
+
+
+def _bfs_trace_path(start: tuple, end: tuple, adj: dict, max_steps: int,
+                    avoid_pixels: set, dir_vec: tuple | None) -> list[tuple] | None:
+    """BFS path finding with neighbor priority scoring.
+
+    Args:
+        start: Starting position (already snapped to skeleton).
+        end: Target position (already snapped to skeleton).
+        adj: Adjacency dict mapping pixels to neighbors.
+        max_steps: Maximum path length.
+        avoid_pixels: Set of pixels to penalize.
+        dir_vec: Direction vector for bias, or None.
+
+    Returns:
+        List of (x, y) tuples forming the path, or None if not found.
+    """
+    if start == end:
+        return [start]
+
+    queue = deque([(start, [start], 0)])
+    visited = {start}
+
+    while queue:
+        current, path, steps = queue.popleft()
+
+        if steps >= max_steps:
+            continue
+
+        if current == end:
+            return path
+
+        neighbors = adj.get(current, [])
+        sorted_neighbors = sorted(
+            neighbors,
+            key=lambda n: _compute_neighbor_score(n, current, end, dir_vec, steps, avoid_pixels)
+        )
+
+        for nb in sorted_neighbors:
+            if nb in visited:
+                continue
+            visited.add(nb)
+            queue.append((nb, [*path, nb], steps + 1))
+
+    return None
+
+
 def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
                         max_steps: int = 500, avoid_pixels: set | None = None,
                         direction: str | None = None) -> list[tuple] | None:
@@ -394,7 +483,7 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
 
     Notes:
         - Uses BFS with neighbor sorting for efficient path finding.
-        - Direction bias only applies to the first 15 pixels of the path.
+        - Direction bias only applies to the first DIRECTION_BIAS_STEPS pixels.
         - Avoided pixels incur a penalty but don't completely block paths.
     """
     if avoid_pixels is None:
@@ -402,65 +491,16 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
 
     start = snap_to_skeleton(start, skel_set)
     end = snap_to_skeleton(end, skel_set)
+    dir_vec = DIRECTION_VECTORS.get(direction)
 
-    if start == end:
-        return [start]
+    # Try with avoidance first
+    path = _bfs_trace_path(start, end, adj, max_steps, avoid_pixels, dir_vec)
 
-    # BFS with direction bias
-    queue = deque([(start, [start], 0)])
-    visited = {start}
+    # Retry without avoidance if needed
+    if path is None and avoid_pixels:
+        path = _bfs_trace_path(start, end, adj, max_steps, set(), dir_vec)
 
-    # Direction vectors for bias
-    dir_vectors = {
-        'down': (0, 1),
-        'up': (0, -1),
-        'left': (-1, 0),
-        'right': (1, 0),
-    }
-    dir_vec = dir_vectors.get(direction)
-
-    while queue:
-        current, path, steps = queue.popleft()
-
-        if steps >= max_steps:
-            continue
-
-        if current == end:
-            return path
-
-        neighbors = adj.get(current, [])
-
-        # Sort neighbors by preference
-        def neighbor_score(n):
-            # Prefer end direction
-            to_end = ((end[0] - n[0])**2 + (end[1] - n[1])**2)**0.5
-            score = to_end
-
-            # Direction bias (only for first few pixels)
-            if dir_vec and steps < DIRECTION_BIAS_STEPS:
-                dx, dy = n[0] - current[0], n[1] - current[1]
-                dot = dx * dir_vec[0] + dy * dir_vec[1]
-                score -= dot * DIRECTION_BIAS_WEIGHT  # Bonus for matching direction
-
-            # Penalty for avoid_pixels
-            if n in avoid_pixels:
-                score += AVOID_PENALTY
-
-            return score
-
-        sorted_neighbors = sorted(neighbors, key=neighbor_score)
-
-        for nb in sorted_neighbors:
-            if nb in visited:
-                continue
-            visited.add(nb)
-            queue.append((nb, [*path, nb], steps + 1))
-
-    # No path found - try without avoidance
-    if avoid_pixels:
-        return trace_skeleton_path(start, end, adj, skel_set, max_steps, None, direction)
-
-    return None
+    return path
 
 
 def trace_segment(start: tuple, end: tuple, config, adj: dict, skel_set: set,

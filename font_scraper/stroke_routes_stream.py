@@ -340,6 +340,64 @@ def _run_per_stroke_refinement(best_strokes: list[np.ndarray],
     return best_score, best_strokes
 
 
+# Completion reason thresholds
+PERFECT_SCORE_THRESHOLD = 0.95
+TIME_LIMIT_SECONDS = 30
+
+
+def _get_initial_strokes(font_path: str, char: str,
+                         canvas_size: int) -> tuple[list | None, str | None]:
+    """Get initial strokes for optimization.
+
+    Tries min_strokes first, falls back to skeleton strokes if needed.
+
+    Args:
+        font_path: Path to the font file.
+        char: Character to extract strokes for.
+        canvas_size: Canvas size for rendering.
+
+    Returns:
+        Tuple of (strokes, error_message). If strokes is None, error_message
+        explains the failure.
+    """
+    try:
+        strokes = min_strokes(font_path, char, canvas_size)
+        if strokes:
+            return strokes, None
+    except Exception as e:
+        return None, f'Failed to get initial strokes: {e}'
+
+    # Fallback to skeleton strokes
+    try:
+        mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
+        if mask is not None:
+            strokes = skel_strokes(mask, min_len=5)
+            if strokes:
+                return strokes, None
+    except Exception:
+        pass
+
+    return None, 'No strokes generated'
+
+
+def _determine_completion_reason(score: float, elapsed: float) -> str:
+    """Determine the completion reason based on score and time.
+
+    Args:
+        score: Final score (positive, higher is better).
+        elapsed: Time elapsed in seconds.
+
+    Returns:
+        Reason string: 'perfect', 'time limit', or 'converged'.
+    """
+    if score >= PERFECT_SCORE_THRESHOLD:
+        return 'perfect'
+    elif elapsed > TIME_LIMIT_SECONDS:
+        return 'time limit'
+    else:
+        return 'converged'
+
+
 def optimize_stream_generator(font_path: str, char: str,
                               canvas_size: int = 224) -> Generator[str, None, None]:
     """Generator that yields SSE events during multi-phase stroke optimization.
@@ -374,22 +432,9 @@ def optimize_stream_generator(font_path: str, char: str,
     # Phase 0: Get initial strokes
     yield _sse_event({'phase': 'Initializing', 'frame': frame, 'score': 0})
 
-    try:
-        strokes_raw = min_strokes(font_path, char, canvas_size)
-    except Exception as e:
-        yield _sse_event({'error': f'Failed to get initial strokes: {e}'})
-        return
-
-    if not strokes_raw:
-        try:
-            mask = render_glyph_mask(resolve_font_path(font_path), char, canvas_size)
-            if mask is not None:
-                strokes_raw = skel_strokes(mask, min_len=5)
-        except Exception:
-            pass
-
-    if not strokes_raw:
-        yield _sse_event({'error': 'No strokes generated'})
+    strokes_raw, error = _get_initial_strokes(font_path, char, canvas_size)
+    if strokes_raw is None:
+        yield _sse_event({'error': error})
         return
 
     # Prepare optimization
@@ -462,13 +507,7 @@ def optimize_stream_generator(font_path: str, char: str,
     # Final result
     elapsed = round(time.time() - start_time, 2)
     final_score_display = round(-best_score, 3)
-
-    if final_score_display >= 0.95:
-        reason = 'perfect'
-    elif elapsed > 30:
-        reason = 'time limit'
-    else:
-        reason = 'converged'
+    reason = _determine_completion_reason(final_score_display, elapsed)
 
     yield _sse_event({
         'strokes': _strokes_to_list(best_strokes),

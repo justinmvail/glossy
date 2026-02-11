@@ -28,13 +28,13 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 1. Long Functions (>80 lines)
 
-- [ ] **stroke_pipeline_stream.py:312** - `stream_minimal_strokes()` - 185 lines
-  - Extract phase generators for each processing stage
-  - Consider state machine pattern
+- [x] **stroke_pipeline_stream.py:312** - `stream_minimal_strokes()` - 185 lines
+  - ✅ Extracted `_create_pipeline()`, `_consume_subgenerator()`, `_stream_template_variants()`
+  - Reduced to ~60 lines using generator delegation
 
-- [ ] **stroke_routes_stream.py:307** - `optimize_stream_generator()` - 136 lines
-  - Already has helpers but main function still too long
-  - Extract initialization and finalization phases
+- [x] **stroke_routes_stream.py:307** - `optimize_stream_generator()` - 136 lines
+  - ✅ Extracted `_get_initial_strokes()`, `_determine_completion_reason()`
+  - Added PERFECT_SCORE_THRESHOLD, TIME_LIMIT_SECONDS constants
 
 - [x] **stroke_pipeline_stream.py:201** - `_stream_skeleton_evaluation()` - 109 lines
   - ✅ Extracted `_apply_stroke_count_penalty()` and `_make_selection_frame()` helpers
@@ -67,8 +67,9 @@ This document tracks code quality issues identified through a comprehensive revi
   - ✅ Extracted `_find_t_junction_candidate()`, `_remove_short_cross_strokes()` helpers
   - ✅ Reuses `_build_cluster_endpoint_map()` and `_execute_merge()`
 
-- [ ] **stroke_skeleton.py:306** - `trace_skeleton_path()` - 93 lines
-  - Extract neighbor scoring logic
+- [x] **stroke_skeleton.py:306** - `trace_skeleton_path()` - 93 lines
+  - ✅ Extracted `_compute_neighbor_score()`, `_bfs_trace_path()`
+  - Added DIRECTION_VECTORS constant, reduced to ~40 lines
 
 - [x] **stroke_dataclasses.py:191** - `parse_stroke_template()` - 91 lines
   - ✅ Extracted `_apply_hint_to_config()`, `_parse_waypoint_item()` helpers
@@ -376,6 +377,10 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_routes_stream.py: Added optimizer constants (NM_*, DE_*, AFFINE_*_BOUNDS)
   - stroke_shapes.py: Added MIN_SHAPE_POINTS, POINT_SPACING_TARGET, RADIUS_FLOOR_MULTIPLIER, MIN_RADIUS, DISTANCE_PERCENTILE
   - stroke_lib/analysis/skeleton.py: Added NEAR_VERTEX_DISTANCE, STUB_THRESHOLD
+- [x] Remaining long function refactoring (2026-02-10)
+  - stroke_skeleton.py: Extracted _compute_neighbor_score(), _bfs_trace_path() for trace_skeleton_path()
+  - stroke_routes_stream.py: Extracted _get_initial_strokes(), _determine_completion_reason()
+  - stroke_pipeline_stream.py: Extracted _create_pipeline(), _consume_subgenerator(), _stream_template_variants()
 
 ### In Progress
 - [ ] None currently

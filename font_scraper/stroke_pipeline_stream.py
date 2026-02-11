@@ -50,6 +50,104 @@ from stroke_utils import point_in_region
 MAX_SKELETON_MARKERS = 500
 
 
+def _create_pipeline(font_path: str, char: str, canvas_size: int) -> MinimalStrokePipeline:
+    """Create a MinimalStrokePipeline with all required callbacks.
+
+    Args:
+        font_path: Resolved path to the font file.
+        char: Character to process.
+        canvas_size: Canvas size for rendering.
+
+    Returns:
+        Configured MinimalStrokePipeline instance.
+    """
+    return MinimalStrokePipeline(
+        font_path, char, canvas_size,
+        resolve_font_path_fn=lambda x: x,
+        render_glyph_mask_fn=render_glyph_mask,
+        analyze_skeleton_fn=analyze_skeleton,
+        find_skeleton_segments_fn=find_skeleton_segments,
+        point_in_region_fn=point_in_region,
+        trace_segment_fn=trace_segment,
+        trace_to_region_fn=trace_to_region,
+        generate_straight_line_fn=generate_straight_line,
+        resample_path_fn=resample_path,
+        skeleton_to_strokes_fn=skel_strokes,
+        apply_stroke_template_fn=_merge_to_expected_count,
+        adjust_stroke_paths_fn=lambda st, c, m: st,
+        quick_stroke_score_fn=quick_stroke_score,
+    )
+
+
+def _consume_subgenerator(gen: Generator) -> Generator[dict, None, Any]:
+    """Consume a sub-generator, yielding all frames and returning its result.
+
+    Args:
+        gen: Generator that yields dicts and returns a result via StopIteration.
+
+    Yields:
+        Each frame dict from the generator.
+
+    Returns:
+        The generator's return value.
+    """
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration as e:
+        return e.value
+
+
+def _stream_template_variants(pipe: MinimalStrokePipeline, char: str,
+                               bbox: tuple) -> Generator[dict, None, tuple]:
+    """Evaluate all template variants and stream progress frames.
+
+    Args:
+        pipe: The MinimalStrokePipeline instance.
+        char: Character being processed.
+        bbox: Bounding box of the glyph.
+
+    Yields:
+        Progress frames for each variant evaluation.
+
+    Returns:
+        Tuple of (best_strokes, best_score, best_variant).
+    """
+    variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
+    best_strokes = None
+    best_score = -1
+    best_variant = None
+
+    if not variants:
+        return best_strokes, best_score, best_variant
+
+    yield {
+        'phase': 'Templates',
+        'step': f'Trying {len(variants)} template variants: {", ".join(variants.keys())}',
+        'strokes': [],
+        'markers': []
+    }
+
+    for var_name, variant_template in variants.items():
+        yield {
+            'phase': 'Template',
+            'step': f'Trying variant: {var_name}',
+            'strokes': [],
+            'markers': []
+        }
+
+        # Stream variant evaluation
+        var_gen = _stream_variant_strokes(pipe, var_name, variant_template, bbox, quick_stroke_score)
+        strokes, score, _ = yield from _consume_subgenerator(var_gen)
+
+        if strokes and score > best_score:
+            best_score = score
+            best_strokes = strokes
+            best_variant = var_name
+
+    return best_strokes, best_score, best_variant
+
+
 def _create_skeleton_markers(info: dict) -> tuple[list[dict], list[dict], list[dict]]:
     """Create visualization markers for skeleton features.
 
@@ -430,23 +528,7 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
     # Phase 2: Create pipeline and analyze skeleton
     yield {'phase': 'Skeleton', 'step': 'Analyzing skeleton...', 'strokes': [], 'markers': []}
 
-    pipe = MinimalStrokePipeline(
-        font_path, char, canvas_size,
-        resolve_font_path_fn=lambda x: x,
-        render_glyph_mask_fn=render_glyph_mask,
-        analyze_skeleton_fn=analyze_skeleton,
-        find_skeleton_segments_fn=find_skeleton_segments,
-        point_in_region_fn=point_in_region,
-        trace_segment_fn=trace_segment,
-        trace_to_region_fn=trace_to_region,
-        generate_straight_line_fn=generate_straight_line,
-        resample_path_fn=resample_path,
-        skeleton_to_strokes_fn=skel_strokes,
-        apply_stroke_template_fn=_merge_to_expected_count,
-        adjust_stroke_paths_fn=lambda st, c, m: st,
-        quick_stroke_score_fn=quick_stroke_score,
-    )
-
+    pipe = _create_pipeline(font_path, char, canvas_size)
     analysis = pipe.analysis
     if analysis is None:
         yield {'phase': 'Error', 'step': 'Failed to analyze skeleton', 'strokes': [], 'markers': [], 'done': True}
@@ -474,52 +556,14 @@ def stream_minimal_strokes(font_path: str, char: str, canvas_size: int = 224) ->
     }
 
     # Phase 4: Evaluate template variants
-    variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
-    best_strokes = None
-    best_score = -1
-    best_variant = None
-
-    if variants:
-        yield {
-            'phase': 'Templates',
-            'step': f'Trying {len(variants)} template variants: {", ".join(variants.keys())}',
-            'strokes': [],
-            'markers': []
-        }
-
-        for var_name, variant_template in variants.items():
-            yield {
-                'phase': 'Template',
-                'step': f'Trying variant: {var_name}',
-                'strokes': [],
-                'markers': []
-            }
-
-            # Stream variant evaluation
-            var_gen = _stream_variant_strokes(pipe, var_name, variant_template, bbox, quick_stroke_score)
-            strokes, score, _ = None, 0.0, None
-
-            try:
-                while True:
-                    frame = next(var_gen)
-                    yield frame
-            except StopIteration as e:
-                strokes, score, _ = e.value
-
-            if strokes and score > best_score:
-                best_score = score
-                best_strokes = strokes
-                best_variant = var_name
+    template_gen = _stream_template_variants(pipe, char, bbox)
+    best_strokes, best_score, best_variant = yield from _consume_subgenerator(template_gen)
 
     # Phase 5: Evaluate skeleton method
-    skel_gen = _stream_skeleton_evaluation(pipe, variants, best_strokes, best_score, best_variant, mask, quick_stroke_score)
-
-    try:
-        while True:
-            frame = next(skel_gen)
-            yield frame
-    except StopIteration as e:
-        best_strokes, best_score, best_variant = e.value
+    skel_gen = _stream_skeleton_evaluation(pipe, NUMPAD_TEMPLATE_VARIANTS.get(char, {}),
+                                            best_strokes, best_score, best_variant,
+                                            mask, quick_stroke_score)
+    best_strokes, best_score, best_variant = yield from _consume_subgenerator(skel_gen)
 
     # Final result
     yield {
