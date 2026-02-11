@@ -413,26 +413,18 @@ def render_font_mask(font_path: str, char: str, font_size: int = 200,
             - bbox: Tuple (cmin, rmin, cmax, rmax) of tight bounding box
         Returns (None, None) if character cannot be rendered.
     """
-    img = Image.new('L', (canvas_size, canvas_size), 0)
-    draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(font_path, font_size)
-    bbox = font.getbbox(char)
-    if not bbox:
+    from stroke_rendering import GlyphRenderer, RenderConfig
+
+    try:
+        config = RenderConfig(
+            canvas_size=canvas_size,
+            font_size=font_size,
+            fill_threshold=1.0,  # No auto-scaling for template morphing
+        )
+        renderer = GlyphRenderer(font_path, font_size=font_size, config=config)
+        return renderer.render_mask_with_bbox(char, canvas_size=canvas_size)
+    except OSError:
         return None, None
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-    x = (canvas_size - w) // 2 - bbox[0]
-    y = (canvas_size - h) // 2 - bbox[1]
-    draw.text((x, y), char, fill=255, font=font)
-    mask = np.array(img) > 127
-    # Find tight bounding box
-    rows = np.any(mask, axis=1)
-    cols = np.any(mask, axis=0)
-    if not rows.any():
-        return None, None
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
-    return mask, (cmin, rmin, cmax, rmax)
 
 
 def _find_waist_height(font_mask: np.ndarray, rmin: int, rmax: int) -> tuple[int, int]:

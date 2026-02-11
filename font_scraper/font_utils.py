@@ -111,11 +111,13 @@ class FontDeduplicator:
             Hex string representation of the perceptual hash, or None
             if the font cannot be loaded or rendered.
         """
+        from stroke_rendering import GlyphRenderer
+
         try:
-            font = ImageFont.truetype(font_path, 48)
-            img = Image.new('L', (256, 64), 255)
-            draw = ImageDraw.Draw(img)
-            draw.text((10, 10), sample_text, font=font, fill=0)
+            renderer = GlyphRenderer(font_path, font_size=48)
+            img = renderer.render_for_phash(sample_text, canvas_width=256, canvas_height=64)
+            if img is None:
+                return None
             return str(imagehash.phash(img))
         except Exception:
             return None

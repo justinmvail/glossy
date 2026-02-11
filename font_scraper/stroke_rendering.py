@@ -1,23 +1,30 @@
 """Glyph rendering utilities for font analysis.
 
-This module provides functions for rendering font glyphs to images and binary
+This module provides functions and classes for rendering font glyphs to images and binary
 masks for analysis. It supports the stroke extraction pipeline by generating
 the input images and masks that are processed by skeleton and scoring modules.
 
 Key functionality:
+    - GlyphRenderer: Unified class for all rendering operations
     - Character rendering: Generate grayscale PNG images of characters
     - Mask generation: Create binary masks for glyph pixels
     - Font analysis: Detect small-caps fonts, check for holes and shape counts
     - Shape metrics: Analyze rendered text for connected components
 
 Typical usage:
-    from stroke_rendering import render_glyph_mask, render_char_image
+    from stroke_rendering import render_glyph_mask, render_char_image, GlyphRenderer
 
     # Get a binary mask of a character
     mask = render_glyph_mask('path/to/font.ttf', 'A')
 
     # Render a character to PNG bytes
     png_bytes = render_char_image('path/to/font.ttf', 'A')
+
+    # Use GlyphRenderer for more control
+    renderer = GlyphRenderer('path/to/font.ttf', font_size=200)
+    img = renderer.render_char('A', canvas_size=224)
+    mask = renderer.render_mask('A', canvas_size=224)
+    text_img = renderer.render_text('Hello', canvas_size=400)
 
     # Check for small-caps font
     mismatched = check_case_mismatch('path/to/font.ttf')
@@ -27,7 +34,9 @@ from __future__ import annotations
 
 import io
 import os
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import Literal
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -128,6 +137,326 @@ def _compute_centered_position(bbox: tuple, canvas_size: int) -> tuple[int, int]
     x = (canvas_size - w) // 2 - bbox[0]
     y = (canvas_size - h) // 2 - bbox[1]
     return x, y
+
+
+# ---------------------------------------------------------------------------
+# GlyphRenderer Class - Unified Rendering Abstraction
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RenderConfig:
+    """Configuration for glyph rendering.
+
+    Attributes:
+        canvas_size: Width and height of the output canvas in pixels.
+        font_size: Initial font size in points (may be scaled down to fit).
+        fill_threshold: Maximum fraction of canvas a glyph can fill (0.0-1.0).
+        binarize_threshold: Grayscale threshold for mask generation (0-255).
+        background: Background color for grayscale images (0=black, 255=white).
+        ink_color: Ink color for drawing (0=black on L mode, 255=white on inverted).
+    """
+    canvas_size: int = DEFAULT_CANVAS_SIZE
+    font_size: int = DEFAULT_FONT_SIZE
+    fill_threshold: float = CANVAS_FILL_THRESHOLD
+    binarize_threshold: int = BINARIZATION_THRESHOLD
+    background: int = 255
+    ink_color: int = 0
+
+
+class GlyphRenderer:
+    """Unified class for rendering font glyphs.
+
+    This class consolidates common rendering patterns used throughout the codebase,
+    providing a consistent interface for:
+    - Rendering single characters to images
+    - Generating binary masks for image processing
+    - Rendering text strings for analysis
+    - Computing bounding boxes and positions
+
+    The renderer caches the loaded font and provides methods for common operations.
+
+    Attributes:
+        font_path: Resolved absolute path to the font file.
+        font_size: Default font size in points.
+        config: RenderConfig with default rendering parameters.
+
+    Example:
+        >>> renderer = GlyphRenderer('fonts/arial.ttf', font_size=200)
+        >>> img = renderer.render_char('A', canvas_size=224)
+        >>> mask = renderer.render_mask('A', canvas_size=224)
+        >>> text_arr = renderer.render_text('Hello', canvas_size=400)
+        >>> bbox = renderer.get_bbox('A')
+    """
+
+    def __init__(self, font_path: str, font_size: int = DEFAULT_FONT_SIZE,
+                 config: RenderConfig = None):
+        """Initialize the renderer with a font.
+
+        Args:
+            font_path: Path to the font file (TTF, OTF, etc.).
+            font_size: Default font size in points.
+            config: Optional RenderConfig to customize rendering.
+
+        Raises:
+            OSError: If the font file cannot be loaded.
+        """
+        self.font_path = resolve_font_path(font_path)
+        self.font_size = font_size
+        self.config = config or RenderConfig(font_size=font_size)
+        # Validate font can be loaded
+        self._font = _cached_font(self.font_path, self.font_size)
+
+    @property
+    def font(self) -> FreeTypeFont:
+        """Get the loaded PIL font object."""
+        return self._font
+
+    def get_bbox(self, text: str) -> tuple | None:
+        """Get the bounding box for text.
+
+        Args:
+            text: Text string to measure.
+
+        Returns:
+            Bounding box as (x0, y0, x1, y1), or None if not available.
+        """
+        return self._font.getbbox(text)
+
+    def get_size(self, text: str) -> tuple[int, int]:
+        """Get the width and height of rendered text.
+
+        Args:
+            text: Text string to measure.
+
+        Returns:
+            Tuple of (width, height) in pixels.
+        """
+        bbox = self.get_bbox(text)
+        if not bbox:
+            return 0, 0
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    def render_char(self, char: str, canvas_size: int = None,
+                    mode: Literal['L', 'RGB', 'RGBA'] = 'L',
+                    auto_scale: bool = True) -> Image.Image | None:
+        """Render a single character to an image.
+
+        Args:
+            char: Single character to render.
+            canvas_size: Canvas width/height in pixels. Defaults to config value.
+            mode: PIL image mode ('L' for grayscale, 'RGB' for color).
+            auto_scale: If True, scale font down if glyph exceeds canvas.
+
+        Returns:
+            PIL Image with the rendered character, or None on error.
+        """
+        canvas_size = canvas_size or self.config.canvas_size
+        fill = self.config.background
+        ink = self.config.ink_color
+
+        # Use RGB values for non-grayscale modes
+        if mode in ('RGB', 'RGBA'):
+            fill = (255, 255, 255) if self.config.background == 255 else (0, 0, 0)
+            ink = (0, 0, 0) if self.config.ink_color == 0 else (255, 255, 255)
+
+        pil_font = self._font
+        bbox = pil_font.getbbox(char)
+        if not bbox:
+            return None
+
+        # Scale font to fit if needed
+        if auto_scale:
+            pil_font, bbox = _scale_font_to_fit(
+                self.font_path, pil_font, char, canvas_size, self.config.fill_threshold
+            )
+            if pil_font is None:
+                return None
+
+        img = Image.new(mode, (canvas_size, canvas_size), fill)
+        draw = ImageDraw.Draw(img)
+        x, y = _compute_centered_position(bbox, canvas_size)
+        draw.text((x, y), char, fill=ink, font=pil_font)
+        return img
+
+    def render_char_png(self, char: str, canvas_size: int = None) -> bytes | None:
+        """Render a character to PNG bytes.
+
+        Args:
+            char: Single character to render.
+            canvas_size: Canvas width/height in pixels.
+
+        Returns:
+            PNG image data as bytes, or None on error.
+        """
+        img = self.render_char(char, canvas_size=canvas_size, mode='L')
+        if img is None:
+            return None
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        return buf.getvalue()
+
+    def render_mask(self, char: str, canvas_size: int = None,
+                    inverted: bool = False) -> np.ndarray | None:
+        """Render a character as a binary mask.
+
+        Args:
+            char: Single character to render.
+            canvas_size: Canvas width/height in pixels.
+            inverted: If True, background is black (0) and ink is white (255).
+                     Default is ink=True in mask.
+
+        Returns:
+            Boolean numpy array where True = glyph pixels, or None on error.
+        """
+        canvas_size = canvas_size or self.config.canvas_size
+
+        # For inverted rendering (black bg, white ink)
+        if inverted:
+            img = Image.new('L', (canvas_size, canvas_size), 0)
+            draw = ImageDraw.Draw(img)
+            pil_font, bbox = _scale_font_to_fit(
+                self.font_path, self._font, char, canvas_size, self.config.fill_threshold
+            )
+            if pil_font is None or not bbox:
+                return None
+            x, y = _compute_centered_position(bbox, canvas_size)
+            draw.text((x, y), char, fill=255, font=pil_font)
+            return np.array(img) > self.config.binarize_threshold
+
+        # Standard rendering (white bg, black ink)
+        img = self.render_char(char, canvas_size=canvas_size, mode='L')
+        if img is None:
+            return None
+        return np.array(img) < self.config.binarize_threshold
+
+    def render_mask_with_bbox(self, char: str, canvas_size: int = None
+                              ) -> tuple[np.ndarray | None, tuple | None]:
+        """Render a character mask and compute its tight bounding box.
+
+        Args:
+            char: Single character to render.
+            canvas_size: Canvas width/height in pixels.
+
+        Returns:
+            Tuple of (mask, bbox):
+                - mask: Boolean numpy array where True = glyph pixels
+                - bbox: Tight bounding box as (col_min, row_min, col_max, row_max)
+            Returns (None, None) on error.
+        """
+        mask = self.render_mask(char, canvas_size=canvas_size)
+        if mask is None:
+            return None, None
+
+        # Find tight bounding box
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        if not rows.any():
+            return None, None
+
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        return mask, (cmin, rmin, cmax, rmax)
+
+    def render_text(self, text: str, canvas_size: int = None,
+                    mode: Literal['L', 'RGB'] = 'L') -> np.ndarray | None:
+        """Render a text string to a numpy array.
+
+        Args:
+            text: Text string to render.
+            canvas_size: Canvas width/height in pixels.
+            mode: PIL image mode.
+
+        Returns:
+            Numpy array of the rendered image, or None on error.
+        """
+        canvas_size = canvas_size or HOLE_ANALYSIS_CANVAS
+        fill = 255 if mode == 'L' else (255, 255, 255)
+        ink = 0 if mode == 'L' else (0, 0, 0)
+
+        img = Image.new(mode, (canvas_size, canvas_size), fill)
+        draw = ImageDraw.Draw(img)
+
+        bbox = self._font.getbbox(text)
+        if not bbox:
+            return None
+
+        x, y = _compute_centered_position(bbox, canvas_size)
+        draw.text((x, y), text, fill=ink, font=self._font)
+        return np.array(img)
+
+    def render_for_phash(self, text: str, canvas_width: int = 256,
+                         canvas_height: int = 64) -> Image.Image | None:
+        """Render text for perceptual hashing.
+
+        Creates a consistent rendering suitable for computing perceptual hashes
+        for font deduplication.
+
+        Args:
+            text: Text to render.
+            canvas_width: Width of the canvas.
+            canvas_height: Height of the canvas.
+
+        Returns:
+            PIL Image suitable for hashing, or None on error.
+        """
+        try:
+            img = Image.new('L', (canvas_width, canvas_height), 255)
+            draw = ImageDraw.Draw(img)
+            draw.text((10, 10), text, font=self._font, fill=0)
+            return img
+        except Exception:
+            return None
+
+    @staticmethod
+    def bbox_size(bbox: tuple) -> tuple[int, int]:
+        """Compute width and height from a bounding box.
+
+        Args:
+            bbox: Bounding box as (x0, y0, x1, y1).
+
+        Returns:
+            Tuple of (width, height).
+        """
+        if not bbox:
+            return 0, 0
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    @staticmethod
+    def centered_position(bbox: tuple, canvas_size: int) -> tuple[int, int]:
+        """Compute position to center a bounding box in a canvas.
+
+        Static wrapper for _compute_centered_position.
+
+        Args:
+            bbox: Bounding box as (x0, y0, x1, y1).
+            canvas_size: Width/height of the square canvas.
+
+        Returns:
+            Tuple of (x, y) offset for draw.text().
+        """
+        return _compute_centered_position(bbox, canvas_size)
+
+
+# Factory function for creating renderers
+def create_renderer(font_path: str, font_size: int = DEFAULT_FONT_SIZE,
+                    **config_kwargs) -> GlyphRenderer | None:
+    """Create a GlyphRenderer with optional configuration.
+
+    Factory function that handles errors gracefully.
+
+    Args:
+        font_path: Path to the font file.
+        font_size: Font size in points.
+        **config_kwargs: Additional arguments for RenderConfig.
+
+    Returns:
+        GlyphRenderer instance, or None if font cannot be loaded.
+    """
+    try:
+        config = RenderConfig(font_size=font_size, **config_kwargs)
+        return GlyphRenderer(font_path, font_size=font_size, config=config)
+    except OSError:
+        return None
 
 
 def render_char_image(font_path: str, char: str, font_size: int = DEFAULT_FONT_SIZE,
