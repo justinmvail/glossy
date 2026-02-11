@@ -88,7 +88,7 @@ draw = ImageDraw.Draw(img)
 # Load a default font for labels
 try:
     label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-except:
+except OSError:
     label_font = ImageFont.load_default()
 
 # Render each font

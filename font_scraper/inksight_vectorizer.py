@@ -1071,7 +1071,7 @@ while True:
                 cls._worker_process.stdin.write("QUIT\n")
                 cls._worker_process.stdin.flush()
                 cls._worker_process.wait(timeout=5)
-            except:
+            except (BrokenPipeError, OSError, TimeoutError):
                 cls._worker_process.kill()
             cls._worker_process = None
             print("OCR worker stopped.")

@@ -454,7 +454,7 @@ def test_classifier():
     # Create test images
     try:
         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 48)
-    except:
+    except OSError:
         font = ImageFont.load_default()
 
     test_chars = 'ABCabc012'

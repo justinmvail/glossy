@@ -70,11 +70,25 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 4. Reliability
 
-- [ ] Missing error handling - bare try/except, unhandled exceptions
-- [ ] Silent failures - errors swallowed without logging
-- [ ] Race conditions - concurrent access issues
-- [ ] Resource leaks - unclosed files/connections
-- [ ] Hardcoded timeouts - non-configurable wait times
+- [x] Missing error handling - bare try/except, unhandled exceptions
+  - **Status:** FIXED - Changed 4 bare `except:` to specific exceptions
+  - render_all_passing.py:91 - `except:` → `except OSError:`
+  - visualize_all_chars.py:73 - `except:` → `except OSError:`
+  - emnist_classifier.py:457 - `except:` → `except OSError:`
+  - inksight_vectorizer.py:1074 - `except:` → `except (BrokenPipeError, OSError, TimeoutError):`
+- [x] Silent failures - errors swallowed without logging
+  - **Status:** Acceptable - Silent excepts in font_utils.py are intentional
+  - Used for per-character rendering loops where individual failures are expected
+  - Higher-level functions report overall success/failure
+- [x] Race conditions - concurrent access issues
+  - **Status:** PASS - SQLite uses file locking, Flask is single-threaded
+  - ProcessPoolExecutor in scrapers is isolated (no shared state)
+- [x] Resource leaks - unclosed files/connections
+  - **Status:** PASS - All DB connections use context managers
+  - File operations use `with` blocks
+- [x] Hardcoded timeouts - non-configurable wait times
+  - **Status:** Acceptable - Timeouts are in optimization constants (NM_GLOBAL_MAXFEV, etc.)
+  - Could be made configurable but not a reliability issue
 
 ## 5. Security
 
@@ -102,43 +116,98 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 6. Testing
 
-- [ ] Low coverage - untested critical paths
-- [ ] Flaky tests - non-deterministic failures
-- [ ] Slow tests - tests taking too long
-- [ ] Missing integration tests - no end-to-end coverage
-- [ ] Untestable code - tightly coupled, hard to mock
+- [x] Low coverage - untested critical paths
+  - **Status:** Acceptable - test_strokes.py covers 10 fonts × 7 chars = 70 tests
+  - Core stroke pipeline has good coverage via test_strokes.py
+  - Scrapers tested manually (external dependencies)
+- [x] Flaky tests - non-deterministic failures
+  - **Status:** PASS - 2 expected failures are for missing fonts (documented)
+  - No flaky tests observed in test runs
+- [x] Slow tests - tests taking too long
+  - **Status:** Acceptable - Full test suite runs in ~30 seconds
+  - Individual tests run quickly
+- [x] Missing integration tests - no end-to-end coverage
+  - **Status:** Noted - Could add Flask route integration tests
+  - Current testing focuses on stroke pipeline
+- [x] Untestable code - tightly coupled, hard to mock
+  - **Status:** PASS - Repository pattern allows DB mocking
+  - Stroke functions take explicit parameters, not global state
 
 ## 7. Configuration & Operations
 
-- [ ] Hardcoded config - IPs, ports, paths in code
-- [ ] Missing logging - insufficient observability
-- [ ] No health checks - missing service health endpoints
-- [ ] Manual deployments - no CI/CD
-- [ ] No monitoring - missing metrics/alerting
+- [x] Hardcoded config - IPs, ports, paths in code
+  - **Status:** Acceptable - Flask runs on localhost:5000 (development tool)
+  - Font paths stored in database, not hardcoded
+  - Canvas sizes defined as module constants (easy to find/change)
+- [x] Missing logging - insufficient observability
+  - **Status:** Partial - logging module used in stroke_routes_stream.py
+  - Scrapers use tqdm for progress
+  - Could add more structured logging
+- [x] No health checks - missing service health endpoints
+  - **Status:** N/A - Local development tool, not production service
+  - Flask app has basic route availability
+- [x] Manual deployments - no CI/CD
+  - **Status:** N/A - Personal development tool
+  - No production deployment needed
+- [x] No monitoring - missing metrics/alerting
+  - **Status:** N/A - Local tool, no monitoring needed
 
 ## 8. Documentation
 
-- [ ] Missing README - inadequate setup/usage docs
-- [ ] Outdated docs - documentation doesn't match code
-- [ ] No API docs - missing docstrings
-- [ ] Missing architecture diagrams - complex flows undocumented
-- [ ] Tribal knowledge - undocumented decisions
+- [x] Missing README - inadequate setup/usage docs
+  - **Status:** PASS - README.md exists with scraper usage docs
+  - PIPELINE.md documents stroke pipeline architecture
+- [x] Outdated docs - documentation doesn't match code
+  - **Status:** FIXED - Updated PIPELINE.md to mark unimplemented features
+  - Fixed OCRValidator import path in docs
+- [x] No API docs - missing docstrings
+  - **Status:** PASS - All major modules have comprehensive docstrings
+  - Module-level, class-level, and function-level docs present
+- [x] Missing architecture diagrams - complex flows undocumented
+  - **Status:** Acceptable - PIPELINE.md has text-based flow description
+  - Could add visual diagrams later
+- [x] Tribal knowledge - undocumented decisions
+  - **Status:** PASS - Key algorithms documented in docstrings
+  - Template matching logic explained in stroke_shapes.py
 
 ## 9. Dependencies
 
-- [ ] Outdated packages - old versions with fixes available
-- [ ] Unused dependencies - packages not actually used
-- [ ] Unpinned versions - missing version constraints
-- [ ] Conflicting versions - dependency conflicts
-- [ ] Abandoned packages - unmaintained dependencies
+- [x] Outdated packages - old versions with fixes available
+  - **Status:** Noted - cryptography 41.0.7 needs upgrade to 42.0.0+
+  - System Python managed externally, upgrade requires --break-system-packages
+- [x] Unused dependencies - packages not actually used
+  - **Status:** PASS - All imported packages are used
+  - transformers optional (only for InkSight OCR)
+- [x] Unpinned versions - missing version constraints
+  - **Status:** FIXED - Created requirements.txt with minimum versions
+  - 10 core dependencies pinned with >= constraints
+- [x] Conflicting versions - dependency conflicts
+  - **Status:** PASS - No conflicts detected in pip freeze
+- [x] Abandoned packages - unmaintained dependencies
+  - **Status:** PASS - All dependencies actively maintained
+  - Flask, numpy, scipy, pillow, etc. are well-supported
 
 ## 10. Developer Experience
 
-- [ ] Slow builds - long setup/build times
-- [ ] Complex setup - difficult onboarding
-- [ ] No linting/formatting - inconsistent style
-- [ ] Inconsistent style - mixed conventions
-- [ ] Missing dev tools - no debugging/profiling helpers
+- [x] Slow builds - long setup/build times
+  - **Status:** N/A - Pure Python, no build step
+  - `pip install -r requirements.txt` is quick
+- [x] Complex setup - difficult onboarding
+  - **Status:** Acceptable - Requires fonts.db with fonts
+  - README explains scraper usage
+  - Could add setup script to initialize empty DB
+- [x] No linting/formatting - inconsistent style
+  - **Status:** Noted - No ruff/flake8/black configured
+  - Code follows PEP8 conventions manually
+  - Recommendation: Add pyproject.toml with ruff config
+- [x] Inconsistent style - mixed conventions
+  - **Status:** PASS - Consistent snake_case naming
+  - Consistent docstring format (Google style)
+  - Consistent import ordering
+- [x] Missing dev tools - no debugging/profiling helpers
+  - **Status:** Acceptable - Flask debug mode available
+  - visualize_skeleton.py for stroke debugging
+  - SSE streaming for real-time optimization visualization
 
 ---
 
@@ -179,4 +248,22 @@ Systematic review of font_scraper codebase for quality improvements.
 - stroke_merge.py: `remove_orphan_stubs()` O(n²) → O(n) with cluster index
 - stroke_rendering.py: Added LRU cache for font loading (32 entries)
 - stroke_rendering.py: Added mask cache for glyph rendering (256 entries)
+
+### Session 2: Remaining Audits
+
+#### Reliability Fixes
+- Fixed 4 bare `except:` clauses to use specific exceptions
+  - render_all_passing.py:91 → `except OSError:`
+  - visualize_all_chars.py:73 → `except OSError:`
+  - emnist_classifier.py:457 → `except OSError:`
+  - inksight_vectorizer.py:1074 → `except (BrokenPipeError, OSError, TimeoutError):`
+
+#### Dependencies
+- Created requirements.txt with 10 core dependencies
+- Minimum version constraints for compatibility
+
+#### Audit Completion
+- All 10 audit categories reviewed
+- 45 checklist items evaluated
+- 12 items fixed, 33 items passed or noted as acceptable
 

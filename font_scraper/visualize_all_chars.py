@@ -70,7 +70,7 @@ draw = ImageDraw.Draw(img)
 try:
     title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
     label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
-except:
+except OSError:
     title_font = ImageFont.load_default()
     label_font = ImageFont.load_default()
 
