@@ -54,7 +54,7 @@ Generated: 2026-02-11
 31. [x] stroke_merge.py - Cache endpoint_cluster results in absorb functions
 
 ### MEDIUM - Code Duplication
-32. [ ] Extract bbox_width_height() utility (appears 5+ times)
+32. [x] Extract bbox_width_height() utility (appears 5+ times)
 33. [ ] Extract point_distance_squared() utility (appears 6+ times)
 34. [ ] Extract render_text_on_image() utility (appears 4+ times)
 35. [ ] Extract binarize_image() utility (appears 6+ times)

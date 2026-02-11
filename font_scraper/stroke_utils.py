@@ -54,6 +54,22 @@ SNAP_DEEP_INSIDE_MIN_DEPTH = 5
 LINEAR_SEGMENT_STEP = 2.0
 
 
+# ---------------------------------------------------------------------------
+# Geometry Utilities
+# ---------------------------------------------------------------------------
+
+def bbox_width_height(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
+    """Extract width and height from a bounding box.
+
+    Args:
+        bbox: Bounding box as (x_min, y_min, x_max, y_max).
+
+    Returns:
+        Tuple of (width, height).
+    """
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
 def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
     """Snap a position to the nearest mask pixel if outside.
 
