@@ -309,13 +309,15 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
         changed = False
         # Build detailed cluster index once per iteration (O(n) instead of O(n²))
         detailed_index = _build_detailed_cluster_index(strokes, assigned)
+        # Build endpoint cache for O(1) cluster lookups
+        endpoint_cache = _build_endpoint_cache(strokes, assigned)
 
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) < 2 or len(s) >= conv_threshold:
                 continue
-            sc = endpoint_cluster(s, False, assigned)
-            ec = endpoint_cluster(s, True, assigned)
+            sc = _get_cached_cluster(endpoint_cache, si, False)
+            ec = _get_cached_cluster(endpoint_cache, si, True)
 
             if sc >= 0 and ec < 0:
                 cluster_id = sc
@@ -353,7 +355,7 @@ def absorb_convergence_stubs(strokes: list[list[tuple]], junction_clusters: list
                 at_end = is_end
                 # Check if the other endpoint is also at this cluster
                 if not at_end:
-                    other_end_cid = endpoint_cluster(s2, True, assigned)
+                    other_end_cid = _get_cached_cluster(endpoint_cache, sj, True)
                     if other_end_cid == cluster_id:
                         at_end = True  # Prefer extending from the end
                         at_start = False
@@ -392,13 +394,15 @@ def absorb_junction_stubs(strokes: list[list[tuple]], assigned: list[set],
         changed = False
         # Build detailed cluster index once per iteration (O(n) instead of O(n²))
         detailed_index = _build_detailed_cluster_index(strokes, assigned)
+        # Build endpoint cache for O(1) cluster lookups
+        endpoint_cache = _build_endpoint_cache(strokes, assigned)
 
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) >= stub_threshold:
                 continue
-            sc = endpoint_cluster(s, False, assigned)
-            ec = endpoint_cluster(s, True, assigned)
+            sc = _get_cached_cluster(endpoint_cache, si, False)
+            ec = _get_cached_cluster(endpoint_cache, si, True)
             clusters_touching = set()
             if sc >= 0:
                 clusters_touching.add(sc)
