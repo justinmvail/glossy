@@ -227,7 +227,7 @@ class MinimalStrokePipeline:
             >>> result = pipeline.evaluate_all_variants()
         """
         # Lazy imports to avoid circular dependencies
-        from stroke_core import _skel as analyze_skeleton, skel_strokes
+        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton, skel_strokes
         from stroke_flask import resolve_font_path
         from stroke_rendering import render_glyph_mask
         from stroke_scoring import quick_stroke_score
@@ -415,7 +415,7 @@ class MinimalStrokePipeline:
             if chain:
                 chains.append(chain)
         # Score chains by distance to template positions
-        def dist(p1, p2):
+        def euclidean_distance(p1, p2):
             return ((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)**0.5
         best, best_score = None, float('inf')
         for chain in chains:
@@ -423,7 +423,7 @@ class MinimalStrokePipeline:
             if not pts:
                 continue
             top, bot = pts[0], pts[-1]
-            s1, s2 = dist(top, template_start) + dist(bot, template_end), dist(bot, template_start) + dist(top, template_end)
+            s1, s2 = euclidean_distance(top, template_start) + euclidean_distance(bot, template_end), euclidean_distance(bot, template_start) + euclidean_distance(top, template_end)
             score = min(s1, s2)
             if score < best_score:
                 best_score, best = score, (top, bot) if s1 <= s2 else (bot, top)
@@ -649,7 +649,7 @@ class MinimalStrokePipeline:
             'left': (135, 180, -180, -135),  # pointing left (wraps around)
         }
 
-        def angle_matches(angle, direction):
+        def angle_in_range(angle, direction):
             if direction == 'left':
                 return angle > 135 or angle < -135
             low, high = angle_ranges[direction]
@@ -659,7 +659,7 @@ class MinimalStrokePipeline:
         # (to avoid tiny stubs)
         good_segments = []
         for seg in segments:
-            if seg['length'] > 10 and angle_matches(seg['angle'], direction):
+            if seg['length'] > 10 and angle_in_range(seg['angle'], direction):
                 good_segments.append(seg)
 
         if not good_segments:
@@ -716,13 +716,13 @@ class MinimalStrokePipeline:
                 1 | 2 | 3   (row 2)
         """
         # Get row and column for each region (0-indexed from top-left)
-        def region_to_rc(r):
+        def region_to_row_col(r):
             row = 2 - (r - 1) // 3  # 7,8,9 -> row 0; 4,5,6 -> row 1; 1,2,3 -> row 2
             col = (r - 1) % 3       # 7,4,1 -> col 0; 8,5,2 -> col 1; 9,6,3 -> col 2
             return row, col
 
-        r1, c1 = region_to_rc(current_region)
-        r2, c2 = region_to_rc(next_region)
+        r1, c1 = region_to_row_col(current_region)
+        r2, c2 = region_to_row_col(next_region)
 
         dr = r2 - r1  # positive = down
         dc = c2 - c1  # positive = right

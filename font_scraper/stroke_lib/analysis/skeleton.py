@@ -679,21 +679,21 @@ class SkeletonAnalyzer:
         """
         import math
 
-        def endpoint_cluster(stroke, from_end):
+        def get_endpoint_cluster(stroke, from_end):
             pt = tuple(stroke[-1]) if from_end else tuple(stroke[0])
             return info.assigned.get(pt, -1)
 
-        def seg_dir(seg, from_end, n=8):
+        def compute_segment_direction(seg, from_end, n_samples=8):
             if from_end:
-                pts = seg[-min(n, len(seg)):]
+                pts = seg[-min(n_samples, len(seg)):]
             else:
-                pts = seg[:min(n, len(seg))][::-1]
+                pts = seg[:min(n_samples, len(seg))][::-1]
             dx = pts[-1][0] - pts[0][0]
             dy = pts[-1][1] - pts[0][1]
             length = (dx * dx + dy * dy) ** 0.5
             return (dx / length, dy / length) if length > 0.01 else (0, 0)
 
-        def angle(d1, d2):
+        def angle_between_directions(d1, d2):
             dot = d1[0] * d2[0] + d1[1] * d2[1]
             return math.acos(max(-1.0, min(1.0, dot)))
 
@@ -703,10 +703,10 @@ class SkeletonAnalyzer:
             changed = False
             cluster_map = defaultdict(list)
             for si, s in enumerate(strokes):
-                sc = endpoint_cluster(s, False)
+                sc = get_endpoint_cluster(s, False)
                 if sc >= 0:
                     cluster_map[sc].append((si, 'start'))
-                ec = endpoint_cluster(s, True)
+                ec = get_endpoint_cluster(s, True)
                 if ec >= 0:
                     cluster_map[ec].append((si, 'end'))
 
@@ -718,13 +718,13 @@ class SkeletonAnalyzer:
                     continue
                 for ai in range(len(entries)):
                     si, side_i = entries[ai]
-                    dir_i = seg_dir(strokes[si], from_end=(side_i == 'end'))
+                    dir_i = compute_segment_direction(strokes[si], from_end=(side_i == 'end'))
                     for bi in range(ai + 1, len(entries)):
                         sj, side_j = entries[bi]
                         if sj == si:
                             continue
-                        dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
-                        ang = math.pi - angle(dir_i, dir_j)
+                        dir_j = compute_segment_direction(strokes[sj], from_end=(side_j == 'end'))
+                        ang = math.pi - angle_between_directions(dir_i, dir_j)
                         if ang < math.pi / 4 and ang < best_score:
                             best_score = ang
                             best_merge = (si, side_i, sj, side_j)
@@ -755,7 +755,7 @@ class SkeletonAnalyzer:
         Returns:
             List of stroke paths with stubs absorbed.
         """
-        def endpoint_cluster(stroke, from_end):
+        def get_endpoint_cluster(stroke, from_end):
             pt = tuple(stroke[-1]) if from_end else tuple(stroke[0])
             return info.assigned.get(pt, -1)
 
@@ -768,8 +768,8 @@ class SkeletonAnalyzer:
                 if len(s) >= STUB_THRESHOLD:
                     continue
 
-                sc = endpoint_cluster(s, False)
-                ec = endpoint_cluster(s, True)
+                sc = get_endpoint_cluster(s, False)
+                ec = get_endpoint_cluster(s, True)
                 clusters_touching = set()
                 if sc >= 0:
                     clusters_touching.add(sc)
@@ -790,8 +790,8 @@ class SkeletonAnalyzer:
                         if sj == si:
                             continue
                         s2 = strokes[sj]
-                        tc_start = endpoint_cluster(s2, False)
-                        tc_end = endpoint_cluster(s2, True)
+                        tc_start = get_endpoint_cluster(s2, False)
+                        tc_end = get_endpoint_cluster(s2, True)
 
                         if tc_start == cid and len(s2) > best_len:
                             best_target = sj

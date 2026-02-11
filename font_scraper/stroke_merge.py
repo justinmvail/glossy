@@ -217,7 +217,7 @@ def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
     best_score = float('inf')
     best_merge = None
 
-    for _cid, entries in cluster_map.items():
+    for cluster_id, entries in cluster_map.items():
         if len(entries) < 2:
             continue
         for ai in range(len(entries)):

@@ -66,7 +66,7 @@ from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_utils import point_in_region
 
 
-def _skel(mask: np.ndarray) -> dict[str, Any] | None:
+def _analyze_skeleton_legacy(mask: np.ndarray) -> dict[str, Any] | None:
     """Analyze skeleton and return info dict compatible with legacy format.
 
     Performs skeleton extraction on a binary mask and returns structural
@@ -175,50 +175,54 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     """
     if min_stroke_len is not None:
         min_len = min_stroke_len
-    info = _skel(mask)
+    info = _analyze_skeleton_legacy(mask)
     if not info:
         return []
 
-    adj, eps = info['adj'], set(info['endpoints'])
-    jps, jcs = set(info['junction_pixels']), info['junction_clusters']
-    stops, vedges, raw = eps | jps, set(), []
+    adj = info['adj']
+    endpoints = set(info['endpoints'])
+    junction_pixels = set(info['junction_pixels'])
+    junction_clusters = info['junction_clusters']
+    stop_pixels = endpoints | junction_pixels
+    visited_edges = set()
+    raw = []
 
-    def trace(s, nb):
-        e = (min(s, nb), max(s, nb))
-        if e in vedges:
+    def trace_path(start, neighbor):
+        edge = (min(start, neighbor), max(start, neighbor))
+        if edge in visited_edges:
             return None
-        vedges.add(e)
-        path, cur, prev = [s, nb], nb, s
+        visited_edges.add(edge)
+        path, cur, prev = [start, neighbor], neighbor, start
         while True:
-            if cur in stops and len(path) > 2:
+            if cur in stop_pixels and len(path) > 2:
                 break
             cands = [(n, (min(cur, n), max(cur, n))) for n in adj.get(cur, [])
-                     if n != prev and (min(cur, n), max(cur, n)) not in vedges]
+                     if n != prev and (min(cur, n), max(cur, n)) not in visited_edges]
             if not cands:
                 break
-            nxt, ne = cands[0]
-            vedges.add(ne)
+            nxt, next_edge = cands[0]
+            visited_edges.add(next_edge)
             path.append(nxt)
             prev, cur = cur, nxt
         return path
 
-    for st in sorted(eps):
-        for nb in adj.get(st, []):
-            if (p := trace(st, nb)) and len(p) >= 2:
-                raw.append(p)
-    for st in sorted(jps):
-        for nb in adj.get(st, []):
-            if (p := trace(st, nb)) and len(p) >= 2:
-                raw.append(p)
+    for start_pt in sorted(endpoints):
+        for neighbor in adj.get(start_pt, []):
+            if (path := trace_path(start_pt, neighbor)) and len(path) >= 2:
+                raw.append(path)
+    for start_pt in sorted(junction_pixels):
+        for neighbor in adj.get(start_pt, []):
+            if (path := trace_path(start_pt, neighbor)) and len(path) >= 2:
+                raw.append(path)
 
     strokes = [s for s in raw if len(s) >= min_len]
-    asgn = [set(c) for c in jcs]
-    strokes = merge_t_junctions(strokes, jcs, asgn)
-    strokes = run_merge_pass(strokes, asgn, min_len=0)
-    strokes = absorb_convergence_stubs(strokes, jcs, asgn)
-    strokes = absorb_junction_stubs(strokes, asgn)
+    assigned_clusters = [set(c) for c in junction_clusters]
+    strokes = merge_t_junctions(strokes, junction_clusters, assigned_clusters)
+    strokes = run_merge_pass(strokes, assigned_clusters, min_len=0)
+    strokes = absorb_convergence_stubs(strokes, junction_clusters, assigned_clusters)
+    strokes = absorb_junction_stubs(strokes, assigned_clusters)
     strokes = absorb_proximity_stubs(strokes)
-    strokes = remove_orphan_stubs(strokes, asgn)
+    strokes = remove_orphan_stubs(strokes, assigned_clusters)
 
     return [[[float(x), float(y)] for x, y in s] for s in strokes]
 
@@ -328,7 +332,7 @@ def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
         fp, c, cs,
         resolve_font_path_fn=resolve_font_path,
         render_glyph_mask_fn=render_glyph_mask,
-        analyze_skeleton_fn=_skel,
+        analyze_skeleton_fn=_analyze_skeleton_legacy,
         find_skeleton_segments_fn=find_skeleton_segments,
         point_in_region_fn=point_in_region,
         trace_segment_fn=trace_segment,

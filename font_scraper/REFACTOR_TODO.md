@@ -227,17 +227,28 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 8. Poor Naming
 
-- [ ] **stroke_pipeline.py:179** - `trace()` → `_trace_segment_from_endpoints()`
-- [ ] **stroke_pipeline.py:338** - `dist()` → `_euclidean_distance()`
-- [ ] **stroke_pipeline.py:565** - `angle_matches()` → `_angle_in_range()`
-- [ ] **stroke_pipeline.py:632** - `region_to_rc()` → `_region_to_row_col()`
-- [ ] **stroke_core.py:63** - `_skel()` → `_analyze_skeleton_legacy()`
-- [ ] **stroke_core.py:176** - `eps`, `jps`, `jcs` → full names
-- [ ] **stroke_routes_core.py:130** - `q` → `query`
-- [ ] **stroke_routes_stream.py:127-140** - `cloud_tree`, `snap_yi` → clearer names
-- [ ] **stroke_merge.py:219** - `_cid` → `cluster_id`
-- [ ] **stroke_lib/analysis/skeleton.py:552** - `trace` → `_trace_path_from_point`
-- [ ] **stroke_lib/analysis/skeleton.py:643** - `seg_dir` → `_compute_segment_direction`
+- [x] **stroke_pipeline.py** - Local function renames:
+  - ✅ `dist()` → `euclidean_distance()`
+  - ✅ `angle_matches()` → `angle_in_range()`
+  - ✅ `region_to_rc()` → `region_to_row_col()`
+
+- [x] **stroke_core.py** - Function and variable renames:
+  - ✅ `_skel()` → `_analyze_skeleton_legacy()`
+  - ✅ `eps` → `endpoints`, `jps` → `junction_pixels`, `jcs` → `junction_clusters`
+  - ✅ `trace()` → `trace_path()`, `vedges` → `visited_edges`, `stops` → `stop_pixels`
+
+- [x] **stroke_routes_core.py:130** - `q` → `query`, `rej` → `show_rejected`
+
+- [x] **stroke_routes_stream.py:127-140** - Clearer spatial names:
+  - ✅ `cloud_tree` → `glyph_kdtree`
+  - ✅ `snap_yi` → `snap_row_indices`, `snap_xi` → `snap_col_indices`
+
+- [x] **stroke_merge.py:220** - `_cid` → `cluster_id`
+
+- [x] **stroke_lib/analysis/skeleton.py** - Method renames in nested functions:
+  - ✅ `endpoint_cluster()` → `get_endpoint_cluster()`
+  - ✅ `seg_dir()` → `compute_segment_direction()`
+  - ✅ `angle()` → `angle_between_directions()`
 
 ### 9. Inconsistent Patterns
 
@@ -351,6 +362,13 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_utils.py: Added return type to parse_waypoint()
   - stroke_rendering.py: Added FreeTypeFont type with TYPE_CHECKING
   - stroke_dataclasses.py: Added dict[str, Any] and cKDTree types
+- [x] Poor naming fixes (2026-02-10)
+  - stroke_pipeline.py: dist→euclidean_distance, angle_matches→angle_in_range, region_to_rc→region_to_row_col
+  - stroke_core.py: _skel→_analyze_skeleton_legacy, eps/jps/jcs→full names
+  - stroke_routes_core.py: q→query, rej→show_rejected
+  - stroke_routes_stream.py: cloud_tree→glyph_kdtree, snap_yi/xi→snap_row/col_indices
+  - stroke_merge.py: _cid→cluster_id
+  - stroke_lib/analysis/skeleton.py: endpoint_cluster→get_endpoint_cluster, seg_dir→compute_segment_direction
 - [x] Long function refactoring (2026-02-10)
   - stroke_scoring.py: Extracted 5 helpers, added module constants
   - stroke_skeleton.py: Extracted 4 helpers for find_skeleton_segments

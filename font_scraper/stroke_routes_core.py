@@ -165,11 +165,11 @@ def font_list():
 
             GET /?rejected=1
     """
-    db, rej = get_db(), request.args.get('rejected') == '1'
-    q = "SELECT f.id, f.name, f.source, f.file_path, COALESCE(cs.char_count, 0) as char_count, {} as rejected FROM fonts f {} LEFT JOIN (SELECT font_id, COUNT(*) as char_count FROM characters WHERE strokes_raw IS NOT NULL GROUP BY font_id) cs ON cs.font_id = f.id {} ORDER BY f.name"
-    fonts = db.execute(q.format('1', 'JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = 8', '') if rej else q.format('0', 'LEFT JOIN font_removals rej ON rej.font_id = f.id AND rej.reason_id = 8 LEFT JOIN font_removals dup ON dup.font_id = f.id AND dup.reason_id = 2', 'WHERE rej.id IS NULL AND dup.id IS NULL')).fetchall()
+    db, show_rejected = get_db(), request.args.get('rejected') == '1'
+    query = "SELECT f.id, f.name, f.source, f.file_path, COALESCE(cs.char_count, 0) as char_count, {} as rejected FROM fonts f {} LEFT JOIN (SELECT font_id, COUNT(*) as char_count FROM characters WHERE strokes_raw IS NOT NULL GROUP BY font_id) cs ON cs.font_id = f.id {} ORDER BY f.name"
+    fonts = db.execute(query.format('1', 'JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = 8', '') if show_rejected else query.format('0', 'LEFT JOIN font_removals rej ON rej.font_id = f.id AND rej.reason_id = 8 LEFT JOIN font_removals dup ON dup.font_id = f.id AND dup.reason_id = 2', 'WHERE rej.id IS NULL AND dup.id IS NULL')).fetchall()
     db.close()
-    return render_template('font_list.html', fonts=fonts, show_rejected=rej)
+    return render_template('font_list.html', fonts=fonts, show_rejected=show_rejected)
 
 
 @app.route('/font/<int:fid>')

@@ -144,14 +144,14 @@ def _prepare_optimization(mask: np.ndarray, strokes_raw: list) -> tuple | None:
     if len(cloud) < 10:
         return None
 
-    cloud_tree = cKDTree(cloud)
+    glyph_kdtree = cKDTree(cloud)
     n_cloud = len(cloud)
     radius = adaptive_radius(mask, spacing=3)
     dist_map = distance_transform_edt(mask)
     _, snap_indices = distance_transform_edt(~mask, return_indices=True)
-    snap_yi, snap_xi = snap_indices[0], snap_indices[1]
+    snap_row_indices, snap_col_indices = snap_indices[0], snap_indices[1]
 
-    score_args = (cloud_tree, n_cloud, radius, snap_yi, snap_xi, w, h, dist_map)
+    score_args = (glyph_kdtree, n_cloud, radius, snap_row_indices, snap_col_indices, w, h, dist_map)
 
     # Convert raw strokes to numpy arrays
     stroke_arrays = []
