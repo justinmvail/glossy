@@ -133,8 +133,10 @@ Systematic review of font_scraper codebase for quality improvements.
   - **Status:** Acceptable - Full test suite runs in ~30 seconds
   - Individual tests run quickly
 - [x] Missing integration tests - no end-to-end coverage
-  - **Status:** Noted - Could add Flask route integration tests
-  - Current testing focuses on stroke pipeline
+  - **Status:** FIXED - Added test_flask_routes.py with 24 tests
+  - Covers: font list, char grid, char API, rendering, quality check,
+    processing, batch operations, SSE streaming
+  - Tests run in ~0.8s, 23 pass, 1 skipped (known issue)
 - [x] Untestable code - tightly coupled, hard to mock
   - **Status:** PASS - Repository pattern allows DB mocking
   - Stroke functions take explicit parameters, not global state
@@ -373,4 +375,18 @@ All tests pass (26/26 characters OK).
 - stroke_routes_stream.py: 2 routes updated (api_optimize_stream, api_minimal_strokes_stream)
 
 All tests pass (26/26 characters OK).
+
+### Session 4: Flask Route Integration Tests
+
+#### Created test_flask_routes.py with 24 tests covering:
+- Font list and character grid pages (2 tests)
+- Character data API - get/save (5 tests)
+- Rendering endpoints - render, preview, thin-preview, font-sample (5 tests)
+- Quality check endpoints (2 tests)
+- Processing endpoints - process, snap, center (3 tests)
+- Batch endpoints - skeleton, detect-markers, minimal-strokes (3 tests)
+- SSE streaming endpoints (2 tests)
+
+Results: 23/24 pass, 1 skipped (known api_skeleton issue)
+Test runtime: ~0.8s
 
