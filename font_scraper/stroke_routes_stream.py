@@ -91,10 +91,6 @@ AFFINE_ROTATE_BOUNDS = (-10, 10)  # Rotation in degrees
 AFFINE_SHEAR_BOUNDS = (-0.2, 0.2)  # Shear factor
 
 
-# Alias for backward compatibility
-_font = get_font
-
-
 def _sse_event(data: dict) -> str:
     """Format a dictionary as a Server-Sent Events data line.
 

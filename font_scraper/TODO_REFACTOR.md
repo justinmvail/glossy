@@ -136,16 +136,16 @@ Generated: 2026-02-11 (Audit #2)
 85. [ ] stroke_scoring.py has both legacy and composite scorer paths in same function
 
 ### LOW - Missing Module Docstrings
-86. [ ] run_ocr_prefilter.py - Missing module docstring
-87. [ ] run_connectivity_filter.py - Missing module docstring
-88. [ ] run_prefilters.py - Missing module docstring
-89. [ ] scrape_all.py - Missing module docstring
-90. [ ] test_minimal_strokes.py - Missing module docstring
-91. [ ] test_flask_routes.py - Missing module docstring
-92. [ ] visualize_all_chars.py - Missing module docstring
-93. [ ] visualize_strokes.py - Missing module docstring
-94. [ ] inksight_cli.py - Missing module docstring
-95. [ ] docker/*.py files - Missing module docstrings (4 files)
+86. [x] run_ocr_prefilter.py - Missing module docstring - ALREADY HAS DOCSTRING
+87. [x] run_connectivity_filter.py - Missing module docstring - ALREADY HAS DOCSTRING
+88. [x] run_prefilters.py - Missing module docstring - ALREADY HAS DOCSTRING
+89. [x] scrape_all.py - Missing module docstring - ALREADY HAS DOCSTRING
+90. [x] test_minimal_strokes.py - Missing module docstring - ALREADY HAS DOCSTRING
+91. [x] test_flask_routes.py - Missing module docstring - ALREADY HAS DOCSTRING
+92. [x] visualize_all_chars.py - Missing module docstring - ALREADY HAS DOCSTRING
+93. [x] visualize_strokes.py - Missing module docstring - ALREADY HAS DOCSTRING
+94. [x] inksight_cli.py - Missing module docstring - ALREADY HAS DOCSTRING
+95. [x] docker/*.py files - Missing module docstrings - ALREADY HAVE DOCSTRINGS
 
 ### LOW - Unused/Dead Code
 96. [ ] stroke_utils.py:29 - `gaussian_filter1d` imported but never used (noqa present)
@@ -153,9 +153,9 @@ Generated: 2026-02-11 (Audit #2)
 98. [ ] font_utils.py:295-303 - Loop generates discarded intermediate images
 
 ### LOW - Module-Level Aliases
-99. [ ] stroke_routes_core.py:112 - `_font = get_font` alias (call directly instead)
-100. [ ] stroke_routes_batch.py:82-85 - Multiple aliases to imported functions
-101. [ ] stroke_routes_stream.py:95 - `_font = get_font` alias
+99. [ ] stroke_routes_core.py:112 - `_font = get_font` alias (still in use, would require changes to 5 call sites)
+100. [x] stroke_routes_batch.py:82-85 - Multiple aliases to imported functions - REMOVED (3 unused aliases)
+101. [x] stroke_routes_stream.py:95 - `_font = get_font` alias - REMOVED (unused)
 
 ### LOW - stroke_lib Package Issues
 102. [ ] stroke_lib/optimization/__init__.py - Missing `create_default_optimizer` in __all__

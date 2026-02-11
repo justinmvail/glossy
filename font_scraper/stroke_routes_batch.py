@@ -83,9 +83,6 @@ from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 
 # Alias for backward compatibility
 _font = get_font
-_cast_ray = cast_ray
-_center_point_in_glyph = center_point_in_glyph
-_RAY_DIRECTIONS = RAY_DIRECTIONS
 
 
 def _get_stroke_funcs() -> tuple:
