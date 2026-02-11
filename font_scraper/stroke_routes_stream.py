@@ -601,8 +601,8 @@ def api_optimize_stream(fid):
     def generate():
         try:
             yield from optimize_stream_generator(f['file_path'], c)
-        except Exception as e:
-            yield _sse_event({'error': str(e)})
+        except Exception:
+            yield _sse_event({'error': 'Optimization failed'})
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={
@@ -707,8 +707,8 @@ def api_minimal_strokes_stream(fid):
                 step['frame'] = frame
                 step['elapsed'] = round(time.time() - start_time, 2)
                 yield _sse_event(step)
-        except Exception as e:
-            yield _sse_event({'error': str(e), 'done': True})
+        except Exception:
+            yield _sse_event({'error': 'Stroke generation failed', 'done': True})
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={

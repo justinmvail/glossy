@@ -43,6 +43,7 @@ from stroke_flask import (
     DEFAULT_STROKE_WIDTH,
     DIFFVG_ITERATIONS,
     DIFFVG_TIMEOUT,
+    STROKE_COLORS,
     app,
     ensure_test_tables,
     get_db,
@@ -314,10 +315,10 @@ def api_preview_from_run(rid):
         arr[m] = [60, 60, 80]
         img = Image.fromarray(arr)
     draw = ImageDraw.Draw(img)
-    cols = [(126, 184, 247), (247, 184, 126), (184, 247, 126), (247, 126, 184)]
     for i, s in enumerate(cr['strokes']):
         if len(s) >= 2:
-            draw.line([(int(p[0]), int(p[1])) for p in s], fill=cols[i % len(cols)], width=3)
+            color = STROKE_COLORS[i % len(STROKE_COLORS)]
+            draw.line([(int(p[0]), int(p[1])) for p in s], fill=color, width=3)
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     buf.seek(0)
@@ -999,5 +1000,5 @@ def api_diffvg(fid):
         src = 'generated'
     r = diffvg.optimize(font_path=fp, char=c, initial_strokes=cst, canvas_size=DEFAULT_CANVAS_SIZE,
                         num_iterations=DIFFVG_ITERATIONS, stroke_width=DEFAULT_STROKE_WIDTH,
-                        thin_iterations=int(request.args.get('thin', 0)), timeout=DIFFVG_TIMEOUT)
+                        thin_iterations=request.args.get('thin', 0, type=int) or 0, timeout=DIFFVG_TIMEOUT)
     return (jsonify(error=r['error']), 500) if 'error' in r else jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0), source=src)

@@ -39,11 +39,26 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 5. Security
 
-- [ ] SQL injection - string formatting in queries
-- [ ] Hardcoded secrets - passwords, keys, tokens in code
-- [ ] Missing input validation - unvalidated user input
+- [x] SQL injection - string formatting in queries
+  - **Status:** PASS - All queries use parameterized `?` placeholders
+- [x] Hardcoded secrets - passwords, keys, tokens in code
+  - **Status:** PASS - No secrets found (only InkSight model tokens)
+- [x] Missing input validation - unvalidated user input
+  - **Status:** FIXED - Changed `int(request.args.get())` to `request.args.get(type=int)` with bounds checking
+  - Files: stroke_routes_core.py, stroke_routes_batch.py
 - [ ] Insecure dependencies - known vulnerabilities
-- [ ] Overly permissive CORS/permissions
+  - **Status:** Unable to run pip-audit (externally managed environment)
+- [x] Overly permissive CORS/permissions
+  - **Status:** PASS - No CORS configured (local tool)
+- [x] Command injection - subprocess with shell=True
+  - **Status:** PASS - All subprocess calls use list args, no shell=True
+- [x] Error message leaks - exposing internal exceptions
+  - **Status:** FIXED - Replaced `str(e)` with generic messages in HTTP responses
+  - Files: stroke_routes_core.py, stroke_routes_stream.py
+- [x] Path traversal - user input in file paths
+  - **Status:** PASS - File paths come from DB, not user input
+- [x] Deserialization - pickle/yaml.load
+  - **Status:** PASS - No unsafe deserialization found
 
 ## 6. Testing
 
@@ -91,4 +106,13 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ### Session 1: Initial Setup
 - Created audit checklist
+
+### Session 1: Security Audit
+- Scanned for SQL injection: PASS (all parameterized queries)
+- Scanned for hardcoded secrets: PASS (none found)
+- Scanned for command injection: PASS (no shell=True)
+- Scanned for path traversal: PASS (DB-sourced paths)
+- Scanned for deserialization: PASS (no pickle/yaml.load)
+- Fixed input validation in 3 locations
+- Fixed error message leaks in 4 locations
 

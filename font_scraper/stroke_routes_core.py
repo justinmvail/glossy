@@ -69,6 +69,7 @@ from stroke_flask import (
     CHARS,
     STROKE_COLORS,
     app,
+    font_repository,
     get_db,
     get_font,
     resolve_font_path,
@@ -165,10 +166,8 @@ def font_list():
 
             GET /?rejected=1
     """
-    db, show_rejected = get_db(), request.args.get('rejected') == '1'
-    query = "SELECT f.id, f.name, f.source, f.file_path, COALESCE(cs.char_count, 0) as char_count, {} as rejected FROM fonts f {} LEFT JOIN (SELECT font_id, COUNT(*) as char_count FROM characters WHERE strokes_raw IS NOT NULL GROUP BY font_id) cs ON cs.font_id = f.id {} ORDER BY f.name"
-    fonts = db.execute(query.format('1', 'JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = 8', '') if show_rejected else query.format('0', 'LEFT JOIN font_removals rej ON rej.font_id = f.id AND rej.reason_id = 8 LEFT JOIN font_removals dup ON dup.font_id = f.id AND dup.reason_id = 2', 'WHERE rej.id IS NULL AND dup.id IS NULL')).fetchall()
-    db.close()
+    show_rejected = request.args.get('rejected') == '1'
+    fonts = font_repository.list_fonts(show_rejected=show_rejected)
     return render_template('font_list.html', fonts=fonts, show_rejected=show_rejected)
 
 
@@ -202,13 +201,10 @@ def char_grid(fid):
 
             GET /font/42
     """
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
+    f = font_repository.get_font_by_id(fid)
     if not f:
-        db.close()
         return "Font not found", 404
-    ch = db.execute("SELECT char, strokes_raw, point_count FROM characters WHERE font_id = ? AND strokes_raw IS NOT NULL ORDER BY char", (fid,)).fetchall()
-    db.close()
+    ch = font_repository.get_font_characters(fid)
     return render_template('char_grid.html', font=f, chars=ch if ch else [{'char': c, 'strokes_raw': None, 'point_count': 0} for c in CHARS])
 
 
@@ -302,13 +298,10 @@ def api_get_char(fid):
     ok, err = validate_char_param(c)
     if not ok:
         return err
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
+    f = font_repository.get_font_by_id(fid)
     if not f:
-        db.close()
         return jsonify(error="Font not found"), 404
-    row = db.execute("SELECT strokes_raw, markers FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
-    db.close()
+    row = font_repository.get_character(fid, c)
     img = render_char_image(f['file_path'], c)
     return jsonify(
         strokes=json.loads(row['strokes_raw']) if row and row['strokes_raw'] else [],
@@ -381,15 +374,12 @@ def api_save_char(fid):
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
     st, mk = data['strokes'], data.get('markers', [])
-    db = get_db()
-    if db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone():
-        db.execute("UPDATE characters SET strokes_raw = ?, point_count = ?, markers = ? WHERE font_id = ? AND char = ?",
-                   (json.dumps(st), sum(len(s) for s in st), json.dumps(mk) if mk else None, fid, c))
-    else:
-        db.execute("INSERT INTO characters (font_id, char, strokes_raw, point_count, markers) VALUES (?, ?, ?, ?, ?)",
-                   (fid, c, json.dumps(st), sum(len(s) for s in st), json.dumps(mk) if mk else None))
-    db.commit()
-    db.close()
+    font_repository.save_character(
+        fid, c,
+        strokes_raw=json.dumps(st),
+        point_count=sum(len(s) for s in st),
+        markers=json.dumps(mk) if mk else None
+    )
     return jsonify(ok=True)
 
 
@@ -486,7 +476,10 @@ def api_thin_preview(fid):
     m = render_glyph_mask(f['file_path'], c)
     if m is None:
         return "Could not render glyph", 500
-    th = thin(m, max_num_iter=int(request.args.get('thin', 5)))
+    thin_iter = request.args.get('thin', 5, type=int)
+    if thin_iter is None or thin_iter < 0 or thin_iter > 100:
+        return "Invalid thin parameter", 400
+    th = thin(m, max_num_iter=thin_iter)
     img = np.full((224, 224, 3), 255, dtype=np.uint8)
     img[m], img[th] = [200, 200, 200], [0, 0, 0]
     buf = io.BytesIO()
@@ -555,8 +548,8 @@ def api_check_connected(fid):
         if shape_count == 0:
             return jsonify(error="Could not render"), 500
         return jsonify(shapes=shape_count, bad=is_bad, case_mismatches=case_mismatches)
-    except Exception as e:
-        return jsonify(error=str(e)), 500
+    except Exception:
+        return jsonify(error="Could not check font"), 500
 
 
 @app.route('/api/reject-connected', methods=['POST'])
@@ -598,8 +591,7 @@ def api_reject_connected():
 
             {"ok": true, "checked": 150, "rejected": 23}
     """
-    db = get_db()
-    fonts = db.execute("SELECT f.id, f.file_path FROM fonts f LEFT JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = 8 WHERE fr.id IS NULL").fetchall()
+    fonts = font_repository.list_fonts_for_scan()
     rej, chk = 0, 0
     for f in fonts:
         try:
@@ -610,13 +602,10 @@ def api_reject_connected():
                 continue
             chk += 1
             if is_bad:
-                db.execute("INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)",
-                           (f['id'], f'{shape_count} shapes'))
+                font_repository.reject_font(f['id'], f'{shape_count} shapes')
                 rej += 1
         except (OSError, ValueError, MemoryError):
             continue
-    db.commit()
-    db.close()
     return jsonify(ok=True, checked=chk, rejected=rej)
 
 
@@ -662,7 +651,10 @@ def api_font_sample(fid):
 
             <img src="/api/font-sample/42?text=Preview" alt="Font preview">
     """
-    txt, h = request.args.get('text', 'Hello World!'), int(request.args.get('h', 40))
+    txt = request.args.get('text', 'Hello World!')
+    h = request.args.get('h', 40, type=int)
+    if h is None or h < 10 or h > 500:
+        return "Invalid height parameter", 400
     f = _font(fid)
     if not f:
         return "Font not found", 404
@@ -677,8 +669,8 @@ def api_font_sample(fid):
         img.save(buf, format='PNG')
         buf.seek(0)
         return send_file(buf, mimetype='image/png')
-    except Exception as e:
-        return f"Error: {e}", 500
+    except Exception:
+        return "Could not render font sample", 500
 
 
 @app.route('/api/preview/<int:fid>')
@@ -725,12 +717,10 @@ def api_preview(fid):
     c = request.args.get('c')
     if not c:
         return "Missing ?c= parameter", 400
-    db = get_db()
-    f = db.execute("SELECT file_path FROM fonts WHERE id = ?", (fid,)).fetchone()
-    row = db.execute("SELECT strokes_raw FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
-    db.close()
+    f = font_repository.get_font_by_id(fid)
     if not f:
         return "Font not found", 404
+    row = font_repository.get_character_strokes(fid, c)
     img = render_char_image(f['file_path'], c)
     if not img:
         return "Could not render", 500
@@ -1049,17 +1039,11 @@ def api_reject_font(fid):
 
             {"ok": true, "status": "rejected"}
     """
-    db = get_db()
-    if not db.execute("SELECT id FROM fonts WHERE id = ?", (fid,)).fetchone():
-        db.close()
+    if not font_repository.get_font_by_id(fid):
         return jsonify(error="Font not found"), 404
-    if db.execute("SELECT id FROM font_removals WHERE font_id = ? AND reason_id = 8", (fid,)).fetchone():
-        db.close()
-        return jsonify(ok=True, status='already_rejected')
-    db.execute("INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, 8, 'Rejected in stroke editor')", (fid,))
-    db.commit()
-    db.close()
-    return jsonify(ok=True, status='rejected')
+    if font_repository.reject_font(fid, 'Rejected in stroke editor'):
+        return jsonify(ok=True, status='rejected')
+    return jsonify(ok=True, status='already_rejected')
 
 
 @app.route('/api/unreject/<int:fid>', methods=['POST'])
@@ -1091,10 +1075,7 @@ def api_unreject_font(fid):
 
             {"ok": true, "status": "unrejected"}
     """
-    db = get_db()
-    db.execute("DELETE FROM font_removals WHERE font_id = ? AND reason_id = 8", (fid,))
-    db.commit()
-    db.close()
+    font_repository.unreject_font(fid)
     return jsonify(ok=True, status='unrejected')
 
 
@@ -1132,8 +1113,5 @@ def api_unreject_all():
 
             {"ok": true, "restored": 23}
     """
-    db = get_db()
-    r = db.execute("DELETE FROM font_removals WHERE reason_id = 8")
-    db.commit()
-    db.close()
-    return jsonify(ok=True, restored=r.rowcount)
+    restored = font_repository.unreject_all_fonts()
+    return jsonify(ok=True, restored=restored)
