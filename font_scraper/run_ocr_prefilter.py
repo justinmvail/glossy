@@ -206,33 +206,7 @@ def get_passing_fonts(db_path: str) -> list:
     return fonts
 
 
-def run_batch_ocr(image_dir: str, image_files: list) -> dict:
-    """Run TrOCR on all images in batch mode via Docker.
-
-    Executes TrOCR model inside a Docker container with GPU support.
-    The model is loaded once and reused for all images, making this
-    significantly faster than processing images individually.
-
-    Args:
-        image_dir: Absolute path to directory containing the images.
-        image_files: List of image filenames (not full paths) to process.
-
-    Returns:
-        A dictionary mapping filename to result, where each result is a
-        dict containing:
-            - text (str or None): Recognized text, or None on error
-            - error (str or None): Error message, or None on success
-
-        Returns None if Docker execution failed entirely.
-
-    Note:
-        Requires Docker with GPU support (--gpus all) and the
-        'trocr:latest' image. The HuggingFace model cache is mounted
-        from ~/.cache/huggingface to avoid re-downloading.
-    """
-
-    # Create batch processing script
-    batch_script = '''
+_BATCH_OCR_SCRIPT = '''
 import sys
 import time
 import json
@@ -283,25 +257,96 @@ print(json.dumps(results), flush=True)
 print("RESULTS_END", flush=True)
 '''
 
+
+def _build_docker_command(image_dir: str, script_path: str,
+                          image_list_json: str) -> list:
+    """Build Docker command for batch OCR.
+
+    Args:
+        image_dir: Directory containing images to process.
+        script_path: Path to the batch OCR Python script.
+        image_list_json: JSON string of image filenames.
+
+    Returns:
+        List of command arguments for subprocess.
+    """
+    return [
+        'docker', 'run', '--rm', '--gpus', 'all',
+        '-v', f'{image_dir}:/data',
+        '-v', f'{script_path}:/app/batch_ocr.py',
+        '-v', f'{os.path.expanduser("~")}/.cache/huggingface:/root/.cache/huggingface',
+        'trocr:latest',
+        'python3', '/app/batch_ocr.py', '/data', image_list_json
+    ]
+
+
+def _parse_docker_output(process) -> str | None:
+    """Parse Docker process output and extract results JSON.
+
+    Args:
+        process: subprocess.Popen object with stdout pipe.
+
+    Returns:
+        JSON string of results, or None if not found.
+    """
+    in_results = False
+    results_lines = []
+
+    for line in process.stdout:
+        line = line.strip()
+        if line.startswith('LOADING_MODEL'):
+            print("  Loading TrOCR model...")
+        elif line.startswith('MODEL_LOADED'):
+            print(f"  Model loaded ({line.split()[1]})")
+        elif line.startswith('DEVICE'):
+            print(f"  Using device: {line.split()[1]}")
+        elif line.startswith('PROGRESS'):
+            parts = line.split()
+            print(f"  Processing: {parts[1]}")
+        elif line == 'RESULTS_START':
+            in_results = True
+        elif line == 'RESULTS_END':
+            in_results = False
+            return ''.join(results_lines)
+        elif in_results:
+            results_lines.append(line)
+
+    return None
+
+
+def run_batch_ocr(image_dir: str, image_files: list) -> dict | None:
+    """Run TrOCR on all images in batch mode via Docker.
+
+    Executes TrOCR model inside a Docker container with GPU support.
+    The model is loaded once and reused for all images, making this
+    significantly faster than processing images individually.
+
+    Args:
+        image_dir: Absolute path to directory containing the images.
+        image_files: List of image filenames (not full paths) to process.
+
+    Returns:
+        A dictionary mapping filename to result, where each result is a
+        dict containing:
+            - text (str or None): Recognized text, or None on error
+            - error (str or None): Error message, or None on success
+
+        Returns None if Docker execution failed entirely.
+
+    Note:
+        Requires Docker with GPU support (--gpus all) and the
+        'trocr:latest' image. The HuggingFace model cache is mounted
+        from ~/.cache/huggingface to avoid re-downloading.
+    """
     # Write script to temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        f.write(batch_script)
+        f.write(_BATCH_OCR_SCRIPT)
         script_path = f.name
 
     try:
-        # Prepare image list as JSON
         image_list_json = json.dumps(image_files)
+        cmd = _build_docker_command(image_dir, script_path, image_list_json)
 
-        cmd = [
-            'docker', 'run', '--rm', '--gpus', 'all',
-            '-v', f'{image_dir}:/data',
-            '-v', f'{script_path}:/app/batch_ocr.py',
-            '-v', f'{os.path.expanduser("~")}/.cache/huggingface:/root/.cache/huggingface',
-            'trocr:latest',
-            'python3', '/app/batch_ocr.py', '/data', image_list_json
-        ]
-
-        # Run with realtime output
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -310,29 +355,7 @@ print("RESULTS_END", flush=True)
             bufsize=1
         )
 
-        results_json = None
-        in_results = False
-        results_lines = []
-
-        for line in process.stdout:
-            line = line.strip()
-            if line.startswith('LOADING_MODEL'):
-                print("  Loading TrOCR model...")
-            elif line.startswith('MODEL_LOADED'):
-                print(f"  Model loaded ({line.split()[1]})")
-            elif line.startswith('DEVICE'):
-                print(f"  Using device: {line.split()[1]}")
-            elif line.startswith('PROGRESS'):
-                parts = line.split()
-                print(f"  Processing: {parts[1]}")
-            elif line == 'RESULTS_START':
-                in_results = True
-            elif line == 'RESULTS_END':
-                in_results = False
-                results_json = ''.join(results_lines)
-            elif in_results:
-                results_lines.append(line)
-
+        results_json = _parse_docker_output(process)
         process.wait()
 
         if process.returncode != 0:

@@ -10,7 +10,7 @@ Generated: 2026-02-11
 
 1. [x] `run_prefilters.py` - `run_pipeline()` 273 lines → split into stage handlers
 2. [x] `run_ocr_prefilter.py` - `run_prefilter()` 197 lines → extract validation logic
-3. [ ] `run_ocr_prefilter.py` - `run_batch_ocr()` 140 lines → extract batch helpers
+3. [x] `run_ocr_prefilter.py` - `run_batch_ocr()` 140 lines → extract batch helpers
 4. [ ] `stroke_pipeline_stream.py` - `stream_minimal_strokes()` 131 lines → extract phases
 5. [ ] `inksight_vectorizer.py` - `main()` 125 lines → extract CLI subcommands
 6. [ ] `stroke_routes_stream.py` - `optimize_stream_generator()` 117 lines → extract phases
@@ -37,7 +37,7 @@ Functions that should be broken down into smaller pieces:
 |------|----------|-------|--------|
 | `run_prefilters.py:333` | `run_pipeline()` | 84 | ✓ DONE - split into 4 helpers |
 | `run_ocr_prefilter.py:513` | `run_prefilter()` | 90 | ✓ DONE - split into 4 helpers |
-| `run_ocr_prefilter.py:209` | `run_batch_ocr()` | 140 | Extract batch processing helpers |
+| `run_ocr_prefilter.py:309` | `run_batch_ocr()` | 57 | ✓ DONE - extracted script + 2 helpers |
 | `stroke_pipeline_stream.py:451` | `stream_minimal_strokes()` | 131 | Extract phase handlers |
 | `inksight_vectorizer.py:1233` | `main()` | 125 | Extract CLI subcommands |
 | `stroke_routes_stream.py:402` | `optimize_stream_generator()` | 117 | Extract optimization phases |
