@@ -18,7 +18,7 @@ Generated: 2026-02-11
 8. [x] `setup_database.py:256` - SQL injection risk → validate table names
 9. [x] `stroke_flask` -> `stroke_rendering` circular import → review/fix
 10. [x] Add docstrings to 53 functions (Shape subclasses, strategies)
-11. [ ] Add return type hints to 37 functions
+11. [x] Add return type hints to 37 functions
 12. [ ] Extract magic numbers to constants
 13. [ ] Add logging to `stroke_merge.py`, `stroke_scoring.py`
 14. [ ] Review `pass` in exception handlers
@@ -84,13 +84,13 @@ Most are Shape subclass methods that inherit behavior from base class:
 - **Without return types:** 37 functions (23%)
 
 Files needing type hints:
-- `dafont_scraper.py`
-- `fontspace_scraper.py`
-- `google_fonts_scraper.py`
-- `run_*.py` scripts
-- `test_*.py` files
+- `dafont_scraper.py` ✓
+- `fontspace_scraper.py` ✓
+- `google_fonts_scraper.py` ✓
+- `run_*.py` scripts ✓
+- `test_*.py` files (test files typically don't need type hints)
 
-**Action:** Add return type hints to remaining public functions.
+**Action:** ✓ Added return type hints to main() and other public functions in scrapers and run scripts.
 
 ### 6. Deep Nesting (465 instances of 4+ indentation levels)
 

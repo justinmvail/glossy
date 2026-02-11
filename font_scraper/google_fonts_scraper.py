@@ -330,7 +330,7 @@ class GoogleFontsScraper:
         return metadata
 
 
-def main():
+def main() -> None:
     """Parse command-line arguments and run the Google Fonts scraper.
 
     This function serves as the entry point when the module is run as a script.

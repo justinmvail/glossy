@@ -533,7 +533,7 @@ def _print_sample_results(db_path: str, threshold: float) -> None:
     conn.close()
 
 
-def run_prefilter(db_path: str, threshold: float = 0.7):
+def run_prefilter(db_path: str, threshold: float = 0.7) -> None:
     """Run OCR prefilter on all passing fonts.
 
     This is the main orchestration function that:
@@ -623,7 +623,7 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
     _print_sample_results(db_path, threshold)
 
 
-def main():
+def main() -> None:
     """Parse command-line arguments and run the OCR prefilter.
 
     Command-line Arguments:

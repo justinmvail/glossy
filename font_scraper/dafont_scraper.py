@@ -480,7 +480,7 @@ class DaFontScraper:
         return metadata
 
 
-def main():
+def main() -> None:
     """Parse command-line arguments and run the DaFont scraper.
 
     This function serves as the entry point when the module is run as a script.

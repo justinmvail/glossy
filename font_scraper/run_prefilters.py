@@ -330,7 +330,7 @@ def _print_cursive_report(db) -> None:
         print("\nNo fonts with connectivity > 0 (no truly connected cursive found)")
 
 
-def run_pipeline(db_path: str, fonts_dir: str):
+def run_pipeline(db_path: str, fonts_dir: str) -> None:
     """Run all pre-AI pipeline steps on fonts.
 
     This is the main orchestration function that executes the complete
@@ -416,7 +416,7 @@ def run_pipeline(db_path: str, fonts_dir: str):
         _print_cursive_report(db)
 
 
-def main():
+def main() -> None:
     """Parse command-line arguments and run the pre-filter pipeline.
 
     Command-line Arguments:

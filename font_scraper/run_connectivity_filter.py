@@ -100,7 +100,7 @@ def count_components(font_path: str) -> tuple:
     return num_components, None
 
 
-def main(update_db=False):
+def main(update_db: bool = False) -> None:
     """Run the connectivity filter on all fonts that passed OCR prefilter.
 
     Queries the database for fonts that passed the prefilter stage, renders
