@@ -12,7 +12,7 @@ Generated: 2026-02-11
 1. [x] Add input validation bounds for text parameter in stroke_routes_core.py:661
 2. [x] Add input validation bounds for limit parameter in stroke_routes_batch.py:199
 3. [x] Fix database connection handling in run_ocr_prefilter.py (use context managers)
-4. [ ] Add thread-safe initialization to stroke_routes_batch.py _diffvg (use Lock)
+4. [x] Add thread-safe initialization to stroke_routes_batch.py _diffvg (use Lock)
 5. [ ] Fix race condition in ocr_validator.py _worker_process singleton
 
 ### CRITICAL - Performance O(n²) Algorithms

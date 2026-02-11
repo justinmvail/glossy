@@ -32,6 +32,7 @@ Attributes:
 import io
 import json
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -63,22 +64,28 @@ from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 # Lazy-loaded DiffVG instance (avoids import overhead if not used)
 _diffvg = None
 _diffvg_initialized = False
+_diffvg_lock = threading.Lock()
 
 
 def get_diffvg() -> Any:
     """Get the DiffVG Docker instance, lazily initializing on first use.
+
+    Thread-safe initialization using double-checked locking pattern.
 
     Returns:
         DiffVGDocker instance, or None if unavailable.
     """
     global _diffvg, _diffvg_initialized
     if not _diffvg_initialized:
-        try:
-            from docker.diffvg_docker import DiffVGDocker
-            _diffvg = DiffVGDocker()
-        except ImportError:
-            _diffvg = None
-        _diffvg_initialized = True
+        with _diffvg_lock:
+            # Double-check after acquiring lock
+            if not _diffvg_initialized:
+                try:
+                    from docker.diffvg_docker import DiffVGDocker
+                    _diffvg = DiffVGDocker()
+                except ImportError:
+                    _diffvg = None
+                _diffvg_initialized = True
     return _diffvg
 
 
