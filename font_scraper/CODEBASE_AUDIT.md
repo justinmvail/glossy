@@ -201,9 +201,10 @@ Systematic review of font_scraper codebase for quality improvements.
   - **Status:** N/A - Pure Python, no build step
   - `pip install -r requirements.txt` is quick
 - [x] Complex setup - difficult onboarding
-  - **Status:** Acceptable - Requires fonts.db with fonts
-  - README explains scraper usage
-  - Could add setup script to initialize empty DB
+  - **Status:** FIXED - Added setup_database.py script
+  - Creates empty fonts.db with all required tables
+  - Seeds removal_reasons with default values
+  - Optional --sample flag to add a test font
 - [x] No linting/formatting - inconsistent style
   - **Status:** FIXED - Added pyproject.toml with ruff configuration
   - Enabled: pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade, simplify
@@ -389,4 +390,13 @@ All tests pass (26/26 characters OK).
 
 Results: 23/24 pass, 1 skipped (known api_skeleton issue)
 Test runtime: ~0.8s
+
+### Session 4: Database Setup Script
+
+#### Created setup_database.py for easy onboarding:
+- Creates fonts.db with all 8 required tables
+- Seeds removal_reasons with 9 default values
+- Adds indexes for common query patterns
+- Options: --force (recreate), --sample (add test font)
+- Usage: `python3 setup_database.py`
 
