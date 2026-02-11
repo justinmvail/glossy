@@ -137,7 +137,7 @@ class FontDeduplicator:
             if img is None:
                 return None
             return str(imagehash.phash(img))
-        except Exception:
+        except (OSError, ValueError):
             return None
 
     def find_duplicates(self, font_scores: list[dict]) -> list[list[dict]]:
@@ -185,7 +185,7 @@ class FontDeduplicator:
                     if distance <= self.threshold:
                         group.extend(hash_groups[h2])
                         processed.add(h2)
-                except Exception as e:
+                except ValueError as e:
                     logger.debug("Hash comparison failed: %s", e)
 
             if len(group) > 1:
@@ -285,7 +285,7 @@ class FontScorer:
 
         try:
             font = ImageFont.truetype(str(font_path), self.render_size)
-        except Exception as e:
+        except OSError as e:
             scores['error'] = str(e)
             return scores
 
@@ -298,7 +298,7 @@ class FontScorer:
                 draw.text((5, 5), char, font=font, fill=0)
                 if img.getextrema() != (255, 255):
                     covered += 1
-            except Exception as e:
+            except OSError as e:
                 logger.debug("Failed to render char %r: %s", char, e)
         scores['charset_coverage'] = covered / len(ASCII_PRINTABLE)
 
@@ -316,7 +316,7 @@ class FontScorer:
                 scores['style_score'] = 0.5
             else:
                 scores['style_score'] = 0.2
-        except Exception:
+        except OSError:
             scores['style_score'] = 0.0
 
         # Perceptual hash
@@ -325,7 +325,7 @@ class FontScorer:
             draw = ImageDraw.Draw(img)
             draw.text((10, 10), "The quick brown", font=font, fill=0)
             scores['phash'] = str(imagehash.phash(img))
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.debug("Failed to compute phash: %s", e)
 
         # Overall score
@@ -391,7 +391,7 @@ class CursiveDetector:
         """
         try:
             font = ImageFont.truetype(font_path, DEFAULT_RENDER_SIZE)
-        except Exception:
+        except OSError:
             return False, 0.0
 
         # Render test word
@@ -441,7 +441,7 @@ class CursiveDetector:
 
             return is_cursive, connectivity_score
 
-        except Exception:
+        except OSError:
             return False, 0.0
 
     def check_contextual(
@@ -469,7 +469,7 @@ class CursiveDetector:
         """
         try:
             font = ImageFont.truetype(font_path, DEFAULT_RENDER_SIZE)
-        except Exception:
+        except OSError:
             return False, 0.0, {}
 
         differences = {}
@@ -479,7 +479,7 @@ class CursiveDetector:
                 diff = self._compare_glyph_contexts(font, char)
                 if diff is not None:
                     differences[char] = diff
-            except Exception:
+            except (OSError, ValueError):
                 continue
 
         if not differences:
@@ -571,7 +571,7 @@ class CursiveDetector:
 
             return np.array(img)
 
-        except Exception:
+        except OSError:
             return None
 
     def _extract_char_from_word(
@@ -658,7 +658,7 @@ class CursiveDetector:
 
             return np.array(cropped_img)
 
-        except Exception:
+        except OSError:
             return None
 
     def _image_difference(self, img1: np.ndarray, img2: np.ndarray) -> float:
@@ -775,7 +775,7 @@ class CompletenessChecker:
         """
         try:
             font = ImageFont.truetype(font_path, PHASH_FONT_SIZE)
-        except Exception:
+        except OSError:
             return 0.0, list(self.required_chars)
 
         missing = []
@@ -788,7 +788,7 @@ class CompletenessChecker:
                 # Check if anything was drawn
                 if img.getextrema() == (255, 255):
                     missing.append(char)
-            except Exception:
+            except OSError:
                 missing.append(char)
 
         completeness = 1.0 - (len(missing) / len(self.required_chars))
@@ -845,7 +845,7 @@ class CharacterRenderer:
         try:
             # Load font scaled to target height
             font = ImageFont.truetype(font_path, self.height - self.padding * 2)
-        except Exception:
+        except OSError:
             return None, None
 
         try:
@@ -896,7 +896,7 @@ class CharacterRenderer:
 
             return img, output_path
 
-        except Exception:
+        except OSError:
             return None, None
 
     def render_all(

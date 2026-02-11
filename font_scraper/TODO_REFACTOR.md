@@ -39,7 +39,7 @@ Generated: 2026-02-11
 20. [x] font_utils.py - Extract PHASH_FONT_SIZE, PHASH_IMG_WIDTH constants
 21. [x] stroke_utils.py - Extract SNAP_DEEP_INSIDE_MIN_DEPTH, LINEAR_SEGMENT_STEP constants
 22. [x] stroke_rendering.py - Extract SMALLCAPS_MIN_SIZE, SMALLCAPS_PADDING constants
-23. [ ] Replace broad `except Exception:` in font_utils.py (8 occurrences)
+23. [x] Replace broad `except Exception:` in font_utils.py (16 occurrences)
 
 ### HIGH - Testing Gaps
 24. [ ] Add unit tests for stroke_pipeline.py (1364 LOC, 0 tests)
