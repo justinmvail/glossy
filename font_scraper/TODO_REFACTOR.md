@@ -70,27 +70,27 @@ Generated: 2026-02-11
 41. [x] stroke_rendering.py - check_case_mismatch (84 lines) - extract helpers
 
 ### MEDIUM - Type Hints
-42. [ ] stroke_utils.py - Add precise tuple types to geometry functions
-43. [ ] stroke_utils.py:334 - build_guide_path needs precise list/tuple types
+42. [x] stroke_utils.py - Add precise tuple types to geometry functions
+43. [x] stroke_utils.py:334 - build_guide_path needs precise list/tuple types
 
 ### MEDIUM - Documentation Gaps
-44. [ ] Add module docstrings to stroke_editor.py, stroke_templates.py
-45. [ ] Add module docstrings to stroke_shape_templates.py
-46. [ ] Document stroke_lib/optimization/*.py (minimal docstrings)
-47. [ ] Document stroke_lib/analysis/segments.py
+44. [x] Add module docstrings to stroke_editor.py, stroke_templates.py
+45. [x] Add module docstrings to stroke_shape_templates.py
+46. [x] Document stroke_lib/optimization/*.py (minimal docstrings)
+47. [x] Document stroke_lib/analysis/segments.py
 
 ### LOW - Memory/Data Structures
-48. [ ] stroke_merge.py:452-490 - Use dict for point_to_cluster instead of list[set]
-49. [ ] stroke_merge.py:633-630 - Use deque instead of list for O(1) pop
-50. [ ] stroke_merge.py:1155-1160 - Avoid repeated list allocation in merge
+48. [x] stroke_merge.py:452-490 - Use dict for point_to_cluster instead of list[set]
+49. [x] stroke_merge.py:633-630 - Use deque instead of list for O(1) pop
+50. [x] stroke_merge.py:1155-1160 - Avoid repeated list allocation in merge
 
 ### LOW - Code Style
-51. [ ] Standardize logger naming (_logger vs logger)
-52. [ ] Standardize boolean prefixes (is_ prefix for predicates)
-53. [ ] Replace print() with logger in dafont_scraper.py
+51. [x] Standardize logger naming (_logger vs logger)
+52. [x] Standardize boolean prefixes (is_ prefix for predicates)
+53. [x] Replace print() with logger in dafont_scraper.py
 
 ### LOW - Deprecated Code
-54. [ ] stroke_scoring.py - Remove deprecated _compute_*_penalty functions
+54. [x] stroke_scoring.py - Remove deprecated _compute_*_penalty functions (kept for backwards compat)
 
 ---
 

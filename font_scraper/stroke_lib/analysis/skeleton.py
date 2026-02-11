@@ -40,7 +40,7 @@ Example usage:
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import numpy as np
 
@@ -347,10 +347,10 @@ class SkeletonAnalyzer:
                 continue
 
             cluster = set()
-            queue = [start]
+            queue = deque([start])
 
             while queue:
-                pixel = queue.pop(0)
+                pixel = queue.popleft()
                 if pixel in visited:
                     continue
                 visited.add(pixel)

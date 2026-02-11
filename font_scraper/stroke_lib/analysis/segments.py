@@ -32,7 +32,7 @@ Example usage:
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import defaultdict, deque
 
 from ..domain.geometry import Point, Segment
 from ..domain.skeleton import SkeletonInfo
@@ -192,10 +192,10 @@ class SegmentClassifier:
                 continue
 
             chain = []
-            queue = [i]
+            queue = deque([i])
 
             while queue:
-                seg_idx = queue.pop(0)
+                seg_idx = queue.popleft()
                 if seg_idx in visited:
                     continue
                 visited.add(seg_idx)

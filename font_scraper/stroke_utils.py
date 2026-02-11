@@ -102,7 +102,7 @@ def point_distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
     return point_distance_squared(p1, p2) ** 0.5
 
 
-def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
+def snap_inside(pos: tuple[float, float], mask: np.ndarray, snap_indices: np.ndarray) -> tuple[float, float]:
     """Snap a position to the nearest mask pixel if outside.
 
     Uses precomputed snap indices from a distance transform for efficient
@@ -128,8 +128,8 @@ def snap_inside(pos: tuple, mask: np.ndarray, snap_indices: np.ndarray) -> tuple
     return (nx, ny)
 
 
-def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
-                     mask: np.ndarray, snap_indices: np.ndarray) -> tuple:
+def snap_deep_inside(pos: tuple[float, float], centroid: tuple[float, float], dist_in: np.ndarray,
+                     mask: np.ndarray, snap_indices: np.ndarray) -> tuple[float, float]:
     """Snap a position to be well inside the mask.
 
     Casts a ray from the given position toward the glyph centroid and finds
@@ -185,7 +185,7 @@ def snap_deep_inside(pos: tuple, centroid: tuple, dist_in: np.ndarray,
     return best_pos
 
 
-def snap_to_glyph_edge(pos: tuple, centroid: tuple, mask: np.ndarray) -> tuple | None:
+def snap_to_glyph_edge(pos: tuple[float, float], centroid: tuple[float, float], mask: np.ndarray) -> tuple[float, float] | None:
     """Snap a termination point to the nearest glyph edge pixel.
 
     Used for positioning stroke endpoints at the boundary of the glyph.
@@ -249,7 +249,7 @@ def parse_waypoint(wp: int | str) -> tuple[int, str]:
     raise ValueError(f"Unknown waypoint format: {wp}")
 
 
-def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
+def numpad_to_pixel(region: int, glyph_bbox: tuple[float, float, float, float]) -> tuple[float, float]:
     """Map a numpad region (1-9) to pixel coordinates within a bounding box.
 
     Uses the numpad layout where regions are arranged as:
@@ -276,7 +276,7 @@ def numpad_to_pixel(region: int, glyph_bbox: tuple) -> tuple[float, float]:
             y_min + frac_y * (y_max - y_min))
 
 
-def linear_segment(p0: tuple, p1: tuple, step: float = LINEAR_SEGMENT_STEP) -> list[tuple]:
+def linear_segment(p0: tuple[float, float], p1: tuple[float, float], step: float = LINEAR_SEGMENT_STEP) -> list[tuple[float, float]]:
     """Generate evenly-spaced points along a line segment.
 
     Args:
@@ -305,8 +305,8 @@ def linear_segment(p0: tuple, p1: tuple, step: float = LINEAR_SEGMENT_STEP) -> l
 # (canonical implementation) at the top of this file.
 
 
-def _snap_to_skeleton_region(region: int, glyph_bbox: tuple,
-                              skel_features: dict | None) -> tuple | None:
+def _snap_to_skeleton_region(region: int, glyph_bbox: tuple[float, float, float, float],
+                              skel_features: dict | None) -> tuple[float, float] | None:
     """Find the best skeleton position for a region.
 
     Args:
@@ -330,10 +330,10 @@ def _snap_to_skeleton_region(region: int, glyph_bbox: tuple,
     return best
 
 
-def _resolve_waypoint_position(region: int, kind: str, glyph_bbox: tuple,
-                                mask: np.ndarray, centroid: tuple,
+def _resolve_waypoint_position(region: int, kind: str, glyph_bbox: tuple[float, float, float, float],
+                                mask: np.ndarray, centroid: tuple[float, float],
                                 dist_in: np.ndarray, snap_indices: np.ndarray,
-                                skel_features: dict | None) -> tuple | None:
+                                skel_features: dict | None) -> tuple[float, float] | None:
     """Resolve a waypoint to its pixel position.
 
     Args:
@@ -370,8 +370,8 @@ def _resolve_waypoint_position(region: int, kind: str, glyph_bbox: tuple,
     return pos
 
 
-def _constrain_points_to_mask(points: list[tuple], mask: np.ndarray,
-                               snap_indices: np.ndarray) -> list[tuple]:
+def _constrain_points_to_mask(points: list[tuple[float, float]], mask: np.ndarray,
+                               snap_indices: np.ndarray) -> list[tuple[float, float]]:
     """Constrain a list of points to lie within the mask.
 
     Args:
@@ -394,8 +394,8 @@ def _constrain_points_to_mask(points: list[tuple], mask: np.ndarray,
     return constrained
 
 
-def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
-                     skel_features: dict | None = None) -> list[tuple]:
+def build_guide_path(waypoints_raw: list[int | str], glyph_bbox: tuple[float, float, float, float], mask: np.ndarray,
+                     skel_features: dict | None = None) -> list[tuple[float, float]]:
     """Build a guide path from a sequence of waypoints.
 
     Creates a path of (x, y) points that passes through the specified
@@ -465,7 +465,7 @@ def build_guide_path(waypoints_raw: list, glyph_bbox: tuple, mask: np.ndarray,
     return _constrain_points_to_mask(all_points, mask, snap_indices)
 
 
-def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
+def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple[float, float, float, float]) -> dict | None:
     """Find skeleton features as candidate waypoint positions.
 
     Skeletonizes the glyph mask and identifies endpoints and junctions

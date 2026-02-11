@@ -65,7 +65,7 @@ from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
 
 # Logger for optimization errors
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Nelder-Mead global optimization parameters
 NM_GLOBAL_MAXFEV = 400  # Maximum function evaluations for global NM
@@ -280,10 +280,10 @@ def _run_nm_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
         best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
         return nm.x, nm.fun, best_strokes
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
-        _logger.warning("Nelder-Mead optimization failed: %s", e)
+        logger.warning("Nelder-Mead optimization failed: %s", e)
         return x0, float('inf'), stroke_arrays
     except Exception as e:
-        _logger.error("Unexpected error in NM optimization: %s", e, exc_info=True)
+        logger.error("Unexpected error in NM optimization: %s", e, exc_info=True)
         return x0, float('inf'), stroke_arrays
 
 
@@ -316,9 +316,9 @@ def _run_de_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
         if de.fun < best_score:
             return de.fun, _affine_transform(stroke_arrays, tuple(de.x), centroid)
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
-        _logger.warning("Differential evolution optimization failed: %s", e)
+        logger.warning("Differential evolution optimization failed: %s", e)
     except Exception as e:
-        _logger.error("Unexpected error in DE optimization: %s", e, exc_info=True)
+        logger.error("Unexpected error in DE optimization: %s", e, exc_info=True)
 
     return best_score, _affine_transform(stroke_arrays, tuple(initial_x), centroid)
 

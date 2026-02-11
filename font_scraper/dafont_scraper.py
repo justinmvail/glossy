@@ -44,6 +44,7 @@ Command-line Arguments:
 import argparse
 import io
 import json
+import logging
 import os
 import re
 import time
@@ -56,6 +57,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from font_source import FontMetadata, FontSource, ScraperConfig
+
+logger = logging.getLogger(__name__)
 
 
 class DaFontScraper(FontSource):
@@ -119,14 +122,14 @@ class DaFontScraper(FontSource):
             category across all scraped pages.
         """
         category_name = self.CATEGORIES.get(category, f'Unknown ({category})')
-        print(f"\nScraping category: {category_name} (cat={category})")
+        logger.info("Scraping category: %s (cat=%s)", category_name, category)
 
         fonts = []
         page = 1
 
         while page <= max_pages:
             url = f"{self.BASE_URL}/theme.php?cat={category}&page={page}"
-            print(f"  Page {page}: {url}")
+            logger.debug("Page %d: %s", page, url)
 
             try:
                 resp = self.session.get(url, timeout=30)
@@ -135,17 +138,17 @@ class DaFontScraper(FontSource):
                 page_fonts = self._parse_font_list(resp.text, category_name)
 
                 if not page_fonts:
-                    print(f"  No fonts found on page {page}, stopping.")
+                    logger.debug("No fonts found on page %d, stopping.", page)
                     break
 
                 fonts.extend(page_fonts)
-                print(f"  Found {len(page_fonts)} fonts (total: {len(fonts)})")
+                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
 
                 page += 1
                 time.sleep(self.rate_limit)
 
             except requests.RequestException as e:
-                print(f"  Error fetching page {page}: {e}")
+                logger.warning("Error fetching page %d: %s", page, e)
                 break
 
         return fonts
@@ -289,14 +292,14 @@ class DaFontScraper(FontSource):
             return True
 
         try:
-            print(f"  Downloading: {font.name}")
+            logger.debug("Downloading: %s", font.name)
 
             resp = self.session.get(font.download_url, timeout=60)
             resp.raise_for_status()
 
             # DaFont serves ZIP files
             if resp.content[:4] != b'PK\x03\x04':
-                print("    Warning: Not a ZIP file")
+                logger.warning("Not a ZIP file for %s", font.name)
                 return False
 
             # Extract fonts from ZIP
@@ -315,23 +318,23 @@ class DaFontScraper(FontSource):
                             extracted += 1
 
             if extracted > 0:
-                print(f"    Extracted {extracted} font file(s)")
+                logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
                 self.downloaded.add(font.name)
                 return True
             else:
-                print("    No TTF/OTF files found in ZIP")
+                logger.warning("No TTF/OTF files found in ZIP for %s", font.name)
                 return False
 
         except zipfile.BadZipFile:
-            print("    Error: Invalid ZIP file")
+            logger.error("Invalid ZIP file for %s", font.name)
             self.failed.append(font.name)
             return False
         except requests.RequestException as e:
-            print(f"    Error downloading: {e}")
+            logger.error("Error downloading %s: %s", font.name, e)
             self.failed.append(font.name)
             return False
         except Exception as e:
-            print(f"    Error: {e}")
+            logger.error("Unexpected error for %s: %s", font.name, e)
             self.failed.append(font.name)
             return False
 
@@ -407,12 +410,12 @@ class DaFontScraper(FontSource):
         if categories is None:
             categories = list(self.CATEGORIES.keys())
 
-        print("=" * 60)
-        print("DaFont Scraper")
-        print("=" * 60)
-        print(f"Output directory: {self.output_dir}")
-        print(f"Categories: {[self.CATEGORIES.get(c, c) for c in categories]}")
-        print(f"Max pages per category: {max_pages}")
+        logger.info("=" * 60)
+        logger.info("DaFont Scraper")
+        logger.info("=" * 60)
+        logger.info("Output directory: %s", self.output_dir)
+        logger.info("Categories: %s", [self.CATEGORIES.get(c, c) for c in categories])
+        logger.info("Max pages per category: %d", max_pages)
 
         # Scrape all categories
         all_fonts = []
@@ -421,13 +424,13 @@ class DaFontScraper(FontSource):
             all_fonts.extend(fonts)
             self.fonts_found.extend(fonts)
 
-        print(f"\nTotal fonts found: {len(all_fonts)}")
+        logger.info("Total fonts found: %d", len(all_fonts))
 
         # Remove duplicates by name
         unique_fonts = {f.name: f for f in all_fonts}
         fonts_to_download = list(unique_fonts.values())
 
-        print(f"Unique fonts: {len(fonts_to_download)}")
+        logger.info("Unique fonts: %d", len(fonts_to_download))
 
         # Sort by downloads (most popular first) if we have that info
         fonts_to_download.sort(key=lambda x: x.downloads, reverse=True)
@@ -435,13 +438,13 @@ class DaFontScraper(FontSource):
         # Limit if specified
         if max_fonts:
             fonts_to_download = fonts_to_download[:max_fonts]
-            print(f"Limiting to {max_fonts} fonts")
+            logger.info("Limiting to %d fonts", max_fonts)
 
         # Download fonts
-        print(f"\nDownloading {len(fonts_to_download)} fonts...")
+        logger.info("Downloading %d fonts...", len(fonts_to_download))
 
         for i, font in enumerate(fonts_to_download):
-            print(f"[{i+1}/{len(fonts_to_download)}]", end='')
+            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts_to_download), font.name)
             self.download_font(font)
             time.sleep(self.rate_limit)
 
@@ -458,13 +461,13 @@ class DaFontScraper(FontSource):
         with open(meta_path, 'w') as f:
             json.dump(metadata, f, indent=2)
 
-        print("\n" + "=" * 60)
-        print("COMPLETE")
-        print("=" * 60)
-        print(f"Fonts found: {len(all_fonts)}")
-        print(f"Fonts downloaded: {len(self.downloaded)}")
-        print(f"Failed: {len(self.failed)}")
-        print(f"Metadata saved: {meta_path}")
+        logger.info("=" * 60)
+        logger.info("COMPLETE")
+        logger.info("=" * 60)
+        logger.info("Fonts found: %d", len(all_fonts))
+        logger.info("Fonts downloaded: %d", len(self.downloaded))
+        logger.info("Failed: %d", len(self.failed))
+        logger.info("Metadata saved: %s", meta_path)
 
         return metadata
 

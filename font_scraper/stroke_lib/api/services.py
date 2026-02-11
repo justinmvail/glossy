@@ -51,7 +51,7 @@ from ..analysis.skeleton import SkeletonAnalyzer
 from ..utils.rendering import get_glyph_bbox, render_glyph_mask
 
 # Logger for service errors
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -358,10 +358,10 @@ class FontService:
             row = cursor.fetchone()
             return row['file_path'] if row else None
         except sqlite3.Error as e:
-            _logger.warning("Database error getting font path for id=%s: %s", font_id, e)
+            logger.warning("Database error getting font path for id=%s: %s", font_id, e)
             return None
         except Exception as e:
-            _logger.error("Unexpected error getting font path: %s", e, exc_info=True)
+            logger.error("Unexpected error getting font path: %s", e, exc_info=True)
             return None
         finally:
             if conn:
@@ -408,15 +408,15 @@ class FontService:
                 return json.loads(row['strokes'])
             return None
         except sqlite3.Error as e:
-            _logger.warning("Database error getting strokes for font=%s char=%s: %s",
+            logger.warning("Database error getting strokes for font=%s char=%s: %s",
                            font_id, char, e)
             return None
         except json.JSONDecodeError as e:
-            _logger.warning("Invalid JSON in strokes for font=%s char=%s: %s",
+            logger.warning("Invalid JSON in strokes for font=%s char=%s: %s",
                            font_id, char, e)
             return None
         except Exception as e:
-            _logger.error("Unexpected error getting strokes: %s", e, exc_info=True)
+            logger.error("Unexpected error getting strokes: %s", e, exc_info=True)
             return None
         finally:
             if conn:
@@ -465,15 +465,15 @@ class FontService:
             conn.commit()
             return True
         except sqlite3.Error as e:
-            _logger.warning("Database error saving strokes for font=%s char=%s: %s",
+            logger.warning("Database error saving strokes for font=%s char=%s: %s",
                            font_id, char, e)
             return False
         except (TypeError, ValueError) as e:
-            _logger.warning("Invalid stroke data for font=%s char=%s: %s",
+            logger.warning("Invalid stroke data for font=%s char=%s: %s",
                            font_id, char, e)
             return False
         except Exception as e:
-            _logger.error("Unexpected error saving strokes: %s", e, exc_info=True)
+            logger.error("Unexpected error saving strokes: %s", e, exc_info=True)
             return False
         finally:
             if conn:

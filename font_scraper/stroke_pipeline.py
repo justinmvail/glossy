@@ -56,7 +56,7 @@ Dependencies:
     - stroke_templates: Predefined templates for common characters
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -552,9 +552,9 @@ class MinimalStrokePipeline:
         for i in range(len(truly_vertical)):
             if i in visited:
                 continue
-            chain, queue = [], [i]
+            chain, queue = [], deque([i])
             while queue:
-                idx = queue.pop(0)
+                idx = queue.popleft()
                 if idx in visited:
                     continue
                 visited.add(idx)
