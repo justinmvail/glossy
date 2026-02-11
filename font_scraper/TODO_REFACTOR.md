@@ -16,7 +16,7 @@ Generated: 2026-02-11
 6. [x] `stroke_routes_stream.py` - `optimize_stream_generator()` 117 lines → extract phases
 7. [x] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
 8. [x] `setup_database.py:256` - SQL injection risk → validate table names
-9. [ ] `stroke_flask` -> `stroke_rendering` circular import → review/fix
+9. [x] `stroke_flask` -> `stroke_rendering` circular import → review/fix
 10. [ ] Add docstrings to 53 functions (Shape subclasses, strategies)
 11. [ ] Add return type hints to 37 functions
 12. [ ] Extract magic numbers to constants
@@ -58,9 +58,9 @@ Functions that should be broken down into smaller pieces:
 | Modules | Status |
 |---------|--------|
 | `stroke_core` -> `stroke_pipeline` | Handled (lazy import) |
-| `stroke_flask` -> `stroke_rendering` | **Needs review** |
+| `stroke_flask` -> `stroke_rendering` | ✓ FIXED |
 
-**Action:** Verify `stroke_flask` -> `stroke_rendering` doesn't cause issues at import time.
+**Action:** ✓ Moved `DEFAULT_CANVAS_SIZE`, `DEFAULT_FONT_SIZE`, and `resolve_font_path` to `stroke_rendering.py`. Re-exported from `stroke_flask.py` for backwards compatibility.
 
 ---
 

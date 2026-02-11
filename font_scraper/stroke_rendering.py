@@ -26,13 +26,36 @@ Typical usage:
 from __future__ import annotations
 
 import io
+import os
 from functools import lru_cache
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
 
-from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
+# Module directory for resolving relative paths
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Default rendering parameters
+DEFAULT_CANVAS_SIZE = 224
+DEFAULT_FONT_SIZE = 200
+
+
+def resolve_font_path(font_path: str) -> str:
+    """Resolve a font file path to an absolute path.
+
+    Converts relative font paths to absolute paths by joining them with
+    the module's base directory. Absolute paths are returned unchanged.
+
+    Args:
+        font_path: The font file path, either absolute or relative.
+
+    Returns:
+        str: The absolute path to the font file.
+    """
+    if os.path.isabs(font_path):
+        return font_path
+    return os.path.join(_BASE_DIR, font_path)
 
 
 # LRU cache for font objects to avoid repeated disk I/O

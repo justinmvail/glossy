@@ -128,9 +128,8 @@ STROKE_COLORS = [
 
 
 # --- Global constants ---
-# Rendering
-DEFAULT_CANVAS_SIZE = 224
-DEFAULT_FONT_SIZE = 200
+# Rendering (imported from stroke_rendering to avoid circular import)
+from stroke_rendering import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
 DEFAULT_STROKE_WIDTH = 8.0
 
 # Optimization
@@ -286,34 +285,6 @@ def ensure_test_tables() -> None:
                 image_data BLOB
             )
         """)
-
-
-def resolve_font_path(font_path: str) -> str:
-    """Resolve a font file path to an absolute path.
-
-    Converts relative font paths to absolute paths by joining them with
-    BASE_DIR. Absolute paths are returned unchanged.
-
-    Args:
-        font_path: The font file path, either absolute or relative to BASE_DIR.
-
-    Returns:
-        str: The absolute path to the font file.
-
-    Example:
-        Resolving different path types::
-
-            # Relative path gets BASE_DIR prepended
-            resolve_font_path("fonts/Arial.ttf")
-            # Returns: "/home/server/glossy/font_scraper/fonts/Arial.ttf"
-
-            # Absolute path is returned unchanged
-            resolve_font_path("/usr/share/fonts/Arial.ttf")
-            # Returns: "/usr/share/fonts/Arial.ttf"
-    """
-    if os.path.isabs(font_path):
-        return font_path
-    return os.path.join(BASE_DIR, font_path)
 
 
 def get_font(fid: int) -> sqlite3.Row | None:
