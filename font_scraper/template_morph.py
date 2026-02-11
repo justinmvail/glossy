@@ -106,7 +106,8 @@ Grid layout::
 """
 
 
-def render_font_mask(font_path, char, font_size=200, canvas_size=512):
+def render_font_mask(font_path: str, char: str, font_size: int = 200,
+                     canvas_size: int = 512) -> tuple[np.ndarray | None, tuple | None]:
     """Render a character and return binary mask plus bounding box.
 
     Creates a binary image of the character and computes its tight
@@ -176,7 +177,7 @@ def _find_waist_height(font_mask: np.ndarray, rmin: int, rmax: int) -> tuple[int
     return waist_y, min_right
 
 
-def get_outline(font_mask):
+def get_outline(font_mask: np.ndarray) -> np.ndarray:
     """Get font outline pixels (edge between filled and empty).
 
     Extracts the 1-pixel-wide outline of the font by subtracting
@@ -193,7 +194,8 @@ def get_outline(font_mask):
     return outline
 
 
-def snap_to_outline(x, y, outline_points, y_tolerance=None):
+def snap_to_outline(x: int, y: int, outline_points: np.ndarray,
+                    y_tolerance: int | None = None) -> tuple[int, int]:
     """Snap a point to nearest outline pixel.
 
     Finds the closest outline point to the given coordinates,
@@ -447,7 +449,7 @@ def _find_vertices_R(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray)
     return vertices
 
 
-def find_vertices(char, font_mask, bbox):
+def find_vertices(char: str, font_mask: np.ndarray, bbox: tuple) -> dict:
     """Find letter-specific vertex positions on the font outline.
 
     Uses character-specific heuristics to locate key vertices like
@@ -495,7 +497,7 @@ def find_vertices(char, font_mask, bbox):
         return vertices
 
 
-def interpolate_stroke(vertices_list, n_points=50):
+def interpolate_stroke(vertices_list: list, n_points: int = 50) -> list:
     """Create smooth curve through vertex points.
 
     Generates evenly-spaced points along straight line segments
@@ -540,7 +542,8 @@ def interpolate_stroke(vertices_list, n_points=50):
     return np.array(all_points, dtype=float)
 
 
-def refine_stroke(points, font_mask, max_iterations=100):
+def refine_stroke(points: list, font_mask: np.ndarray,
+                  max_iterations: int = 100) -> list:
     """Iteratively morph stroke points to be inside the font.
 
     Adjusts points that fall outside the font shape by snapping them
@@ -601,7 +604,8 @@ def refine_stroke(points, font_mask, max_iterations=100):
     return pts
 
 
-def morph_to_font(char, font_path, font_size=200, canvas_size=512):
+def morph_to_font(char: str, font_path: str, font_size: int = 200,
+                  canvas_size: int = 512) -> tuple:
     """Full pipeline: render font, find vertices, generate and morph strokes.
 
     Main entry point for stroke generation. Renders the character,
@@ -666,7 +670,8 @@ def morph_to_font(char, font_path, font_size=200, canvas_size=512):
     return mask, vertices, strokes
 
 
-def visualize_letter(char, font_path, font_size=200, canvas_size=512):
+def visualize_letter(char: str, font_path: str, font_size: int = 200,
+                     canvas_size: int = 512) -> np.ndarray | None:
     """Create visualization of template morph for a single letter.
 
     Renders the font in dark gray with colored stroke paths overlaid
@@ -724,7 +729,8 @@ def visualize_letter(char, font_path, font_size=200, canvas_size=512):
     return img
 
 
-def visualize_alphabet(font_path, font_size=200, output_path='/tmp/template_morph_AZ.png'):
+def visualize_alphabet(font_path: str, font_size: int = 200,
+                       output_path: str = '/tmp/template_morph_AZ.png') -> str:
     """Create grid visualization of A-Z stroke templates.
 
     Generates a 6x5 grid showing all 26 uppercase letters with their

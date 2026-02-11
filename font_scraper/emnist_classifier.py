@@ -116,7 +116,7 @@ class EMNISTNet(nn.Module):
         self.fc1 = nn.Linear(128 * 3 * 3, 256)
         self.fc2 = nn.Linear(256, num_classes)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the network.
 
         Args:
@@ -435,7 +435,7 @@ class EMNISTClassifier:
         return passed, recognized, confidence, expected_prob
 
 
-def test_classifier():
+def test_classifier() -> None:
     """Test the classifier with sample rendered characters.
 
     Creates test images using a system font and runs classification

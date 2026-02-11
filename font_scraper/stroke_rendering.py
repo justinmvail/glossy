@@ -30,25 +30,24 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from PIL.ImageFont import FreeTypeFont
 from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
 
 
 # LRU cache for font objects to avoid repeated disk I/O
 @lru_cache(maxsize=32)
-def _cached_font(font_path: str, size: int):
+def _cached_font(font_path: str, size: int) -> FreeTypeFont:
     """Load a font with caching to avoid repeated disk I/O."""
     return ImageFont.truetype(font_path, size)
-
-if TYPE_CHECKING:
-    from PIL.ImageFont import FreeTypeFont
 
 # Constants for rendering
 CANVAS_FILL_THRESHOLD = 0.9  # Max fraction of canvas a glyph can fill
 BINARIZATION_THRESHOLD = 128  # Grayscale threshold for mask generation
 
 
-def _scale_font_to_fit(font_path: str, pil_font, char: str,
-                       canvas_size: int, threshold: float = CANVAS_FILL_THRESHOLD):
+def _scale_font_to_fit(font_path: str, pil_font: FreeTypeFont, char: str,
+                       canvas_size: int, threshold: float = CANVAS_FILL_THRESHOLD
+                       ) -> tuple[FreeTypeFont | None, tuple | None]:
     """Scale a font to fit within the canvas bounds.
 
     Args:
@@ -105,7 +104,8 @@ def _compute_centered_position(bbox: tuple, canvas_size: int) -> tuple[int, int]
     return x, y
 
 
-def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=DEFAULT_CANVAS_SIZE):
+def render_char_image(font_path: str, char: str, font_size: int = DEFAULT_FONT_SIZE,
+                      canvas_size: int = DEFAULT_CANVAS_SIZE) -> bytes | None:
     """Render a character to a centered grayscale PNG image.
 
     Creates a square grayscale image with the character drawn in black on
@@ -155,7 +155,8 @@ _mask_cache = {}
 _MASK_CACHE_MAX_SIZE = 256
 
 
-def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
+def render_glyph_mask(font_path: str, char: str,
+                      canvas_size: int = DEFAULT_CANVAS_SIZE) -> np.ndarray | None:
     """Render a glyph as a binary mask for image processing.
 
     Creates a boolean numpy array where True indicates pixels that are
@@ -339,7 +340,7 @@ def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | 
     return np.array(img)
 
 
-def analyze_shape_metrics(arr, width):
+def analyze_shape_metrics(arr: np.ndarray, width: int) -> tuple[int, float]:
     """Analyze shape metrics from a rendered text array.
 
     Computes basic shape statistics useful for character classification

@@ -59,10 +59,12 @@ Example:
 import base64
 import io
 import json
+from typing import Any
 
 import numpy as np
-from flask import jsonify, render_template, request, send_file
+from flask import Response, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageFont
+from PIL.ImageFont import FreeTypeFont
 from scipy.ndimage import distance_transform_edt
 from skimage.morphology import thin
 from stroke_flask import (
@@ -96,7 +98,7 @@ MAX_WIDTH_RATIO = 0.225
 EXPECTED_EXCLAMATION_SHAPES = 2
 
 
-def _check_font_quality(pil_font, font_path: str) -> tuple[bool, int, float, list]:
+def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> tuple[bool, int, float, list[str]]:
     """Check font quality based on standard criteria.
 
     Args:
@@ -130,7 +132,7 @@ def _check_font_quality(pil_font, font_path: str) -> tuple[bool, int, float, lis
 
 
 @app.route('/')
-def font_list():
+def font_list() -> str:
     """Display the font list page showing all available fonts.
 
     Renders a list of fonts from the database with character count statistics.
@@ -172,7 +174,7 @@ def font_list():
 
 
 @app.route('/font/<int:fid>')
-def char_grid(fid):
+def char_grid(fid: int) -> str | tuple[str, int]:
     """Display the character grid page for a specific font.
 
     Shows a grid of all characters (A-Z, a-z, 0-9) for the font, with visual
@@ -209,7 +211,7 @@ def char_grid(fid):
 
 
 @app.route('/edit/<int:fid>')
-def edit_char(fid):
+def edit_char(fid: int) -> str | tuple[str, int]:
     """Display the stroke editor page for a specific character.
 
     Opens the interactive editor interface where users can draw and edit
@@ -245,7 +247,7 @@ def edit_char(fid):
 
 
 @app.route('/api/char/<int:fid>')
-def api_get_char(fid):
+def api_get_char(fid: int) -> Response | tuple[str, int]:
     """Retrieve stroke data and rendered image for a character.
 
     Fetches the stored stroke data, markers, and a rendered glyph image for
@@ -311,7 +313,7 @@ def api_get_char(fid):
 
 
 @app.route('/api/char/<int:fid>', methods=['POST'])
-def api_save_char(fid):
+def api_save_char(fid: int) -> Response | tuple[str, int]:
     """Save stroke data for a character.
 
     Stores or updates the stroke data and optional markers for a character
@@ -384,7 +386,7 @@ def api_save_char(fid):
 
 
 @app.route('/api/render/<int:fid>')
-def api_render(fid):
+def api_render(fid: int) -> Response | tuple[str, int]:
     """Render a character glyph as a PNG image.
 
     Renders the specified character using the font file and returns it as
@@ -427,7 +429,7 @@ def api_render(fid):
 
 
 @app.route('/api/thin-preview/<int:fid>')
-def api_thin_preview(fid):
+def api_thin_preview(fid: int) -> Response | tuple[str, int]:
     """Generate a thinned skeleton preview of a character glyph.
 
     Renders the character and applies morphological thinning to produce a
@@ -489,7 +491,7 @@ def api_thin_preview(fid):
 
 
 @app.route('/api/check-connected/<int:fid>')
-def api_check_connected(fid):
+def api_check_connected(fid: int) -> Response | tuple[str, int]:
     """Check if a font has connected/script letters or quality issues.
 
     Analyzes a font by rendering sample text and checking for various issues
@@ -553,7 +555,7 @@ def api_check_connected(fid):
 
 
 @app.route('/api/reject-connected', methods=['POST'])
-def api_reject_connected():
+def api_reject_connected() -> Response:
     """Batch check and reject all fonts with connected letters or quality issues.
 
     Iterates through all non-rejected fonts in the database, applies the same
@@ -610,7 +612,7 @@ def api_reject_connected():
 
 
 @app.route('/api/font-sample/<int:fid>')
-def api_font_sample(fid):
+def api_font_sample(fid: int) -> Response | tuple[str, int]:
     """Render sample text using a specific font.
 
     Creates a PNG image of custom text rendered with the specified font.
@@ -674,7 +676,7 @@ def api_font_sample(fid):
 
 
 @app.route('/api/preview/<int:fid>')
-def api_preview(fid):
+def api_preview(fid: int) -> Response | tuple[str, int]:
     """Generate a preview image showing strokes overlaid on the glyph.
 
     Creates a composite image with the character glyph as a semi-transparent
@@ -741,7 +743,7 @@ def api_preview(fid):
 
 
 @app.route('/api/process/<int:fid>', methods=['POST'])
-def api_process(fid):
+def api_process(fid: int) -> Response | tuple[str, int]:
     """Process strokes with optional smoothing and connection extension.
 
     Applies post-processing algorithms to the provided stroke data, including
@@ -822,7 +824,7 @@ def api_process(fid):
 
 
 @app.route('/api/snap/<int:fid>', methods=['POST'])
-def api_snap(fid):
+def api_snap(fid: int) -> Response | tuple[str, int]:
     """Snap stroke points to the nearest glyph boundary.
 
     Moves any stroke points that are outside the glyph mask to the nearest
@@ -912,7 +914,7 @@ def api_snap(fid):
 
 
 @app.route('/api/center/<int:fid>', methods=['POST'])
-def api_center(fid):
+def api_center(fid: int) -> Response | tuple[str, int]:
     """Center strokes on the glyph bounding box.
 
     Translates all stroke points so that the center of the stroke bounding
@@ -1002,7 +1004,7 @@ def api_center(fid):
 
 
 @app.route('/api/reject/<int:fid>', methods=['POST'])
-def api_reject_font(fid):
+def api_reject_font(fid: int) -> Response | tuple[str, int]:
     """Mark a font as rejected in the stroke editor.
 
     Adds a rejection record to the font_removals table with reason_id 8
@@ -1047,7 +1049,7 @@ def api_reject_font(fid):
 
 
 @app.route('/api/unreject/<int:fid>', methods=['POST'])
-def api_unreject_font(fid):
+def api_unreject_font(fid: int) -> Response | tuple[str, int]:
     """Remove the rejection status from a font.
 
     Deletes the rejection record for the specified font (reason_id 8 only).
@@ -1080,7 +1082,7 @@ def api_unreject_font(fid):
 
 
 @app.route('/api/unreject-all', methods=['POST'])
-def api_unreject_all():
+def api_unreject_all() -> Response:
     """Remove rejection status from all fonts.
 
     Deletes all rejection records with reason_id 8 (stroke editor rejections)

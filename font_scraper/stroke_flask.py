@@ -50,7 +50,9 @@ Attributes:
 import logging
 import os
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 from urllib.parse import quote as urlquote
 
 from flask import Flask
@@ -94,7 +96,7 @@ DIFFVG_TIMEOUT = 300
 
 
 @app.template_filter('urlencode')
-def urlencode_filter(s):
+def urlencode_filter(s: str) -> str:
     """URL encode a string for use in Jinja2 templates.
 
     This template filter safely encodes strings for inclusion in URLs,
@@ -114,7 +116,7 @@ def urlencode_filter(s):
     return urlquote(str(s), safe='')
 
 
-def get_db():
+def get_db() -> sqlite3.Connection:
     """Create and return a new database connection.
 
     Creates a connection to the SQLite database with Row factory enabled,
@@ -145,7 +147,7 @@ def get_db():
 
 
 @contextmanager
-def get_db_context():
+def get_db_context() -> Generator[sqlite3.Connection, None, None]:
     """Context manager for database connections with automatic transaction handling.
 
     Provides a database connection that automatically commits on successful
@@ -190,7 +192,7 @@ def get_db_context():
         db.close()
 
 
-def ensure_test_tables():
+def ensure_test_tables() -> None:
     """Create test-related database tables if they do not already exist.
 
     Initializes the database schema for storing test run results and associated
@@ -238,7 +240,7 @@ def ensure_test_tables():
         """)
 
 
-def resolve_font_path(font_path):
+def resolve_font_path(font_path: str) -> str:
     """Resolve a font file path to an absolute path.
 
     Converts relative font paths to absolute paths by joining them with
@@ -266,7 +268,7 @@ def resolve_font_path(font_path):
     return os.path.join(BASE_DIR, font_path)
 
 
-def get_font(fid):
+def get_font(fid: int) -> sqlite3.Row | None:
     """Retrieve a font record from the database by its ID.
 
     Args:
@@ -292,7 +294,7 @@ def get_font(fid):
             return None
 
 
-def validate_char_param(char):
+def validate_char_param(char: str | None) -> tuple[bool, tuple | None]:
     """Validate a character parameter from a request query string.
 
     Ensures the character parameter is present and contains exactly one

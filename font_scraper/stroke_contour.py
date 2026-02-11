@@ -215,7 +215,7 @@ def extract_contours(font_path: str, char: str) -> tuple[list | None, 'TTFont']:
 
 
 def font_to_pixel_transform(tt: 'TTFont', font_path: str, char: str,
-                            canvas_size: int = 224):
+                            canvas_size: int = 224) -> callable:
     """Build a transformation function from font units to pixel coordinates.
 
     This function replicates the centering logic used in glyph rendering functions
@@ -269,14 +269,14 @@ def font_to_pixel_transform(tt: 'TTFont', font_path: str, char: str,
     px_per_unit = font_size / upem
     ascender = tt['hhea'].ascent
 
-    def transform(fx, fy):
+    def transform(fx: float, fy: float) -> tuple[float, float]:
         return (fx * px_per_unit + offset_x, (ascender - fy) * px_per_unit + offset_y)
 
     return transform
 
 
 def get_pixel_contours(font_path: str, char: str, canvas_size: int = 224,
-                       resolve_font_path_fn=None) -> list[list[tuple]]:
+                       resolve_font_path_fn: callable | None = None) -> list[list[tuple]]:
     """Extract glyph contours as pixel-space polylines.
 
     This is a convenience function that combines contour extraction with
@@ -352,7 +352,8 @@ def contour_segments(pixel_contours: list[list[tuple]]) -> list[tuple]:
 
 
 def contour_to_strokes(font_path: str, char: str, canvas_size: int = 224,
-                       resolve_font_path_fn=None) -> list[list[list[float]]] | None:
+                       resolve_font_path_fn: callable | None = None
+                       ) -> list[list[list[float]]] | None:
     """Convert the outer font contour to strokes by splitting at extremal points.
 
     This function extracts the largest (outer) contour of a glyph and splits it
@@ -435,7 +436,7 @@ def contour_to_strokes(font_path: str, char: str, canvas_size: int = 224,
 
 
 def contour_detect_markers(font_path: str, char: str, canvas_size: int = 224,
-                           resolve_font_path_fn=None) -> list[dict]:
+                           resolve_font_path_fn: callable | None = None) -> list[dict]:
     """Detect termination markers from contour extremal points.
 
     Termination markers indicate where strokes should naturally end, typically

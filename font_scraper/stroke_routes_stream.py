@@ -518,7 +518,7 @@ def optimize_stream_generator(font_path: str, char: str,
 
 
 @app.route('/api/optimize-stream/<int:fid>')
-def api_optimize_stream(fid):
+def api_optimize_stream(fid: int) -> Response:
     """SSE endpoint for streaming stroke optimization progress.
 
     Performs multi-phase optimization of strokes for a character,
@@ -613,7 +613,7 @@ def api_optimize_stream(fid):
 
 
 @app.route('/api/minimal-strokes-stream/<int:fid>')
-def api_minimal_strokes_stream(fid):
+def api_minimal_strokes_stream(fid: int) -> Response:
     """SSE endpoint for streaming minimal strokes generation with debug info.
 
     Streams the step-by-step process of generating minimal strokes,

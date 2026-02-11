@@ -33,9 +33,10 @@ import io
 import json
 import sqlite3
 from datetime import datetime
+from typing import Any
 
 import numpy as np
-from flask import jsonify, render_template, request, send_file
+from flask import Response, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw
 from stroke_flask import (
     CHARS,
@@ -60,7 +61,7 @@ _diffvg = None
 _diffvg_initialized = False
 
 
-def get_diffvg():
+def get_diffvg() -> Any:
     """Get the DiffVG Docker instance, lazily initializing on first use.
 
     Returns:
@@ -81,7 +82,7 @@ def get_diffvg():
 _font = get_font
 
 
-def _get_stroke_funcs():
+def _get_stroke_funcs() -> tuple:
     """Import stroke processing functions lazily to avoid circular imports.
 
     This function defers imports from stroke_core until they're actually
@@ -96,7 +97,7 @@ def _get_stroke_funcs():
 
 
 @app.route('/api/test-run/<int:fid>', methods=['POST'])
-def api_run_tests(fid):
+def api_run_tests(fid: int) -> Response | tuple[str, int]:
     """Run automated stroke generation tests for all characters of a font.
 
     Executes the test_letter function for each character in CHARS, computes
@@ -152,7 +153,7 @@ def api_run_tests(fid):
 
 
 @app.route('/api/test-history/<int:fid>')
-def api_test_history(fid):
+def api_test_history(fid: int) -> Response | tuple[str, int]:
     """Retrieve test run history for a font.
 
     Returns a list of recent test runs with aggregate statistics,
@@ -197,7 +198,7 @@ def api_test_history(fid):
 
 
 @app.route('/api/test-run-detail/<int:rid>')
-def api_test_run_detail(rid):
+def api_test_run_detail(rid: int) -> Response | tuple[str, int]:
     """Retrieve detailed results for a specific test run.
 
     Returns the full test run record including per-character results
@@ -253,7 +254,7 @@ def api_test_run_detail(rid):
 
 
 @app.route('/api/preview-from-run/<int:rid>')
-def api_preview_from_run(rid):
+def api_preview_from_run(rid: int) -> Response | tuple[str, int]:
     """Generate a preview image of strokes from a test run.
 
     Renders the glyph mask with colored stroke overlays for visual
@@ -320,7 +321,7 @@ def api_preview_from_run(rid):
 
 
 @app.route('/api/compare-runs')
-def api_compare_runs():
+def api_compare_runs() -> Response:
     """Compare two test runs and show per-character score differences.
 
     Calculates score deltas between runs to identify improvements
@@ -401,7 +402,7 @@ def api_compare_runs():
 
 
 @app.route('/compare/<int:fid>')
-def compare_page(fid):
+def compare_page(fid: int) -> str | tuple[str, int]:
     """Render the test run comparison page for a font.
 
     Args:
@@ -483,7 +484,7 @@ _RAY_DIRECTIONS = [(np.cos(i * np.pi / 18), np.sin(i * np.pi / 18)) for i in ran
 
 
 @app.route('/api/center-borders/<int:fid>', methods=['POST'])
-def api_center_borders(fid):
+def api_center_borders(fid: int) -> Response | tuple[str, int]:
     """Center stroke points within the glyph borders using ray casting.
 
     For each point in the provided strokes, casts rays in 36 directions
@@ -545,7 +546,7 @@ def api_center_borders(fid):
 
 
 @app.route('/api/detect-markers/<int:fid>', methods=['POST'])
-def api_detect_markers(fid):
+def api_detect_markers(fid: int) -> Response | tuple[str, int]:
     """Detect skeleton markers (endpoints and junctions) for a character.
 
     Uses skeletonization to identify key structural points in the glyph
@@ -597,7 +598,7 @@ def api_detect_markers(fid):
 
 
 @app.route('/api/clear-shape-cache/<int:fid>', methods=['POST'])
-def api_clear_shape_cache(fid):
+def api_clear_shape_cache(fid: int) -> Response | tuple[str, int]:
     """Clear cached shape parameters for a font's characters.
 
     Removes the shape_params_cache column values to force regeneration
@@ -630,7 +631,7 @@ def api_clear_shape_cache(fid):
 
 
 @app.route('/api/skeleton/<int:fid>', methods=['POST'])
-def api_skeleton(fid):
+def api_skeleton(fid: int) -> Response | tuple[str, int]:
     """Generate skeleton-based strokes for a single character.
 
     First attempts auto_fit which uses template matching, then falls back
@@ -696,7 +697,7 @@ def api_skeleton(fid):
 
 
 @app.route('/api/minimal-strokes-batch/<int:fid>', methods=['POST'])
-def api_minimal_strokes_batch(fid):
+def api_minimal_strokes_batch(fid: int) -> Response | tuple[str, int]:
     """Generate minimal strokes for all characters of a font in batch.
 
     Uses template-based stroke generation (min_strokes) for each character
@@ -771,7 +772,7 @@ def api_minimal_strokes_batch(fid):
 
 
 @app.route('/api/skeleton-batch/<int:fid>', methods=['POST'])
-def api_skeleton_batch(fid):
+def api_skeleton_batch(fid: int) -> Response | tuple[str, int]:
     """Generate skeleton-based strokes for all characters in batch.
 
     For each character, first tries auto_fit (template matching), then
@@ -839,7 +840,7 @@ def api_skeleton_batch(fid):
 
 
 @app.route('/api/template-variants')
-def api_template_variants():
+def api_template_variants() -> Response:
     """Get available template variants for a character.
 
     Returns all stroke templates available for a given character,
@@ -887,7 +888,7 @@ def api_template_variants():
 
 
 @app.route('/api/minimal-strokes/<int:fid>')
-def api_minimal_strokes(fid):
+def api_minimal_strokes(fid: int) -> Response | tuple[str, int]:
     """Generate minimal strokes for a single character.
 
     Uses template-based stroke generation with optional variant selection.
@@ -944,7 +945,7 @@ def api_minimal_strokes(fid):
 
 
 @app.route('/api/diffvg/<int:fid>', methods=['POST'])
-def api_diffvg(fid):
+def api_diffvg(fid: int) -> Response | tuple[str, int]:
     """Optimize strokes using DiffVG differentiable rendering.
 
     Uses Docker-containerized DiffVG to refine stroke positions through

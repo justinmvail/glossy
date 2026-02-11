@@ -107,7 +107,7 @@ class Stroke:
     """
     points: np.ndarray  # Shape: (N, 2)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of points in the stroke.
 
         Returns:
@@ -115,7 +115,7 @@ class Stroke:
         """
         return len(self.points)
 
-    def copy(self):
+    def copy(self) -> 'Stroke':
         """Create a deep copy of the stroke.
 
         Returns:
@@ -1233,7 +1233,7 @@ def visualize(result: InkResult, output_path: str = None, show: bool = False):
         plt.close()
 
 
-def main():
+def main() -> None:
     """Command-line interface for InkSight vectorization.
 
     Parses command-line arguments and runs vectorization on the specified
