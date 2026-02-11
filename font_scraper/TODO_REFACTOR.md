@@ -28,7 +28,7 @@ Generated: 2026-02-11
 13. [x] Split stroke_routes_batch.py (1018 lines) into routes + handlers + services
 
 ### HIGH - Architecture Issues
-14. [ ] stroke_core.py has 10 internal dependencies - create StrokeProcessor service
+14. [x] stroke_core.py has 10 internal dependencies - create StrokeProcessor service
 15. [ ] Direct DB calls scattered - create CharacterRepository
 16. [ ] Rendering logic scattered - consolidate into GlyphRenderer abstraction
 17. [ ] Inconsistent scraper interfaces - create common FontSource base class

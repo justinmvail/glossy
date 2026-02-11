@@ -39,7 +39,8 @@ Notes:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -62,6 +63,161 @@ from stroke_skeleton import (
 )
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_utils import point_in_region
+
+
+# ---------------------------------------------------------------------------
+# StrokeProcessor Service with Dependency Injection
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StrokeProcessorDependencies:
+    """Dependencies for StrokeProcessor, enabling dependency injection.
+
+    This dataclass encapsulates all external dependencies needed by
+    StrokeProcessor, making it easy to swap implementations for testing
+    or different processing strategies.
+
+    Attributes:
+        resolve_font_path: Function to resolve font path strings.
+        render_glyph_mask: Function to render a glyph as a binary mask.
+        find_skeleton_segments: Function to find skeleton segments.
+        merge_pipeline: Pipeline for merging stroke segments.
+        quick_stroke_score: Function to score stroke quality.
+        point_in_region: Function to check if point is in a region.
+        trace_segment: Function to trace a skeleton segment.
+        trace_to_region: Function to trace to a target region.
+        generate_straight_line: Function to generate straight line points.
+        resample_path: Function to resample a path to fixed intervals.
+    """
+    resolve_font_path: Callable = field(default_factory=lambda: resolve_font_path)
+    render_glyph_mask: Callable = field(default_factory=lambda: render_glyph_mask)
+    find_skeleton_segments: Callable = field(default_factory=lambda: find_skeleton_segments)
+    merge_pipeline: MergePipeline = field(default_factory=MergePipeline.create_default)
+    quick_stroke_score: Callable = field(default_factory=lambda: quick_stroke_score)
+    point_in_region: Callable = field(default_factory=lambda: point_in_region)
+    trace_segment: Callable = field(default_factory=lambda: trace_segment)
+    trace_to_region: Callable = field(default_factory=lambda: trace_to_region)
+    generate_straight_line: Callable = field(default_factory=lambda: generate_straight_line)
+    resample_path: Callable = field(default_factory=lambda: resample_path)
+
+
+class StrokeProcessor:
+    """Service for processing font glyphs into stroke representations.
+
+    This class provides a unified interface for stroke extraction with
+    configurable dependencies via dependency injection. It encapsulates
+    the core stroke processing algorithms and allows easy customization
+    or mocking of individual components.
+
+    Example:
+        # Use default dependencies
+        processor = StrokeProcessor()
+        strokes = processor.min_strokes('/path/to/font.ttf', 'A')
+
+        # Use custom dependencies for testing
+        deps = StrokeProcessorDependencies(
+            render_glyph_mask=mock_render,
+            quick_stroke_score=mock_score,
+        )
+        processor = StrokeProcessor(deps)
+
+    Attributes:
+        deps: StrokeProcessorDependencies instance with all dependencies.
+    """
+
+    def __init__(self, deps: StrokeProcessorDependencies = None):
+        """Initialize the processor with dependencies.
+
+        Args:
+            deps: Optional dependencies. If None, uses defaults.
+        """
+        self.deps = deps or StrokeProcessorDependencies()
+
+    def skel_markers(self, mask: np.ndarray) -> list[dict[str, Any]]:
+        """Detect structural markers in a glyph mask.
+
+        Delegates to the module-level skel_markers function.
+
+        Args:
+            mask: Binary glyph mask (2D numpy array).
+
+        Returns:
+            List of marker dictionaries.
+        """
+        return skel_markers(mask)
+
+    def skel_strokes(self, mask: np.ndarray, min_len: int = 5,
+                     junction_clusters: list = None) -> list[list[list[float]]]:
+        """Extract raw stroke paths from skeleton analysis.
+
+        Delegates to the module-level skel_strokes function.
+
+        Args:
+            mask: Binary glyph mask.
+            min_len: Minimum stroke length.
+            junction_clusters: Optional pre-computed junction clusters.
+
+        Returns:
+            List of stroke paths.
+        """
+        return skel_strokes(mask, min_len, junction_clusters)
+
+    def min_strokes(self, font_path: str, char: str, canvas_size: int = 224,
+                    template: list = None, return_variant: bool = False):
+        """Generate minimal strokes using template-based pipeline.
+
+        Delegates to the module-level min_strokes function.
+
+        Args:
+            font_path: Path to font file.
+            char: Character to process.
+            canvas_size: Canvas size in pixels.
+            template: Optional custom template.
+            return_variant: If True, return (strokes, variant_name).
+
+        Returns:
+            Strokes list, or (strokes, variant) tuple if return_variant=True.
+        """
+        return min_strokes(font_path, char, canvas_size, template, return_variant)
+
+    def auto_fit(self, font_path: str, char: str, canvas_size: int = 224,
+                 return_markers: bool = False):
+        """Auto-fit strokes using affine transformation optimization.
+
+        Delegates to the module-level auto_fit function.
+
+        Args:
+            font_path: Path to font file.
+            char: Character to process.
+            canvas_size: Canvas size in pixels.
+            return_markers: If True, return (strokes, markers).
+
+        Returns:
+            Strokes list, or (strokes, markers) tuple if return_markers=True.
+        """
+        return auto_fit(font_path, char, canvas_size, return_markers)
+
+    @classmethod
+    def create_default(cls) -> 'StrokeProcessor':
+        """Create a processor with default dependencies.
+
+        Returns:
+            StrokeProcessor instance with default configuration.
+        """
+        return cls(StrokeProcessorDependencies())
+
+    @classmethod
+    def create_with_custom_merge(cls, merge_pipeline: MergePipeline) -> 'StrokeProcessor':
+        """Create a processor with a custom merge pipeline.
+
+        Args:
+            merge_pipeline: Custom MergePipeline instance.
+
+        Returns:
+            StrokeProcessor with custom merge configuration.
+        """
+        deps = StrokeProcessorDependencies(merge_pipeline=merge_pipeline)
+        return cls(deps)
 
 
 def _analyze_skeleton_legacy(mask: np.ndarray) -> dict[str, Any] | None:
