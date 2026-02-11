@@ -39,7 +39,7 @@ Optional Keys Per Shape:
 
     bounds (list): Override default parameter bounds for optimization.
         Format is a list of (lo, hi) tuples or None per parameter.
-        None entries keep the default from SHAPE_PARAM_BOUNDS.
+        None entries keep the default from SHAPES[name].get_bounds().
 
 Coordinate System:
     All fractional parameters are in the range [0.0, 1.0] and are relative
