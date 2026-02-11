@@ -59,38 +59,30 @@ from stroke_flask import (
     test_run_repository,
 )
 from stroke_rendering import render_glyph_mask
+from stroke_services_batch import (
+    get_diffvg,
+    get_stroke_funcs,
+    cast_ray,
+    center_point_in_glyph,
+    center_strokes_in_borders,
+    RAY_DIRECTIONS,
+    create_test_run,
+    get_test_history,
+    get_test_run_detail,
+    generate_skeleton_strokes,
+    generate_minimal_strokes,
+    generate_batch_skeletons,
+    generate_batch_minimal_strokes,
+    get_template_variants,
+    render_strokes_preview,
+)
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
-
-# Lazy-loaded DiffVG instance (avoids import overhead if not used)
-_diffvg = None
-_diffvg_initialized = False
-_diffvg_lock = threading.Lock()
-
-
-def get_diffvg() -> Any:
-    """Get the DiffVG Docker instance, lazily initializing on first use.
-
-    Thread-safe initialization using double-checked locking pattern.
-
-    Returns:
-        DiffVGDocker instance, or None if unavailable.
-    """
-    global _diffvg, _diffvg_initialized
-    if not _diffvg_initialized:
-        with _diffvg_lock:
-            # Double-check after acquiring lock
-            if not _diffvg_initialized:
-                try:
-                    from docker.diffvg_docker import DiffVGDocker
-                    _diffvg = DiffVGDocker()
-                except ImportError:
-                    _diffvg = None
-                _diffvg_initialized = True
-    return _diffvg
-
 
 # Alias for backward compatibility
 _font = get_font
+_cast_ray = cast_ray
+_center_point_in_glyph = center_point_in_glyph
+_RAY_DIRECTIONS = RAY_DIRECTIONS
 
 
 def _get_stroke_funcs() -> tuple:
