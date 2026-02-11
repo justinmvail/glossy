@@ -62,10 +62,15 @@ Example:
 """
 
 # Import Flask app and register routes
+import os
+
 import stroke_routes_batch  # noqa: F401 - registers batch routes with app
 import stroke_routes_core  # noqa: F401 - registers core routes with app
 import stroke_routes_stream  # noqa: F401 - registers SSE streaming routes with app
 from stroke_flask import app
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', '1').lower() in ('1', 'true', 'yes')
+    host = os.environ.get('FLASK_HOST', '0.0.0.0')
+    port = int(os.environ.get('FLASK_PORT', '5000'))
+    app.run(debug=debug, host=host, port=port)

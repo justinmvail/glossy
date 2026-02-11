@@ -4,6 +4,19 @@ A refactored, modular architecture for stroke editing functionality. This packag
 provides tools for analyzing font glyphs, extracting skeleton information, detecting
 markers, and performing stroke optimization.
 
+Architecture Overview:
+    This package (stroke_lib) provides a clean, object-oriented API layered on top
+    of the main codebase's procedural modules (stroke_*.py files in the parent
+    directory). The relationship is:
+
+    - stroke_lib uses stroke_rendering, stroke_flask for font/glyph utilities
+    - stroke_lib.analysis wraps stroke_skeleton functionality with OOP interfaces
+    - stroke_lib.domain provides typed data structures (Point, Stroke, etc.)
+    - stroke_lib.api offers high-level services for external consumers
+
+    The main codebase modules remain the source of truth for algorithms, while
+    stroke_lib provides ergonomic wrappers and type safety for API consumers.
+
 The package is organized into the following modules:
     domain: Core value objects including Point, BBox, Stroke, Segment, and
         skeleton-related data structures.

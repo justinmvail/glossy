@@ -43,7 +43,7 @@ from pathlib import Path
 # Add parent dir to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from stroke_core import min_strokes as minimal_strokes_from_skeleton, _skel as _analyze_skeleton
+from stroke_core import min_strokes as minimal_strokes_from_skeleton, _analyze_skeleton_legacy as _analyze_skeleton
 from stroke_rendering import render_glyph_mask
 from stroke_flask import resolve_font_path
 from stroke_templates import NUMPAD_TEMPLATES, NUMPAD_POS

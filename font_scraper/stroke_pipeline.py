@@ -714,6 +714,14 @@ class MinimalStrokePipeline:
                 7 | 8 | 9   (row 0)
                 4 | 5 | 6   (row 1)
                 1 | 2 | 3   (row 2)
+
+            Diagonal moves (e.g., 7→3, 1→9) return None because skeleton
+            path tracing uses directional bias to choose branches at
+            junctions. Cardinal directions map cleanly to segment angles
+            (down=90°, up=-90°, etc.), but diagonals are ambiguous - a
+            45° move could follow either a horizontal or vertical segment.
+            Returning None tells the tracer to use distance-based routing
+            instead of directional bias for these cases.
         """
         # Get row and column for each region (0-indexed from top-left)
         def region_to_row_col(r):

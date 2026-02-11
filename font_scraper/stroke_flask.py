@@ -327,3 +327,259 @@ def validate_char_param(char):
     if len(char) != 1:
         return False, (jsonify(error="Character must be a single character"), 400)
     return True, None
+
+
+class FontRepository:
+    """Data access layer for font and character database operations.
+
+    Encapsulates all database queries related to fonts and characters,
+    providing a clean interface for route handlers and enabling easier
+    testing through dependency injection.
+
+    The repository uses the module-level get_db_context() for connection
+    management, but can accept a custom connection factory for testing.
+
+    Attributes:
+        _connection_factory: Callable that returns a context manager
+            yielding a database connection.
+
+    Example:
+        Using the default connection factory::
+
+            repo = FontRepository()
+            fonts = repo.list_fonts()
+            font = repo.get_font_by_id(42)
+
+        Using a custom connection factory for testing::
+
+            def mock_db_context():
+                return mock_connection
+
+            repo = FontRepository(connection_factory=mock_db_context)
+    """
+
+    # Rejection reason ID for manually rejected fonts
+    REJECTION_REASON_ID = 8
+    # Duplicate reason ID
+    DUPLICATE_REASON_ID = 2
+
+    def __init__(self, connection_factory=None):
+        """Initialize the repository with an optional connection factory.
+
+        Args:
+            connection_factory: Optional callable that returns a context
+                manager yielding a database connection. Defaults to
+                get_db_context.
+        """
+        self._connection_factory = connection_factory or get_db_context
+
+    def list_fonts(self, show_rejected: bool = False) -> list:
+        """List fonts with optional filtering for rejected fonts.
+
+        Args:
+            show_rejected: If True, show only rejected fonts.
+                If False (default), show non-rejected, non-duplicate fonts.
+
+        Returns:
+            List of font records with id, name, source, file_path,
+            char_count, and rejected flag.
+        """
+        with self._connection_factory() as db:
+            if show_rejected:
+                query = """
+                    SELECT f.id, f.name, f.source, f.file_path,
+                           COALESCE(cs.char_count, 0) as char_count,
+                           1 as rejected
+                    FROM fonts f
+                    JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = ?
+                    LEFT JOIN (
+                        SELECT font_id, COUNT(*) as char_count
+                        FROM characters WHERE strokes_raw IS NOT NULL
+                        GROUP BY font_id
+                    ) cs ON cs.font_id = f.id
+                    ORDER BY f.name
+                """
+                return db.execute(query, (self.REJECTION_REASON_ID,)).fetchall()
+            else:
+                query = """
+                    SELECT f.id, f.name, f.source, f.file_path,
+                           COALESCE(cs.char_count, 0) as char_count,
+                           0 as rejected
+                    FROM fonts f
+                    LEFT JOIN font_removals rej ON rej.font_id = f.id AND rej.reason_id = ?
+                    LEFT JOIN font_removals dup ON dup.font_id = f.id AND dup.reason_id = ?
+                    LEFT JOIN (
+                        SELECT font_id, COUNT(*) as char_count
+                        FROM characters WHERE strokes_raw IS NOT NULL
+                        GROUP BY font_id
+                    ) cs ON cs.font_id = f.id
+                    WHERE rej.id IS NULL AND dup.id IS NULL
+                    ORDER BY f.name
+                """
+                return db.execute(query, (self.REJECTION_REASON_ID,
+                                          self.DUPLICATE_REASON_ID)).fetchall()
+
+    def get_font_by_id(self, fid: int):
+        """Get a font record by ID.
+
+        Args:
+            fid: The font ID.
+
+        Returns:
+            Font record or None if not found.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                "SELECT * FROM fonts WHERE id = ?", (fid,)
+            ).fetchone()
+
+    def get_font_characters(self, fid: int) -> list:
+        """Get all characters with stroke data for a font.
+
+        Args:
+            fid: The font ID.
+
+        Returns:
+            List of character records with char, strokes_raw, point_count.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                """SELECT char, strokes_raw, point_count
+                   FROM characters
+                   WHERE font_id = ? AND strokes_raw IS NOT NULL
+                   ORDER BY char""",
+                (fid,)
+            ).fetchall()
+
+    def get_character(self, fid: int, char: str):
+        """Get a specific character's stroke data.
+
+        Args:
+            fid: The font ID.
+            char: The character.
+
+        Returns:
+            Character record with strokes_raw and markers, or None.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                "SELECT strokes_raw, markers FROM characters WHERE font_id = ? AND char = ?",
+                (fid, char)
+            ).fetchone()
+
+    def save_character(self, fid: int, char: str, strokes_raw: str,
+                       point_count: int, markers: str) -> None:
+        """Save or update character stroke data.
+
+        Args:
+            fid: The font ID.
+            char: The character.
+            strokes_raw: JSON string of stroke data.
+            point_count: Total number of points in strokes.
+            markers: JSON string of marker data.
+        """
+        with self._connection_factory() as db:
+            existing = db.execute(
+                "SELECT id FROM characters WHERE font_id = ? AND char = ?",
+                (fid, char)
+            ).fetchone()
+            if existing:
+                db.execute(
+                    """UPDATE characters
+                       SET strokes_raw = ?, point_count = ?, markers = ?
+                       WHERE font_id = ? AND char = ?""",
+                    (strokes_raw, point_count, markers, fid, char)
+                )
+            else:
+                db.execute(
+                    """INSERT INTO characters (font_id, char, strokes_raw, point_count, markers)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (fid, char, strokes_raw, point_count, markers)
+                )
+
+    def get_character_strokes(self, fid: int, char: str):
+        """Get just the strokes_raw for a character.
+
+        Args:
+            fid: The font ID.
+            char: The character.
+
+        Returns:
+            Character record with strokes_raw, or None.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                "SELECT strokes_raw FROM characters WHERE font_id = ? AND char = ?",
+                (fid, char)
+            ).fetchone()
+
+    def list_fonts_for_scan(self) -> list:
+        """List non-rejected fonts for batch scanning.
+
+        Returns:
+            List of font records with id and file_path.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                """SELECT f.id, f.file_path FROM fonts f
+                   LEFT JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = ?
+                   WHERE fr.id IS NULL""",
+                (self.REJECTION_REASON_ID,)
+            ).fetchall()
+
+    def reject_font(self, fid: int, details: str) -> bool:
+        """Mark a font as rejected.
+
+        Args:
+            fid: The font ID.
+            details: Rejection details/reason.
+
+        Returns:
+            True if rejected, False if font not found or already rejected.
+        """
+        with self._connection_factory() as db:
+            if not db.execute("SELECT id FROM fonts WHERE id = ?", (fid,)).fetchone():
+                return False
+            if db.execute(
+                "SELECT id FROM font_removals WHERE font_id = ? AND reason_id = ?",
+                (fid, self.REJECTION_REASON_ID)
+            ).fetchone():
+                return False
+            db.execute(
+                "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+                (fid, self.REJECTION_REASON_ID, details)
+            )
+            return True
+
+    def unreject_font(self, fid: int) -> int:
+        """Remove rejection for a font.
+
+        Args:
+            fid: The font ID.
+
+        Returns:
+            Number of rows deleted (0 or 1).
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                "DELETE FROM font_removals WHERE font_id = ? AND reason_id = ?",
+                (fid, self.REJECTION_REASON_ID)
+            )
+            return cursor.rowcount
+
+    def unreject_all_fonts(self) -> int:
+        """Remove all font rejections.
+
+        Returns:
+            Number of fonts unrejected.
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                "DELETE FROM font_removals WHERE reason_id = ?",
+                (self.REJECTION_REASON_ID,)
+            )
+            return cursor.rowcount
+
+
+# Default repository instance for convenience
+font_repository = FontRepository()

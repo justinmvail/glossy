@@ -254,6 +254,17 @@ def _merge_to_expected_count(strokes: list[list[list[float]]],
         5. Considers all four endpoint combinations (start-start, start-end,
            end-start, end-end) when computing distances
         6. Reverses stroke direction as needed when merging
+
+        Endpoint combination strategy explained:
+            Given strokes A (points a1→a2) and B (points b1→b2), we check
+            distances for all four ways to connect them:
+                - a2 to b1: A followed by B (no reversal)
+                - a2 to b2: A followed by reversed B
+                - a1 to b1: reversed A followed by B
+                - a1 to b2: reversed A followed by reversed B
+            The pair with minimum distance wins. This ensures we find the
+            optimal connection regardless of how strokes were originally
+            traced (skeleton tracing can produce strokes in either direction).
     """
     variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
     if not variants or not strokes:
