@@ -50,7 +50,7 @@ Generated: 2026-02-11
 
 ### MEDIUM - Performance Caching
 29. [x] stroke_utils.py:458-469 - find_skeleton_waypoints: use KD-tree instead of min()
-30. [ ] stroke_rendering.py:64 - Increase LRU cache from 32 to 256
+30. [x] stroke_rendering.py:64 - Increase LRU cache from 32 to 256
 31. [ ] stroke_merge.py - Cache endpoint_cluster results in absorb functions
 
 ### MEDIUM - Code Duplication

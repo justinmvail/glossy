@@ -71,8 +71,11 @@ def resolve_font_path(font_path: str) -> str:
     return os.path.join(_BASE_DIR, font_path)
 
 
-# LRU cache for font objects to avoid repeated disk I/O
-@lru_cache(maxsize=32)
+# LRU cache size for font objects - larger cache reduces disk I/O
+# when processing many characters from the same fonts
+FONT_CACHE_SIZE = 256
+
+@lru_cache(maxsize=FONT_CACHE_SIZE)
 def _cached_font(font_path: str, size: int) -> FreeTypeFont:
     """Load a font with caching to avoid repeated disk I/O."""
     return ImageFont.truetype(font_path, size)
