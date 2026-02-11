@@ -264,3 +264,129 @@ python3 test_minimal_strokes.py --compare test_baseline.json
 - Static: `static/` (CSS, JS)
 - Fonts: `fonts/` subdirectories by source
 - Database: `fonts.db` (SQLite)
+
+## Complete Codebase Audit
+
+When asked to perform a "complete audit", follow this systematic checklist:
+
+### 1. Code Quality
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Dead code | `Grep` for unused functions, check imports | Remove unused code |
+| Code duplication | Look for repeated patterns across files | Extract to shared helpers |
+| Long functions | Functions > 50 lines | Extract helpers, reduce nesting |
+| Deep nesting | 4+ levels of indentation | Early returns, extract functions |
+| Magic numbers | Hardcoded literals | Define as named constants |
+| Missing type hints | Public functions without annotations | Add type hints |
+| Inconsistent naming | Mixed conventions | Standardize to snake_case |
+
+### 2. Architecture
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Circular imports | Import errors, `Grep` for cross-imports | Lazy imports, restructure |
+| God modules | Files > 500 lines with mixed concerns | Split into focused modules |
+| Tight coupling | Excessive cross-module imports | Introduce interfaces/abstractions |
+| Missing abstractions | Direct DB/API calls scattered | Repository pattern, service layer |
+| Inconsistent patterns | Mixed approaches to same problem | Standardize on one pattern |
+
+### 3. Design Patterns
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Dict dispatch | `THING_FNS = {'name': fn}` patterns | Polymorphism (base class + registry) |
+| if/elif chains | Character/type-specific branches | Strategy pattern or registry |
+| Hardcoded algorithms | Can't swap implementations | Strategy pattern |
+| Scattered config | Constants across multiple files | Config dataclasses, factories |
+| Procedural pipelines | Sequential function calls | Pipeline/chain pattern |
+
+### 4. Performance
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| O(n²) algorithms | Nested loops over same data | Build indexes, use sets/dicts |
+| Missing caching | Repeated expensive operations | LRU cache, memoization |
+| N+1 queries | Loop with DB query inside | Batch queries, joins |
+| Blocking I/O | Synchronous file/network ops | Async or background tasks |
+| Memory leaks | Unbounded caches, reference cycles | Size limits, weak refs |
+
+### 5. Reliability
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Bare except | `except:` without exception type | Specific exception types |
+| Silent failures | Errors swallowed without logging | Add logging or re-raise |
+| Missing validation | User input used directly | Validate at boundaries |
+| Resource leaks | Files/connections not closed | Context managers (`with`) |
+| Race conditions | Shared mutable state | Locks or immutable patterns |
+
+### 6. Security
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| SQL injection | String formatting in queries | Parameterized queries (`?`) |
+| Command injection | `shell=True`, string commands | List args, no shell |
+| Path traversal | User input in file paths | Validate, use safe joins |
+| Hardcoded secrets | Passwords/keys in code | Environment variables |
+| Error leaks | `str(e)` in HTTP responses | Generic error messages |
+
+### 7. Testing
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Missing tests | Critical paths untested | Add unit/integration tests |
+| Flaky tests | Non-deterministic failures | Fix race conditions, mock time |
+| Slow tests | Test suite > 30s | Parallelize, mock I/O |
+| No integration tests | Only unit tests | Add end-to-end tests |
+| Untestable code | Tightly coupled, global state | Dependency injection |
+
+### 8. Documentation
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Missing docstrings | Public functions undocumented | Add Google-style docstrings |
+| Outdated docs | Docs don't match code | Update or remove |
+| No README | Missing setup instructions | Add README.md |
+| Tribal knowledge | Undocumented decisions | Add comments or ADRs |
+
+### 9. Dependencies
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Outdated packages | `pip list --outdated` | Update with testing |
+| Unused deps | Imports not used | Remove from requirements |
+| Unpinned versions | No version constraints | Add `>=` constraints |
+| Security vulns | `pip-audit` or manual check | Update affected packages |
+
+### 10. Developer Experience
+
+| Check | Command/Method | Fix |
+|-------|----------------|-----|
+| Complex setup | Many manual steps to run | Add setup scripts |
+| No linting | Inconsistent style | Add ruff/pyproject.toml |
+| Missing dev tools | Hard to debug | Add logging, visualization |
+
+### Audit Workflow
+
+1. **Scan first**: Use Grep/Glob to identify issues before fixing
+2. **Prioritize**: Security > Reliability > Performance > Code Quality
+3. **Test after each fix**: Run `test_flask_routes` and `test_minimal_strokes.py`
+4. **Commit incrementally**: One commit per category or major fix
+5. **Update docs**: Keep CLAUDE.md current with patterns used
+
+### Verification Commands
+
+```bash
+# Syntax check all Python files
+python3 -m py_compile *.py
+
+# Run all tests
+python3 -m unittest test_flask_routes -v
+python3 test_minimal_strokes.py
+
+# Check for common issues
+grep -r "except:" *.py           # Bare excepts
+grep -r "shell=True" *.py        # Command injection risk
+grep -r "% s" *.py               # SQL injection risk (string formatting)
+```
