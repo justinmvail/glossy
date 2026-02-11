@@ -60,6 +60,7 @@ from collections import defaultdict
 
 import numpy as np
 from scipy.spatial import cKDTree
+
 from stroke_dataclasses import (
     ARRIVAL_BRANCH_SIZE,
     ParsedWaypoint,
@@ -227,7 +228,8 @@ class MinimalStrokePipeline:
             >>> result = pipeline.evaluate_all_variants()
         """
         # Lazy imports to avoid circular dependencies
-        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton, skel_strokes
+        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton
+        from stroke_core import skel_strokes
         from stroke_flask import resolve_font_path
         from stroke_rendering import render_glyph_mask
         from stroke_scoring import quick_stroke_score
@@ -674,9 +676,9 @@ class MinimalStrokePipeline:
                 candidate_junctions.add(start)
             # Also check junction pixels near segment start
             for jp in junction_pixels:
-                if abs(jp[0] - start[0]) <= 3 and abs(jp[1] - start[1]) <= 3:
-                    if self._point_in_region(jp, region, bbox) or jp in region_pixels:
-                        candidate_junctions.add(jp)
+                if (abs(jp[0] - start[0]) <= 3 and abs(jp[1] - start[1]) <= 3
+                        and (self._point_in_region(jp, region, bbox) or jp in region_pixels)):
+                    candidate_junctions.add(jp)
 
         if not candidate_junctions:
             # Try junction pixels in region that are close to good segment starts

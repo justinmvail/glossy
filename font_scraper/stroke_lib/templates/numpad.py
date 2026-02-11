@@ -40,19 +40,19 @@ Example usage:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional, Union
+
 import re
+from dataclasses import dataclass
+from typing import Union
 
-from ..domain.geometry import Point, BBox
-
+from ..domain.geometry import BBox, Point
 
 # Numpad position mapping (region 1-9 to fractional x,y coordinates)
 # Layout:
 # 7 8 9
 # 4 5 6
 # 1 2 3
-NUMPAD_POS: Dict[int, Tuple[float, float]] = {
+NUMPAD_POS: dict[int, tuple[float, float]] = {
     1: (0.167, 0.833),  # bottom-left
     2: (0.500, 0.833),  # bottom-center
     3: (0.833, 0.833),  # bottom-right
@@ -131,9 +131,9 @@ class NumpadTemplate:
         2
     """
     name: str
-    strokes: List[List[Union[int, str, Tuple]]]
+    strokes: list[list[Union[int, str, tuple]]]
 
-    def parse_waypoint(self, wp: Union[int, str, Tuple]) -> Optional[WaypointInfo]:
+    def parse_waypoint(self, wp: Union[int, str, tuple]) -> WaypointInfo | None:
         """Parse a waypoint into structured info.
 
         Converts a waypoint specification (integer, string, or tuple)
@@ -180,7 +180,7 @@ class NumpadTemplate:
 
         return None
 
-    def get_waypoints(self, stroke_index: int) -> List[WaypointInfo]:
+    def get_waypoints(self, stroke_index: int) -> list[WaypointInfo]:
         """Get parsed waypoints for a stroke.
 
         Parses all waypoints in the specified stroke, filtering out
@@ -203,7 +203,7 @@ class NumpadTemplate:
                 waypoints.append(info)
         return waypoints
 
-    def get_direction_hint(self, stroke_index: int, waypoint_index: int) -> Optional[str]:
+    def get_direction_hint(self, stroke_index: int, waypoint_index: int) -> str | None:
         """Get direction hint following a waypoint.
 
         Looks for direction hints ('up', 'down', 'left', 'right')
@@ -234,9 +234,7 @@ class NumpadTemplate:
                     next_val = next_wp[0] if isinstance(next_wp, tuple) else next_wp
                     if isinstance(next_val, str) and next_val in DIRECTION_HINTS:
                         return next_val
-                    elif isinstance(next_val, str) and next_val not in STYLE_HINTS:
-                        break
-                    elif not isinstance(next_val, str):
+                    elif isinstance(next_val, str) and next_val not in STYLE_HINTS or not isinstance(next_val, str):
                         break
                 return None
 
@@ -281,7 +279,7 @@ class NumpadTemplate:
 
         return False
 
-    def to_pixel_positions(self, bbox: BBox) -> List[List[Point]]:
+    def to_pixel_positions(self, bbox: BBox) -> list[list[Point]]:
         """Convert template to pixel positions within bounding box.
 
         Maps each waypoint region to actual pixel coordinates within
@@ -307,7 +305,7 @@ class NumpadTemplate:
         return result
 
 
-def extract_region(wp: Union[int, str, Tuple]) -> Optional[int]:
+def extract_region(wp: Union[int, str, tuple]) -> int | None:
     """Extract region number from a waypoint (for compatibility).
 
     Helper function to extract the region number from various waypoint
@@ -325,7 +323,7 @@ def extract_region(wp: Union[int, str, Tuple]) -> Optional[int]:
     return wp if isinstance(wp, int) else None
 
 
-def is_vertical_stroke(stroke_template: List) -> bool:
+def is_vertical_stroke(stroke_template: list) -> bool:
     """Check if stroke template represents a vertical line.
 
     Determines whether a two-waypoint stroke is vertical by checking

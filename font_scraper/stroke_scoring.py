@@ -34,10 +34,10 @@ Typical usage:
 
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from scipy.spatial import cKDTree
+
 from stroke_shapes import (
     SHAPE_FNS,
 )
@@ -82,7 +82,7 @@ class ScoringContext:
     snap_yi: np.ndarray
     w: int
     h: int
-    dist_map: Optional[np.ndarray] = None
+    dist_map: np.ndarray | None = None
 
 
 # Module-level constants for scoring

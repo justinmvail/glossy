@@ -33,11 +33,12 @@ Example usage:
 """
 
 from __future__ import annotations
-import math
-import numpy as np
-from typing import Tuple, List, Optional
 
-from ..domain.geometry import Point, BBox
+import math
+
+import numpy as np
+
+from ..domain.geometry import Point
 
 
 def angle_between(d1: Point, d2: Point) -> float:
@@ -66,7 +67,7 @@ def angle_between(d1: Point, d2: Point) -> float:
     return math.acos(max(-1.0, min(1.0, dot)))
 
 
-def point_in_region(point: Tuple[int, int], region: int, bbox: Tuple[float, float, float, float]) -> bool:
+def point_in_region(point: tuple[int, int], region: int, bbox: tuple[float, float, float, float]) -> bool:
     """Check if a point falls within a numpad region (1-9) of a bounding box.
 
     Legacy function for compatibility - use BBox.point_in_region for new code.
@@ -111,7 +112,7 @@ def point_in_region(point: Tuple[int, int], region: int, bbox: Tuple[float, floa
     return x_start <= x < x_end and y_start <= y < y_end
 
 
-def smooth_stroke(points: List[Tuple[float, float]], sigma: float = 2.0) -> List[Tuple[float, float]]:
+def smooth_stroke(points: list[tuple[float, float]], sigma: float = 2.0) -> list[tuple[float, float]]:
     """Apply Gaussian smoothing to a stroke path.
 
     Smooths the x and y coordinates of the path independently using
@@ -145,7 +146,7 @@ def smooth_stroke(points: List[Tuple[float, float]], sigma: float = 2.0) -> List
     return list(zip(xs_smooth, ys_smooth))
 
 
-def resample_path(path: List[Tuple[float, float]], num_points: int) -> List[Tuple[float, float]]:
+def resample_path(path: list[tuple[float, float]], num_points: int) -> list[tuple[float, float]]:
     """Resample a path to have a specified number of evenly-spaced points.
 
     Creates a new path with points distributed at equal arc-length
@@ -187,7 +188,7 @@ def resample_path(path: List[Tuple[float, float]], num_points: int) -> List[Tupl
     target_dist = 0.0
     step = total_length / (num_points - 1)
 
-    for i in range(1, num_points - 1):
+    for _i in range(1, num_points - 1):
         target_dist += step
         # Find segment containing target distance
         for j in range(1, len(distances)):
@@ -203,7 +204,7 @@ def resample_path(path: List[Tuple[float, float]], num_points: int) -> List[Tupl
     return result
 
 
-def constrain_to_mask(points: List[Tuple[float, float]], mask: np.ndarray) -> List[Tuple[float, float]]:
+def constrain_to_mask(points: list[tuple[float, float]], mask: np.ndarray) -> list[tuple[float, float]]:
     """Constrain stroke points to stay within a binary mask.
 
     For any point outside the mask, snaps it to the nearest inside pixel
@@ -252,7 +253,7 @@ def constrain_to_mask(points: List[Tuple[float, float]], mask: np.ndarray) -> Li
     return result
 
 
-def generate_straight_line(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+def generate_straight_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
     """Generate points along a straight line using Bresenham's algorithm.
 
     Produces a list of integer pixel coordinates along the line from

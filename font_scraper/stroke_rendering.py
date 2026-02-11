@@ -24,13 +24,14 @@ Typical usage:
 """
 
 from __future__ import annotations
+
 import io
 from functools import lru_cache
-from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
+
 from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
 
 

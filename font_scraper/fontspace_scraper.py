@@ -37,18 +37,18 @@ Command-line Arguments:
 """
 
 import argparse
+import io
+import json
 import os
 import re
 import time
 import zipfile
-import io
-from pathlib import Path
-from typing import List, Set
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlencode
-import json
 
 
 @dataclass
@@ -119,11 +119,11 @@ class FontSpaceScraper:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         })
 
-        self.fonts_found: List[FontInfo] = []
-        self.downloaded: Set[str] = set()
-        self.failed: List[str] = []
+        self.fonts_found: list[FontInfo] = []
+        self.downloaded: set[str] = set()
+        self.failed: list[str] = []
 
-    def scrape_search(self, query: str = "handwritten", max_pages: int = 10) -> List[FontInfo]:
+    def scrape_search(self, query: str = "handwritten", max_pages: int = 10) -> list[FontInfo]:
         """Scrape fonts from FontSpace search results.
 
         Performs a search query and iterates through paginated results,
@@ -168,7 +168,7 @@ class FontSpaceScraper:
 
         return fonts
 
-    def scrape_category(self, category: str = "handwriting", max_pages: int = 10) -> List[FontInfo]:
+    def scrape_category(self, category: str = "handwriting", max_pages: int = 10) -> list[FontInfo]:
         """Scrape fonts from a FontSpace category.
 
         Browses a specific category and iterates through paginated results,
@@ -214,7 +214,7 @@ class FontSpaceScraper:
 
         return fonts
 
-    def _parse_search_results(self, html: str) -> List[FontInfo]:
+    def _parse_search_results(self, html: str) -> list[FontInfo]:
         """Parse font list from search or category page HTML.
 
         Extracts font information by finding links to font pages in the HTML.
@@ -250,7 +250,6 @@ class FontSpaceScraper:
                 # Build download URL from font page URL
                 # FontSpace download: /font/fontname -> click download button
                 # We'll get the actual download URL when we visit the font page
-                font_slug = font_url.split('/font/')[-1] if '/font/' in font_url else ''
 
                 fonts.append(FontInfo(
                     name=font_name,
@@ -338,7 +337,7 @@ class FontSpaceScraper:
                 time.sleep(0.5)
 
             if not font.download_url:
-                print(f"    Could not find download URL")
+                print("    Could not find download URL")
                 self.failed.append(font.name)
                 return False
 
@@ -353,7 +352,7 @@ class FontSpaceScraper:
                     self.downloaded.add(font.name)
                     return True
                 else:
-                    print(f"    No TTF/OTF files in ZIP")
+                    print("    No TTF/OTF files in ZIP")
                     return False
             else:
                 # Might be a direct font file
@@ -367,7 +366,7 @@ class FontSpaceScraper:
                     self.downloaded.add(font.name)
                     return True
 
-            print(f"    Unknown file format")
+            print("    Unknown file format")
             return False
 
         except Exception as e:

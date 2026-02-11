@@ -26,13 +26,14 @@ Typical usage:
 import re
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt, gaussian_filter1d
+from scipy.ndimage import distance_transform_edt, gaussian_filter1d  # noqa: F401
 
 # Import shared utilities from stroke_lib (canonical implementations)
-from stroke_lib.utils.geometry import (
-    smooth_stroke,
+# These are re-exported for backwards compatibility
+from stroke_lib.utils.geometry import (  # noqa: F401
     constrain_to_mask,
     point_in_region,
+    smooth_stroke,
 )
 
 # Note: resolve_font_path is in stroke_flask.py (canonical location for Flask utilities)

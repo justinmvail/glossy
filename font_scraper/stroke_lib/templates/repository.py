@@ -44,7 +44,6 @@ Example usage:
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Union
 
 from .numpad import NumpadTemplate
 
@@ -80,8 +79,8 @@ class TemplateRepository:
 
         Creates empty dictionaries for default templates and variants.
         """
-        self._templates: Dict[str, NumpadTemplate] = {}
-        self._variants: Dict[str, Dict[str, NumpadTemplate]] = {}
+        self._templates: dict[str, NumpadTemplate] = {}
+        self._variants: dict[str, dict[str, NumpadTemplate]] = {}
 
     def register(self, char: str, template: NumpadTemplate) -> None:
         """Register a template for a character.
@@ -111,7 +110,7 @@ class TemplateRepository:
             self._variants[char] = {}
         self._variants[char][variant_name] = template
 
-    def get(self, char: str) -> Optional[NumpadTemplate]:
+    def get(self, char: str) -> NumpadTemplate | None:
         """Get the default template for a character.
 
         Args:
@@ -123,7 +122,7 @@ class TemplateRepository:
         """
         return self._templates.get(char)
 
-    def get_variant(self, char: str, variant_name: str) -> Optional[NumpadTemplate]:
+    def get_variant(self, char: str, variant_name: str) -> NumpadTemplate | None:
         """Get a specific variant template.
 
         Args:
@@ -137,7 +136,7 @@ class TemplateRepository:
         variants = self._variants.get(char, {})
         return variants.get(variant_name)
 
-    def get_all_variants(self, char: str) -> Dict[str, NumpadTemplate]:
+    def get_all_variants(self, char: str) -> dict[str, NumpadTemplate]:
         """Get all variants for a character.
 
         Args:
@@ -160,7 +159,7 @@ class TemplateRepository:
         """
         return char in self._variants and len(self._variants[char]) > 1
 
-    def list_characters(self) -> List[str]:
+    def list_characters(self) -> list[str]:
         """List all characters with templates.
 
         Returns:
@@ -174,9 +173,9 @@ class TemplateRepository:
     @classmethod
     def from_dict(
         cls,
-        templates: Dict[str, List],
-        variants: Optional[Dict[str, Dict[str, List]]] = None
-    ) -> 'TemplateRepository':
+        templates: dict[str, list],
+        variants: dict[str, dict[str, list]] | None = None
+    ) -> TemplateRepository:
         """Create repository from dictionary definitions.
 
         Factory method to create a fully populated repository from

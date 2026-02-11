@@ -41,16 +41,13 @@ Example:
         print(f"Overall quality: {scores['overall']:.1%}")
 """
 
-import json
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from pathlib import Path
 
+import imagehash
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import imagehash
 from scipy import ndimage
-
 
 # ASCII printable characters (95 total)
 ASCII_PRINTABLE = (
@@ -96,7 +93,7 @@ class FontDeduplicator:
         """
         self.threshold = threshold
 
-    def compute_phash(self, font_path: str, sample_text: str = "The quick brown") -> Optional[str]:
+    def compute_phash(self, font_path: str, sample_text: str = "The quick brown") -> str | None:
         """Compute perceptual hash for a font.
 
         Renders sample text using the font and computes a perceptual hash
@@ -120,7 +117,7 @@ class FontDeduplicator:
         except Exception:
             return None
 
-    def find_duplicates(self, font_scores: List[Dict]) -> List[List[Dict]]:
+    def find_duplicates(self, font_scores: list[dict]) -> list[list[dict]]:
         """Find duplicate fonts based on perceptual hash.
 
         Groups fonts by their perceptual hash similarity, finding both
@@ -176,9 +173,9 @@ class FontDeduplicator:
 
     def select_best_from_groups(
         self,
-        duplicate_groups: List[List[Dict]],
+        duplicate_groups: list[list[dict]],
         score_key: str = 'overall'
-    ) -> Tuple[List[Dict], List[Dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         """From each duplicate group, select the best font to keep.
 
         Ranks fonts within each group by a score key and selects the
@@ -233,7 +230,7 @@ class FontScorer:
         """
         self.render_size = render_size
 
-    def score_font(self, font_path: str) -> Dict:
+    def score_font(self, font_path: str) -> dict:
         """Score a font on multiple criteria.
 
         Evaluates character coverage, visual style, and computes a
@@ -352,7 +349,7 @@ class CursiveDetector:
         self.connectivity_threshold = connectivity_threshold
         self.context_threshold = context_threshold
 
-    def check(self, font_path: str, test_word: str = "minimum") -> Tuple[bool, float]:
+    def check(self, font_path: str, test_word: str = "minimum") -> tuple[bool, float]:
         """Check if a font is cursive by analyzing stroke connectivity.
 
         Renders a test word and counts connected components. Cursive fonts
@@ -427,7 +424,7 @@ class CursiveDetector:
         self,
         font_path: str,
         test_chars: str = "aeimnou"
-    ) -> Tuple[bool, float, Dict[str, float]]:
+    ) -> tuple[bool, float, dict[str, float]]:
         """Detect contextual alternates by comparing isolated vs in-word glyphs.
 
         Cursive fonts often have different glyphs depending on position
@@ -469,7 +466,7 @@ class CursiveDetector:
 
         return has_contextual, avg_diff, differences
 
-    def _compare_glyph_contexts(self, font: ImageFont.FreeTypeFont, char: str) -> Optional[float]:
+    def _compare_glyph_contexts(self, font: ImageFont.FreeTypeFont, char: str) -> float | None:
         """Compare a character in two different word contexts.
 
         For print fonts, 'a' in "oao" should look identical to 'a' in "nan".
@@ -512,7 +509,7 @@ class CursiveDetector:
         char: str,
         size: int,
         padding: int
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """Render a single character in isolation.
 
         Args:
@@ -560,7 +557,7 @@ class CursiveDetector:
         char_index: int,
         size: int,
         padding: int
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """Extract a specific character from a rendered word.
 
         Renders the full word and crops out the target character based
@@ -671,7 +668,7 @@ class CursiveDetector:
 
         return normalized
 
-    def check_all(self, font_path: str) -> Dict:
+    def check_all(self, font_path: str) -> dict:
         """Run all cursive detection methods and return combined result.
 
         Executes both connectivity and contextual detection, combining
@@ -738,7 +735,7 @@ class CompletenessChecker:
         """
         self.required_chars = required_chars
 
-    def check(self, font_path: str) -> Tuple[float, List[str]]:
+    def check(self, font_path: str) -> tuple[float, list[str]]:
         """Check which characters a font can render.
 
         Attempts to render each required character and checks if any
@@ -804,8 +801,8 @@ class CharacterRenderer:
         self,
         font_path: str,
         char: str,
-        output_dir: Optional[str] = None
-    ) -> Tuple[Optional[Image.Image], Optional[str]]:
+        output_dir: str | None = None
+    ) -> tuple[Image.Image | None, str | None]:
         """Render a single character.
 
         Creates a grayscale image with the character centered and scaled
@@ -883,7 +880,7 @@ class CharacterRenderer:
         font_path: str,
         output_dir: str,
         chars: str = ASCII_PRINTABLE
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Render all characters from a font.
 
         Renders each character in the given set and saves to the output

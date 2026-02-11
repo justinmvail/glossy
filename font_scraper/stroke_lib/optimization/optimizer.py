@@ -29,13 +29,15 @@ Example usage:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import List, Optional, Callable
+
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
 import numpy as np
 
-from ..domain.geometry import Stroke, BBox
-from .strategies import OptimizationStrategy, OptimizationResult
+from ..domain.geometry import BBox
+from .strategies import OptimizationResult, OptimizationStrategy
 
 
 @dataclass
@@ -65,14 +67,14 @@ class StrokeOptimizer:
         >>> optimizer.add_strategy(GreedyStrategy())
         >>> result = optimizer.optimize(mask, templates, bbox)
     """
-    strategies: List[OptimizationStrategy] = field(default_factory=list)
+    strategies: list[OptimizationStrategy] = field(default_factory=list)
     score_threshold: float = 0.95  # Stop early if score exceeds this
-    progress_callback: Optional[Callable[[OptimizationResult, str], None]] = None
+    progress_callback: Callable[[OptimizationResult, str], None] | None = None
 
     def optimize(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox,
         time_budget: float = 10.0,
     ) -> OptimizationResult:
@@ -135,7 +137,7 @@ class StrokeOptimizer:
 
         return best_result
 
-    def add_strategy(self, strategy: OptimizationStrategy) -> 'StrokeOptimizer':
+    def add_strategy(self, strategy: OptimizationStrategy) -> StrokeOptimizer:
         """Add a strategy to the pipeline (fluent interface).
 
         Appends a strategy to the end of the optimization pipeline.
@@ -156,7 +158,7 @@ class StrokeOptimizer:
 
 
 def create_default_optimizer(
-    progress_callback: Optional[Callable] = None
+    progress_callback: Callable | None = None
 ) -> StrokeOptimizer:
     """Create optimizer with default strategy pipeline.
 

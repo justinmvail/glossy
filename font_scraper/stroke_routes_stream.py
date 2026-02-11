@@ -57,8 +57,9 @@ from flask import Response, request
 from scipy.ndimage import distance_transform_edt
 from scipy.optimize import differential_evolution, minimize
 from scipy.spatial import cKDTree
+
 from stroke_core import min_strokes, skel_strokes
-from stroke_flask import app, get_db, get_font
+from stroke_flask import app, get_font
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud

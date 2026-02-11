@@ -42,16 +42,13 @@ Note:
     inversion if needed.
 """
 
-import os
 from pathlib import Path
-from typing import Tuple, List, Dict, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-
 
 # EMNIST ByClass has 62 classes
 # Mapping from class index to character
@@ -163,7 +160,7 @@ class EMNISTClassifier:
     MODEL_PATH = Path(__file__).parent / "emnist_model.pt"
     """Path: Default location for pre-trained model weights."""
 
-    def __init__(self, device: Optional[str] = None):
+    def __init__(self, device: str | None = None):
         """Initialize the classifier.
 
         Args:
@@ -176,7 +173,7 @@ class EMNISTClassifier:
         self.model = None
         self.classes = EMNIST_CLASSES
 
-    def load_model(self, model_path: Optional[Path] = None):
+    def load_model(self, model_path: Path | None = None):
         """Load pre-trained model weights.
 
         If weights file doesn't exist, trains a new model on EMNIST
@@ -216,8 +213,8 @@ class EMNISTClassifier:
             epochs: Number of training epochs.
             batch_size: Batch size for training.
         """
-        from torchvision import datasets, transforms
         from torch.utils.data import DataLoader
+        from torchvision import datasets, transforms
 
         print("Downloading EMNIST dataset (this may take a few minutes)...")
 
@@ -333,7 +330,7 @@ class EMNISTClassifier:
         tensor = torch.from_numpy(img_array).unsqueeze(0).unsqueeze(0)
         return tensor.to(self.device)
 
-    def classify(self, image: Image.Image) -> Tuple[str, float, List[Tuple[str, float]]]:
+    def classify(self, image: Image.Image) -> tuple[str, float, list[tuple[str, float]]]:
         """Classify a single character image.
 
         Args:
@@ -369,7 +366,7 @@ class EMNISTClassifier:
 
         return predicted_char, confidence, top3
 
-    def get_scores(self, image: Image.Image) -> Dict[str, float]:
+    def get_scores(self, image: Image.Image) -> dict[str, float]:
         """Get probability scores for all 62 characters.
 
         Args:
@@ -396,7 +393,7 @@ class EMNISTClassifier:
         self,
         stroke_image: Image.Image,
         expected_char: str
-    ) -> Tuple[bool, str, float, float]:
+    ) -> tuple[bool, str, float, float]:
         """Validate if a stroke image matches the expected character.
 
         Useful for quality checking generated stroke data by verifying

@@ -59,7 +59,6 @@ Example:
 import base64
 import io
 import json
-from typing import Any
 
 import numpy as np
 from flask import Response, jsonify, render_template, request, send_file
@@ -67,12 +66,12 @@ from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
 from scipy.ndimage import distance_transform_edt
 from skimage.morphology import thin
+
 from stroke_flask import (
     CHARS,
     STROKE_COLORS,
     app,
     font_repository,
-    get_db,
     get_font,
     resolve_font_path,
     validate_char_param,
@@ -86,7 +85,6 @@ from stroke_rendering import (
     render_glyph_mask,
     render_text_for_analysis,
 )
-
 
 # Alias for backward compatibility
 _font = get_font

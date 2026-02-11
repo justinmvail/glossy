@@ -46,9 +46,10 @@ Example usage:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import List, Tuple, Iterator
+
 import math
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -163,7 +164,7 @@ class Point:
             return Point(0.0, 0.0)
         return self / length
 
-    def to_tuple(self) -> Tuple[float, float]:
+    def to_tuple(self) -> tuple[float, float]:
         """Convert to tuple for compatibility.
 
         Returns:
@@ -171,7 +172,7 @@ class Point:
         """
         return (self.x, self.y)
 
-    def to_int_tuple(self) -> Tuple[int, int]:
+    def to_int_tuple(self) -> tuple[int, int]:
         """Convert to integer tuple for pixel operations.
 
         Returns:
@@ -179,7 +180,7 @@ class Point:
         """
         return (int(round(self.x)), int(round(self.y)))
 
-    def to_list(self) -> List[float]:
+    def to_list(self) -> list[float]:
         """Convert to list for JSON serialization.
 
         Returns:
@@ -188,7 +189,7 @@ class Point:
         return [float(self.x), float(self.y)]
 
     @classmethod
-    def from_tuple(cls, t: Tuple[float, float]) -> Point:
+    def from_tuple(cls, t: tuple[float, float]) -> Point:
         """Create from tuple.
 
         Args:
@@ -200,7 +201,7 @@ class Point:
         return cls(t[0], t[1])
 
     @classmethod
-    def from_list(cls, lst: List[float]) -> Point:
+    def from_list(cls, lst: list[float]) -> Point:
         """Create from list.
 
         Args:
@@ -307,7 +308,7 @@ class BBox:
         return (self.x_min <= point.x <= self.x_max and
                 self.y_min <= point.y <= self.y_max)
 
-    def to_tuple(self) -> Tuple[float, float, float, float]:
+    def to_tuple(self) -> tuple[float, float, float, float]:
         """Convert to tuple for compatibility.
 
         Returns:
@@ -316,7 +317,7 @@ class BBox:
         return (self.x_min, self.y_min, self.x_max, self.y_max)
 
     @classmethod
-    def from_tuple(cls, t: Tuple[float, float, float, float]) -> BBox:
+    def from_tuple(cls, t: tuple[float, float, float, float]) -> BBox:
         """Create from tuple.
 
         Args:
@@ -328,7 +329,7 @@ class BBox:
         return cls(t[0], t[1], t[2], t[3])
 
     @classmethod
-    def from_points(cls, points: List[Point]) -> BBox:
+    def from_points(cls, points: list[Point]) -> BBox:
         """Create bounding box containing all points.
 
         Args:
@@ -411,7 +412,7 @@ class Stroke:
         >>> stroke.length()
         141.4213562373095
     """
-    points: List[Point] = field(default_factory=list)
+    points: list[Point] = field(default_factory=list)
 
     def __len__(self) -> int:
         """Return the number of points in the stroke.
@@ -516,7 +517,7 @@ class Stroke:
         """
         return Stroke(list(reversed(self.points)))
 
-    def to_list(self) -> List[List[float]]:
+    def to_list(self) -> list[list[float]]:
         """Convert to nested list for JSON serialization.
 
         Returns:
@@ -525,7 +526,7 @@ class Stroke:
         return [p.to_list() for p in self.points]
 
     @classmethod
-    def from_list(cls, lst: List[List[float]]) -> Stroke:
+    def from_list(cls, lst: list[list[float]]) -> Stroke:
         """Create from nested list.
 
         Args:
@@ -537,7 +538,7 @@ class Stroke:
         return cls([Point.from_list(p) for p in lst])
 
     @classmethod
-    def from_tuples(cls, tuples: List[Tuple[float, float]]) -> Stroke:
+    def from_tuples(cls, tuples: list[tuple[float, float]]) -> Stroke:
         """Create from list of tuples.
 
         Args:

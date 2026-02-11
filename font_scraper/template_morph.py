@@ -560,15 +560,13 @@ def refine_stroke(points: list, font_mask: np.ndarray,
         guaranteed to be inside the font mask.
     """
     h, w = font_mask.shape
-    outline = get_outline(font_mask)
-    outline_pts = np.argwhere(outline)[:, ::-1]  # (x, y)
     font_ys, font_xs = np.where(font_mask)
     if len(font_xs) == 0:
         return points
 
     pts = points.copy()
 
-    for iteration in range(max_iterations):
+    for _iteration in range(max_iterations):
         # Check which points are outside
         outside = []
         for i, (px, py) in enumerate(pts):

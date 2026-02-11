@@ -42,18 +42,18 @@ Command-line Arguments:
 """
 
 import argparse
+import io
+import json
 import os
 import re
 import time
 import zipfile
-import io
-from pathlib import Path
-from typing import List, Dict, Optional, Set
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-import json
 
 
 @dataclass
@@ -136,11 +136,11 @@ class DaFontScraper:
             'Accept-Language': 'en-US,en;q=0.5',
         })
 
-        self.fonts_found: List[FontInfo] = []
-        self.downloaded: Set[str] = set()
-        self.failed: List[str] = []
+        self.fonts_found: list[FontInfo] = []
+        self.downloaded: set[str] = set()
+        self.failed: list[str] = []
 
-    def scrape_category(self, category: str, max_pages: int = 10) -> List[FontInfo]:
+    def scrape_category(self, category: str, max_pages: int = 10) -> list[FontInfo]:
         """Scrape fonts from a specific DaFont category.
 
         Iterates through paginated category listings, parsing font information
@@ -188,7 +188,7 @@ class DaFontScraper:
 
         return fonts
 
-    def _parse_font_list(self, html: str, category: str) -> List[FontInfo]:
+    def _parse_font_list(self, html: str, category: str) -> list[FontInfo]:
         """Parse font list from category page HTML.
 
         Extracts font information from the HTML of a DaFont category page.
@@ -244,7 +244,7 @@ class DaFontScraper:
                     downloads=downloads
                 ))
 
-            except Exception as e:
+            except Exception:
                 continue
 
         # Fallback: parse download links directly
@@ -253,7 +253,7 @@ class DaFontScraper:
 
         return fonts
 
-    def _parse_font_list_alt(self, soup: BeautifulSoup, category: str) -> List[FontInfo]:
+    def _parse_font_list_alt(self, soup: BeautifulSoup, category: str) -> list[FontInfo]:
         """Alternative parsing method using download URLs.
 
         This fallback method extracts font information by finding download
@@ -331,8 +331,8 @@ class DaFontScraper:
             resp.raise_for_status()
 
             # DaFont serves ZIP files
-            if not resp.content[:4] == b'PK\x03\x04':
-                print(f"    Warning: Not a ZIP file")
+            if resp.content[:4] != b'PK\x03\x04':
+                print("    Warning: Not a ZIP file")
                 return False
 
             # Extract fonts from ZIP
@@ -355,11 +355,11 @@ class DaFontScraper:
                 self.downloaded.add(font.name)
                 return True
             else:
-                print(f"    No TTF/OTF files found in ZIP")
+                print("    No TTF/OTF files found in ZIP")
                 return False
 
         except zipfile.BadZipFile:
-            print(f"    Error: Invalid ZIP file")
+            print("    Error: Invalid ZIP file")
             self.failed.append(font.name)
             return False
         except requests.RequestException as e:
@@ -388,10 +388,10 @@ class DaFontScraper:
 
     def scrape_and_download(
         self,
-        categories: List[str] = None,
+        categories: list[str] = None,
         max_pages: int = 10,
         max_fonts: int = None
-    ) -> Dict:
+    ) -> dict:
         """Scrape and download fonts from specified categories.
 
         This is the main entry point for the scraper. It coordinates the

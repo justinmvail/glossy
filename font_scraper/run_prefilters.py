@@ -46,16 +46,16 @@ Note:
 
 import argparse
 import json
-import sys
 from pathlib import Path
+
 from tqdm import tqdm
 
-from db_schema import init_db, FontDB
+from db_schema import FontDB, init_db
 from font_utils import (
     CompletenessChecker,
+    CursiveDetector,
     FontDeduplicator,
     FontScorer,
-    CursiveDetector,
 )
 
 
@@ -261,9 +261,7 @@ def run_pipeline(db_path: str, fonts_dir: str):
         print(f"Keeping {len(keep_fonts)}, removing {len(remove_fonts)} duplicates")
 
         # Update database with dedup results
-        group_id = 0
-        for group in duplicate_groups:
-            group_id += 1
+        for group_id, group in enumerate(duplicate_groups, start=1):
             sorted_group = sorted(group, key=lambda x: x.get('overall', 0), reverse=True)
 
             for i, font in enumerate(sorted_group):

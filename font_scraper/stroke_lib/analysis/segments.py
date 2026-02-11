@@ -30,11 +30,11 @@ Example usage:
 """
 
 from __future__ import annotations
+
 import math
-from typing import Dict, List, Set, Tuple
 from collections import defaultdict
 
-from ..domain.geometry import Segment, Point
+from ..domain.geometry import Point, Segment
 from ..domain.skeleton import SkeletonInfo
 
 
@@ -60,7 +60,7 @@ class SegmentClassifier:
         >>> vertical = classifier.find_vertical_segments(segments)
     """
 
-    def classify(self, info: SkeletonInfo) -> List[Segment]:
+    def classify(self, info: SkeletonInfo) -> list[Segment]:
         """Find and classify all skeleton segments.
 
         Traces segments starting from endpoints and junction pixels in the
@@ -122,7 +122,7 @@ class SegmentClassifier:
 
         return segments
 
-    def find_vertical_segments(self, segments: List[Segment]) -> List[Segment]:
+    def find_vertical_segments(self, segments: list[Segment]) -> list[Segment]:
         """Filter to only vertical segments (60-120 degree angle).
 
         Vertical segments are those where the absolute angle is between
@@ -136,7 +136,7 @@ class SegmentClassifier:
         """
         return [s for s in segments if s.is_vertical]
 
-    def find_horizontal_segments(self, segments: List[Segment]) -> List[Segment]:
+    def find_horizontal_segments(self, segments: list[Segment]) -> list[Segment]:
         """Filter to only horizontal segments.
 
         Horizontal segments are those where the absolute angle is less than
@@ -152,8 +152,8 @@ class SegmentClassifier:
 
     def _build_junction_connectivity(
         self,
-        vertical: List[Segment]
-    ) -> Dict[int, List[int]]:
+        vertical: list[Segment]
+    ) -> dict[int, list[int]]:
         """Build a mapping from junction indices to segment indices.
 
         Args:
@@ -172,9 +172,9 @@ class SegmentClassifier:
 
     def _find_connected_chains(
         self,
-        vertical: List[Segment],
-        junction_to_segs: Dict[int, List[int]]
-    ) -> List[List[int]]:
+        vertical: list[Segment],
+        junction_to_segs: dict[int, list[int]]
+    ) -> list[list[int]]:
         """Find connected chains of segments via BFS.
 
         Args:
@@ -215,11 +215,11 @@ class SegmentClassifier:
 
     def _score_chain(
         self,
-        chain: List[int],
-        vertical: List[Segment],
+        chain: list[int],
+        vertical: list[Segment],
         template_start: Point,
         template_end: Point
-    ) -> Tuple[float, Tuple[Point, Point] | None]:
+    ) -> tuple[float, tuple[Point, Point] | None]:
         """Score a chain by distance to template positions.
 
         Args:
@@ -257,10 +257,10 @@ class SegmentClassifier:
 
     def find_best_vertical_chain(
         self,
-        segments: List[Segment],
+        segments: list[Segment],
         template_start: Point,
         template_end: Point
-    ) -> Tuple[Point, Point] | None:
+    ) -> tuple[Point, Point] | None:
         """Find vertical segment chain best matching template positions.
 
         Searches for connected chains of vertical segments and scores them
@@ -310,11 +310,11 @@ class SegmentClassifier:
 
     def _trace_segment(
         self,
-        start: Tuple[int, int],
-        neighbor: Tuple[int, int],
+        start: tuple[int, int],
+        neighbor: tuple[int, int],
         info: SkeletonInfo,
-        visited_edges: Set[Tuple]
-    ) -> List[Tuple[int, int]] | None:
+        visited_edges: set[tuple]
+    ) -> list[tuple[int, int]] | None:
         """Trace a single segment from start through neighbor.
 
         Follows the skeleton path from the start point through the initial

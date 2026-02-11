@@ -38,6 +38,7 @@ from typing import Any
 import numpy as np
 from flask import Response, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw
+
 from stroke_flask import (
     CHARS,
     DEFAULT_CANVAS_SIZE,

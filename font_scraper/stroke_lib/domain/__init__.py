@@ -46,8 +46,8 @@ Example usage:
             print(f"{m.marker_type.value} at {m.position}")
 """
 
-from .geometry import Point, BBox, Stroke, Segment
-from .skeleton import SkeletonInfo, JunctionCluster, Marker
+from .geometry import BBox, Point, Segment, Stroke
+from .skeleton import JunctionCluster, Marker, SkeletonInfo
 
 __all__ = [
     'Point', 'BBox', 'Stroke', 'Segment',

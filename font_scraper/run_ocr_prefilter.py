@@ -35,19 +35,16 @@ Note:
 """
 
 import argparse
+import json
+import os
 import subprocess
 import tempfile
 import time
-import json
-import os
-import sys
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
 from db_schema import FontDB
-
 
 SAMPLE_TEXT = "Hello World 123"
 
@@ -71,7 +68,7 @@ def render_sample(font_path: str, output_path: str) -> bool:
 
     try:
         font = ImageFont.truetype(font_path, font_size)
-    except Exception as e:
+    except Exception:
         return False
 
     # Calculate size
@@ -508,7 +505,7 @@ def run_prefilter(db_path: str, threshold: float = 0.7):
     print(f"  render:     {timings['render']:>7.2f}s")
     print(f"  ocr:        {timings['ocr']:>7.2f}s")
     print(f"  db_update:  {timings['db_update']:>7.2f}s")
-    print(f"  ─────────────────────────")
+    print("  ─────────────────────────")
     print(f"  TOTAL:      {timings['total']:>7.2f}s ({timings['total']/60:.1f} min)")
 
     # Show some examples

@@ -32,12 +32,13 @@ Example usage:
 """
 
 from __future__ import annotations
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Protocol
+
+from dataclasses import dataclass
+from typing import Protocol
+
 import numpy as np
 
-from ..domain.geometry import Stroke, BBox
+from ..domain.geometry import BBox, Stroke
 
 
 @dataclass
@@ -65,9 +66,9 @@ class OptimizationResult:
         >>> print(f"Score: {result.score:.3f}")
         >>> print(f"Found {len(result.strokes)} strokes")
     """
-    strokes: List[Stroke]
+    strokes: list[Stroke]
     score: float
-    params: Optional[np.ndarray] = None
+    params: np.ndarray | None = None
     converged: bool = False
     iterations: int = 0
 
@@ -102,9 +103,9 @@ class OptimizationStrategy(Protocol):
     def optimize(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox,
-        initial_params: Optional[np.ndarray] = None,
+        initial_params: np.ndarray | None = None,
         time_budget: float = 5.0,
     ) -> OptimizationResult:
         """Run optimization.
@@ -158,9 +159,9 @@ class AffineStrategy:
     def optimize(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox,
-        initial_params: Optional[np.ndarray] = None,
+        initial_params: np.ndarray | None = None,
         time_budget: float = 5.0,
     ) -> OptimizationResult:
         """Optimize via affine transformation.
@@ -216,7 +217,7 @@ class AffineStrategy:
     def _compute_coverage(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         params: np.ndarray,
         bbox: BBox
     ) -> float:
@@ -240,9 +241,9 @@ class AffineStrategy:
     def _params_to_strokes(
         self,
         params: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox
-    ) -> List[Stroke]:
+    ) -> list[Stroke]:
         """Convert parameters to stroke objects.
 
         Applies the affine transformation to template shapes and
@@ -283,9 +284,9 @@ class GreedyStrategy:
     def optimize(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox,
-        initial_params: Optional[np.ndarray] = None,
+        initial_params: np.ndarray | None = None,
         time_budget: float = 5.0,
     ) -> OptimizationResult:
         """Optimize each shape greedily.
@@ -338,7 +339,7 @@ class GreedyStrategy:
         bbox: BBox,
         shape_index: int,
         total_shapes: int
-    ) -> tuple[Optional[Stroke], float]:
+    ) -> tuple[Stroke | None, float]:
         """Optimize a single shape.
 
         Performs local optimization for one template shape.
@@ -386,9 +387,9 @@ class JointRefinementStrategy:
     def optimize(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox,
-        initial_params: Optional[np.ndarray] = None,
+        initial_params: np.ndarray | None = None,
         time_budget: float = 5.0,
     ) -> OptimizationResult:
         """Joint optimization of all shapes.
@@ -409,8 +410,9 @@ class JointRefinementStrategy:
         Returns:
             OptimizationResult with jointly optimized strokes.
         """
-        from scipy.optimize import differential_evolution
         import time
+
+        from scipy.optimize import differential_evolution
 
         if initial_params is None or len(templates) == 0:
             return OptimizationResult([], -1.0)
@@ -447,7 +449,7 @@ class JointRefinementStrategy:
             iterations=result.nit,
         )
 
-    def _compute_bounds(self, n_params: int, bbox: BBox) -> List[tuple]:
+    def _compute_bounds(self, n_params: int, bbox: BBox) -> list[tuple]:
         """Compute parameter bounds.
 
         Generates bounds for each parameter based on the bounding box
@@ -466,7 +468,7 @@ class JointRefinementStrategy:
     def _compute_score(
         self,
         mask: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         params: np.ndarray,
         bbox: BBox
     ) -> float:
@@ -488,9 +490,9 @@ class JointRefinementStrategy:
     def _params_to_strokes(
         self,
         params: np.ndarray,
-        templates: List[str],
+        templates: list[str],
         bbox: BBox
-    ) -> List[Stroke]:
+    ) -> list[Stroke]:
         """Convert parameters to strokes.
 
         Generates stroke objects from the optimized parameters.

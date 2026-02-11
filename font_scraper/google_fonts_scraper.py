@@ -40,13 +40,13 @@ Command-line Arguments:
 """
 
 import argparse
+import json
 import re
 import time
-from pathlib import Path
-from typing import List, Set, Dict
 from dataclasses import dataclass
+from pathlib import Path
+
 import requests
-import json
 
 
 @dataclass
@@ -63,8 +63,8 @@ class FontInfo:
     name: str
     family: str
     category: str
-    variants: List[str]
-    download_urls: Dict[str, str]  # variant -> url
+    variants: list[str]
+    download_urls: dict[str, str]  # variant -> url
 
     def to_dict(self):
         """Convert the FontInfo to a dictionary for JSON serialization.
@@ -164,8 +164,8 @@ class GoogleFontsScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; rv:60.0) Gecko/20100101 Firefox/60.0',
         })
 
-        self.downloaded: Set[str] = set()
-        self.failed: List[str] = []
+        self.downloaded: set[str] = set()
+        self.failed: list[str] = []
 
     def get_font_url(self, family: str, variant: str = 'regular') -> str:
         """Get the download URL for a font from the Google Fonts CSS API.
@@ -202,7 +202,7 @@ class GoogleFontsScraper:
             if urls:
                 return urls[0]
 
-        except Exception as e:
+        except Exception:
             pass
 
         return ''
@@ -227,7 +227,7 @@ class GoogleFontsScraper:
 
             url = self.get_font_url(family)
             if not url:
-                print(f"    Could not get download URL")
+                print("    Could not get download URL")
                 self.failed.append(family)
                 return False
 
@@ -260,7 +260,7 @@ class GoogleFontsScraper:
 
     def scrape_and_download(
         self,
-        fonts: List[str] = None,
+        fonts: list[str] = None,
         max_fonts: int = None
     ) -> dict:
         """Download specified fonts or all known handwriting fonts.

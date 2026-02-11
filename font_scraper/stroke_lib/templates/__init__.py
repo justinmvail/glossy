@@ -44,7 +44,7 @@ Example usage:
         serif_a = repo.get_variant('A', 'serif')
 """
 
-from .numpad import NumpadTemplate, NUMPAD_POS
+from .numpad import NUMPAD_POS, NumpadTemplate
 from .repository import TemplateRepository
 
 __all__ = ['NumpadTemplate', 'NUMPAD_POS', 'TemplateRepository']

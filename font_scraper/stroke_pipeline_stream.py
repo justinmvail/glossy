@@ -30,7 +30,8 @@ Note:
 from collections.abc import Generator
 from typing import Any
 
-from stroke_core import _merge_to_expected_count, _analyze_skeleton_legacy as analyze_skeleton, skel_strokes
+from stroke_core import _analyze_skeleton_legacy as analyze_skeleton
+from stroke_core import _merge_to_expected_count, skel_strokes
 from stroke_dataclasses import parse_stroke_template
 from stroke_flask import resolve_font_path
 from stroke_pipeline import MinimalStrokePipeline

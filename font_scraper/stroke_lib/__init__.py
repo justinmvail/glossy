@@ -60,9 +60,9 @@ Attributes:
     __all__ (list): List of public symbols exported by this package.
 """
 
-from .domain import Point, BBox, Stroke, Segment, SkeletonInfo, Marker
-from .analysis import SkeletonAnalyzer, SegmentClassifier
-from .api import StrokeService, FontService
+from .analysis import SegmentClassifier, SkeletonAnalyzer
+from .api import FontService, StrokeService
+from .domain import BBox, Marker, Point, Segment, SkeletonInfo, Stroke
 
 __all__ = [
     # Domain objects

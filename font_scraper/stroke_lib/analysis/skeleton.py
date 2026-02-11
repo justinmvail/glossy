@@ -39,12 +39,13 @@ Example usage:
 """
 
 from __future__ import annotations
-import numpy as np
-from typing import Optional, List, Set, Dict, Tuple
+
 from collections import defaultdict
 
-from ..domain.skeleton import SkeletonInfo, Marker, MarkerType
+import numpy as np
+
 from ..domain.geometry import Point, Stroke
+from ..domain.skeleton import Marker, MarkerType, SkeletonInfo
 
 # Distance threshold for suppressing termination markers near vertices
 NEAR_VERTEX_DISTANCE = 5
@@ -92,7 +93,7 @@ class SkeletonAnalyzer:
         """
         self.merge_distance = merge_distance
 
-    def analyze(self, mask: np.ndarray) -> Optional[SkeletonInfo]:
+    def analyze(self, mask: np.ndarray) -> SkeletonInfo | None:
         """Analyze skeleton of a binary mask.
 
         Extracts the morphological skeleton from the mask and builds a
@@ -165,7 +166,7 @@ class SkeletonAnalyzer:
             assigned=assigned,
         )
 
-    def detect_markers(self, mask: np.ndarray) -> List[Marker]:
+    def detect_markers(self, mask: np.ndarray) -> list[Marker]:
         """Detect vertex and termination markers from skeleton.
 
         Analyzes the skeleton to identify three types of markers:
@@ -242,7 +243,7 @@ class SkeletonAnalyzer:
 
         return markers
 
-    def to_strokes(self, mask: np.ndarray, min_stroke_len: int = 5) -> List[Stroke]:
+    def to_strokes(self, mask: np.ndarray, min_stroke_len: int = 5) -> list[Stroke]:
         """Extract stroke paths from skeleton.
 
         Traces connected paths through the skeleton graph and converts them
@@ -286,7 +287,7 @@ class SkeletonAnalyzer:
             for s in strokes
         ]
 
-    def _build_adjacency(self, skel_set: Set[Tuple[int, int]]) -> Dict[Tuple[int, int], Set[Tuple[int, int]]]:
+    def _build_adjacency(self, skel_set: set[tuple[int, int]]) -> dict[tuple[int, int], set[tuple[int, int]]]:
         """Build 8-connected adjacency graph.
 
         Creates a dictionary mapping each skeleton pixel to its set of
@@ -312,10 +313,10 @@ class SkeletonAnalyzer:
 
     def _cluster_junctions(
         self,
-        junction_pixels: Set[Tuple[int, int]],
-        adj: Dict,
-        skel_set: Set[Tuple[int, int]]
-    ) -> Tuple[List[Set[Tuple[int, int]]], Dict[Tuple[int, int], int]]:
+        junction_pixels: set[tuple[int, int]],
+        adj: dict,
+        skel_set: set[tuple[int, int]]
+    ) -> tuple[list[set[tuple[int, int]]], dict[tuple[int, int], int]]:
         """Cluster nearby junction pixels and merge close clusters.
 
         Groups connected junction pixels into clusters using BFS, then
@@ -401,7 +402,7 @@ class SkeletonAnalyzer:
 
         return final_clusters, final_assigned
 
-    def _merge_nearby_points(self, points: List[List[float]], threshold: float) -> None:
+    def _merge_nearby_points(self, points: list[list[float]], threshold: float) -> None:
         """Merge points that are closer than threshold (modifies in place).
 
         Iteratively merges the closest pair of points until no pairs are
@@ -438,13 +439,13 @@ class SkeletonAnalyzer:
 
     def _classify_junctions(
         self,
-        endpoints: Set[Tuple[int, int]],
-        junction_clusters: List[Set[Tuple[int, int]]],
-        junction_pixels: Set[Tuple[int, int]],
-        adj: Dict,
-        assigned: Dict,
-        vertices: List[List[float]]
-    ) -> List[bool]:
+        endpoints: set[tuple[int, int]],
+        junction_clusters: list[set[tuple[int, int]]],
+        junction_pixels: set[tuple[int, int]],
+        adj: dict,
+        assigned: dict,
+        vertices: list[list[float]]
+    ) -> list[bool]:
         """Classify junction clusters as vertex (True) or intersection (False).
 
         A junction is classified as a vertex if it has short paths leading
@@ -494,11 +495,11 @@ class SkeletonAnalyzer:
 
     def _find_absorbed_endpoints(
         self,
-        endpoints: Set[Tuple[int, int]],
-        junction_clusters: List[Set[Tuple[int, int]]],
-        adj: Dict,
-        assigned: Dict
-    ) -> Set[Tuple[int, int]]:
+        endpoints: set[tuple[int, int]],
+        junction_clusters: list[set[tuple[int, int]]],
+        adj: dict,
+        assigned: dict
+    ) -> set[tuple[int, int]]:
         """Find endpoints that should be absorbed into junction clusters.
 
         Identifies endpoints that are very close to junction clusters and
@@ -537,9 +538,9 @@ class SkeletonAnalyzer:
         return absorbed
 
     @staticmethod
-    def _trace_single_path(start: Tuple[int, int], neighbor: Tuple[int, int],
-                           info: SkeletonInfo, stop_set: Set,
-                           visited_edges: Set) -> Optional[List[Tuple[int, int]]]:
+    def _trace_single_path(start: tuple[int, int], neighbor: tuple[int, int],
+                           info: SkeletonInfo, stop_set: set,
+                           visited_edges: set) -> list[tuple[int, int]] | None:
         """Trace a single stroke path from start through neighbor.
 
         Follows the skeleton graph from start, preferring straight paths
@@ -593,8 +594,8 @@ class SkeletonAnalyzer:
         return path
 
     @staticmethod
-    def _pick_straightest_candidate(current: Tuple[int, int], path: List,
-                                     candidates: List) -> Tuple:
+    def _pick_straightest_candidate(current: tuple[int, int], path: list,
+                                     candidates: list) -> tuple:
         """Pick the candidate that continues most straight from current direction.
 
         Args:
@@ -629,7 +630,7 @@ class SkeletonAnalyzer:
 
         return next_pt, next_edge
 
-    def _trace_all_strokes(self, info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
+    def _trace_all_strokes(self, info: SkeletonInfo) -> list[list[tuple[int, int]]]:
         """Trace all stroke paths from the skeleton.
 
         Traces paths starting from endpoints first, then from junction
@@ -643,7 +644,7 @@ class SkeletonAnalyzer:
             pixel coordinate tuples.
         """
         stop_set = info.endpoints | info.junction_pixels
-        visited_edges: Set = set()
+        visited_edges: set = set()
         strokes = []
 
         # Trace from endpoints first
@@ -662,7 +663,7 @@ class SkeletonAnalyzer:
 
         return strokes
 
-    def _merge_strokes(self, strokes: List[List[Tuple[int, int]]], info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
+    def _merge_strokes(self, strokes: list[list[tuple[int, int]]], info: SkeletonInfo) -> list[list[tuple[int, int]]]:
         """Merge strokes that pass through junction clusters.
 
         Combines strokes that share a junction cluster endpoint and have
@@ -712,7 +713,7 @@ class SkeletonAnalyzer:
             best_score = float('inf')
             best_merge = None
 
-            for cid, entries in cluster_map.items():
+            for _cid, entries in cluster_map.items():
                 if len(entries) < 2:
                     continue
                 for ai in range(len(entries)):
@@ -741,7 +742,7 @@ class SkeletonAnalyzer:
 
         return strokes
 
-    def _absorb_stubs(self, strokes: List[List[Tuple[int, int]]], info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
+    def _absorb_stubs(self, strokes: list[list[tuple[int, int]]], info: SkeletonInfo) -> list[list[tuple[int, int]]]:
         """Absorb short stub strokes into longer neighbors.
 
         Identifies short strokes (stubs) that connect to junction clusters

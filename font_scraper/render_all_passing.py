@@ -27,8 +27,8 @@ Note:
 """
 
 import sqlite3
+
 from PIL import Image, ImageDraw, ImageFont
-from pathlib import Path
 
 # Configuration constants
 DB_PATH = 'fonts.db'
@@ -126,5 +126,6 @@ img.save(OUTPUT_PATH)
 print(f"Saved to {OUTPUT_PATH}")
 
 # Open it
-import subprocess
+import subprocess  # noqa: E402
+
 subprocess.run(['xdg-open', OUTPUT_PATH])

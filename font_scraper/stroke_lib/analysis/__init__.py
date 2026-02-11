@@ -32,7 +32,7 @@ Example usage:
         vertical = classifier.find_vertical_segments(segments)
 """
 
-from .skeleton import SkeletonAnalyzer
 from .segments import SegmentClassifier
+from .skeleton import SkeletonAnalyzer
 
 __all__ = ['SkeletonAnalyzer', 'SegmentClassifier']

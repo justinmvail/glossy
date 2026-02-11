@@ -37,6 +37,6 @@ Example usage:
         strokes = font_service.get_character_strokes(123, 'A')
 """
 
-from .services import StrokeService, FontService
+from .services import FontService, StrokeService
 
 __all__ = ['StrokeService', 'FontService']

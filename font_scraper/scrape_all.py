@@ -40,12 +40,12 @@ Command-line Arguments:
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import time
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import json
+from pathlib import Path
 
 
 def run_dafont(output_dir: str, pages: int, max_fonts: int = None) -> dict:
@@ -83,7 +83,7 @@ def run_dafont(output_dir: str, pages: int, max_fonts: int = None) -> dict:
         print(f"[DaFont] Error: {result.stderr}")
         return {'source': 'dafont', 'error': result.stderr}
 
-    print(f"[DaFont] Complete")
+    print("[DaFont] Complete")
     return {'source': 'dafont', 'output': result.stdout}
 
 
@@ -121,7 +121,7 @@ def run_fontspace(output_dir: str, pages: int, max_fonts: int = None) -> dict:
         print(f"[FontSpace] Error: {result.stderr}")
         return {'source': 'fontspace', 'error': result.stderr}
 
-    print(f"[FontSpace] Complete")
+    print("[FontSpace] Complete")
     return {'source': 'fontspace', 'output': result.stdout}
 
 
@@ -157,7 +157,7 @@ def run_google(output_dir: str, max_fonts: int = None) -> dict:
         print(f"[Google] Error: {result.stderr}")
         return {'source': 'google', 'error': result.stderr}
 
-    print(f"[Google] Complete")
+    print("[Google] Complete")
     return {'source': 'google', 'output': result.stdout}
 
 

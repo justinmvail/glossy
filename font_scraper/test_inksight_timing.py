@@ -35,11 +35,10 @@ Note:
     the InkSight model to be located at /home/server/inksight/model.
 """
 
-import sqlite3
-import time
-import subprocess
-import json
 import os
+import sqlite3
+import subprocess
+import time
 
 DB_PATH = 'fonts.db'
 
@@ -173,8 +172,8 @@ else:
 
     print(f"  Total characters: {total_chars:,}")
     print()
-    print(f"  Single container per font:")
+    print("  Single container per font:")
     print(f"    {total_single_container_per_font/60:.1f} minutes ({total_single_container_per_font/3600:.1f} hours)")
     print()
-    print(f"  Batch mode (one container):")
+    print("  Batch mode (one container):")
     print(f"    {total_batch/60:.1f} minutes ({total_batch/3600:.1f} hours)")

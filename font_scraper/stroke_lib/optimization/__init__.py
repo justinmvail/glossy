@@ -48,14 +48,14 @@ Example usage:
         result = optimizer.optimize(mask, templates, bbox)
 """
 
+from .optimizer import StrokeOptimizer
 from .strategies import (
-    OptimizationStrategy,
-    OptimizationResult,
     AffineStrategy,
     GreedyStrategy,
     JointRefinementStrategy,
+    OptimizationResult,
+    OptimizationStrategy,
 )
-from .optimizer import StrokeOptimizer
 
 __all__ = [
     'OptimizationStrategy',

@@ -26,8 +26,9 @@ Note:
     (fewer than 2) are skipped during rendering.
 """
 
-import sqlite3
 import json
+import sqlite3
+
 from PIL import Image, ImageDraw
 
 # Database connection with Row factory for dict-like access
@@ -127,5 +128,6 @@ print(f"Font: {font_name}")
 conn.close()
 
 # Open it
-import subprocess
+import subprocess  # noqa: E402
+
 subprocess.run(['xdg-open', output])

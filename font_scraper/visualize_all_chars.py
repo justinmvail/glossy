@@ -25,8 +25,9 @@ Note:
     characters.strokes_raw column.
 """
 
-import sqlite3
 import json
+import sqlite3
+
 from PIL import Image, ImageDraw, ImageFont
 
 # Database connection with Row factory for dict-like access
@@ -153,5 +154,6 @@ print(f"Saved to {output}")
 conn.close()
 
 # Open it
-import subprocess
+import subprocess  # noqa: E402
+
 subprocess.run(['xdg-open', output])

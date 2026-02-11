@@ -35,18 +35,19 @@ Attributes:
     NUMPAD_POS: Numpad region position mappings (1-9 grid).
 """
 
-import sys
 import json
-import numpy as np
+import sys
 from pathlib import Path
+
+import numpy as np
 
 # Add parent dir to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from stroke_core import min_strokes as minimal_strokes_from_skeleton, _analyze_skeleton_legacy as _analyze_skeleton
-from stroke_rendering import render_glyph_mask
+from stroke_core import min_strokes as minimal_strokes_from_skeleton
 from stroke_flask import resolve_font_path
-from stroke_templates import NUMPAD_TEMPLATES, NUMPAD_POS
+from stroke_rendering import render_glyph_mask
+from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATES
 
 
 def compute_stroke_coverage(strokes, mask, stroke_width=8):

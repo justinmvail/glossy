@@ -240,7 +240,7 @@ def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
     best_score = float('inf')
     best_merge = None
 
-    for cluster_id, entries in cluster_map.items():
+    for _cluster_id, entries in cluster_map.items():
         if len(entries) < 2:
             continue
         for ai in range(len(entries)):
@@ -431,10 +431,9 @@ def _remove_short_cross_strokes(strokes: list[list[tuple]], cid: int,
         s = strokes[sk]
         s_sc = endpoint_cluster(s, False, assigned)
         s_ec = endpoint_cluster(s, True, assigned)
-        if s_sc >= 0 and s_ec >= 0 and len(s) < threshold_len:
-            if s_sc == cid or s_ec == cid:
-                strokes.pop(sk)
-                return True
+        if s_sc >= 0 and s_ec >= 0 and len(s) < threshold_len and (s_sc == cid or s_ec == cid):
+            strokes.pop(sk)
+            return True
     return False
 
 

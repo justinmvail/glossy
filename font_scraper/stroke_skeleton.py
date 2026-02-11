@@ -31,7 +31,8 @@ from scipy.spatial import cKDTree
 from skimage.morphology import skeletonize
 
 # Import shared utilities from stroke_lib (canonical implementations)
-from stroke_lib.utils.geometry import (
+# These are re-exported for backwards compatibility
+from stroke_lib.utils.geometry import (  # noqa: F401
     generate_straight_line,
     resample_path,
 )

@@ -61,9 +61,6 @@ Example:
 """
 
 import sqlite3
-from pathlib import Path
-from typing import Optional
-
 
 SCHEMA = """
 -- Fonts table
@@ -304,11 +301,11 @@ class FontDB:
         self,
         name: str,
         file_path: str,
-        source: Optional[str] = None,
-        url: Optional[str] = None,
-        category: Optional[str] = None,
-        license: Optional[str] = None,
-        variant: Optional[str] = None
+        source: str | None = None,
+        url: str | None = None,
+        category: str | None = None,
+        license: str | None = None,
+        variant: str | None = None
     ) -> int:
         """Add a font to the database.
 
@@ -341,17 +338,17 @@ class FontDB:
     def update_checks(
         self,
         font_id: int,
-        completeness_score: Optional[float] = None,
-        missing_glyphs: Optional[str] = None,
-        is_duplicate: Optional[bool] = None,
-        duplicate_group_id: Optional[int] = None,
-        keep_in_group: Optional[bool] = None,
-        connectivity_score: Optional[float] = None,
-        is_cursive: Optional[bool] = None,
-        prefilter_passed: Optional[bool] = None,
-        prefilter_confidence: Optional[float] = None,
-        prefilter_ocr_text: Optional[str] = None,
-        prefilter_image_path: Optional[str] = None
+        completeness_score: float | None = None,
+        missing_glyphs: str | None = None,
+        is_duplicate: bool | None = None,
+        duplicate_group_id: int | None = None,
+        keep_in_group: bool | None = None,
+        connectivity_score: float | None = None,
+        is_cursive: bool | None = None,
+        prefilter_passed: bool | None = None,
+        prefilter_confidence: float | None = None,
+        prefilter_ocr_text: str | None = None,
+        prefilter_image_path: str | None = None
     ):
         """Update font check results.
 
@@ -414,14 +411,14 @@ class FontDB:
         self,
         font_id: int,
         char: str,
-        image_path: Optional[str] = None,
-        strokes_raw: Optional[str] = None,
-        strokes_processed: Optional[str] = None,
-        point_count: Optional[int] = None,
-        ocr_result: Optional[str] = None,
-        ocr_confidence: Optional[float] = None,
-        ocr_match: Optional[bool] = None,
-        quality_score: Optional[float] = None
+        image_path: str | None = None,
+        strokes_raw: str | None = None,
+        strokes_processed: str | None = None,
+        point_count: int | None = None,
+        ocr_result: str | None = None,
+        ocr_confidence: float | None = None,
+        ocr_match: bool | None = None,
+        quality_score: float | None = None
     ) -> int:
         """Add or update a character record.
 
@@ -586,11 +583,11 @@ class FontDB:
         self,
         character_id: int,
         stage: str,
-        ocr_result: Optional[str] = None,
-        ocr_confidence: Optional[float] = None,
-        ocr_match: Optional[bool] = None,
-        image_path: Optional[str] = None,
-        model: Optional[str] = None
+        ocr_result: str | None = None,
+        ocr_confidence: float | None = None,
+        ocr_match: bool | None = None,
+        image_path: str | None = None,
+        model: str | None = None
     ) -> int:
         """Record an OCR run for a character.
 
@@ -637,7 +634,7 @@ class FontDB:
         self,
         font_id: int,
         reason_code: str,
-        details: Optional[str] = None
+        details: str | None = None
     ):
         """Record that a font was removed from the pipeline.
 
@@ -673,7 +670,7 @@ class FontDB:
         """, (font_id, reason_id, details))
         self.conn.commit()
 
-    def get_removed_fonts(self, reason_code: Optional[str] = None) -> list:
+    def get_removed_fonts(self, reason_code: str | None = None) -> list:
         """Get list of removed fonts, optionally filtered by reason.
 
         Args:

@@ -40,13 +40,13 @@ Example usage:
 
 from .geometry import (
     angle_between,
-    point_in_region,
-    smooth_stroke,
-    resample_path,
     constrain_to_mask,
     generate_straight_line,
+    point_in_region,
+    resample_path,
+    smooth_stroke,
 )
-from .rendering import render_glyph_mask, get_glyph_bbox
+from .rendering import get_glyph_bbox, render_glyph_mask
 
 __all__ = [
     'angle_between', 'point_in_region',

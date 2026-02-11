@@ -38,17 +38,17 @@ Example usage:
 """
 
 from __future__ import annotations
+
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 import numpy as np
 
-from ..domain.geometry import Stroke, BBox, Point
-from ..domain.skeleton import Marker
-from ..analysis.skeleton import SkeletonAnalyzer
 from ..analysis.segments import SegmentClassifier
-from ..utils.rendering import render_glyph_mask, get_glyph_bbox
+from ..analysis.skeleton import SkeletonAnalyzer
+from ..utils.rendering import get_glyph_bbox, render_glyph_mask
 
 # Logger for service errors
 _logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class StrokeService:
         self.skeleton_analyzer = SkeletonAnalyzer()
         self.segment_classifier = SegmentClassifier()
 
-    def detect_markers(self, font_path: str, char: str, canvas_size: int = 224) -> List[Dict]:
+    def detect_markers(self, font_path: str, char: str, canvas_size: int = 224) -> list[dict]:
         """Detect skeleton markers for a glyph.
 
         Renders the specified character from the font and analyzes its
@@ -128,7 +128,7 @@ class StrokeService:
         char: str,
         canvas_size: int = 224,
         min_stroke_len: int = 5
-    ) -> Optional[List[List[List[float]]]]:
+    ) -> list[list[list[float]]] | None:
         """Extract strokes from glyph skeleton.
 
         Renders the character, extracts its skeleton, and traces stroke
@@ -171,7 +171,7 @@ class StrokeService:
         font_path: str,
         char: str,
         canvas_size: int = 224
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Get comprehensive glyph information.
 
         Performs full skeleton analysis and returns a dictionary with
@@ -229,7 +229,7 @@ class StrokeService:
         font_path: str,
         text: str,
         size: int = 100
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Analyze shape metrics for text rendering.
 
         Renders the text and analyzes connected components to compute
@@ -254,8 +254,9 @@ class StrokeService:
             >>> print(metrics['shape_count'])
             5
         """
-        from ..utils.rendering import render_text_for_analysis
         from scipy import ndimage
+
+        from ..utils.rendering import render_text_for_analysis
 
         arr = render_text_for_analysis(font_path, text, size)
         if arr is None:
@@ -328,7 +329,7 @@ class FontService:
             return self._connection_factory()
         return sqlite3.connect(self.db_path)
 
-    def get_font_path(self, font_id: int) -> Optional[str]:
+    def get_font_path(self, font_id: int) -> str | None:
         """Get file path for a font by ID.
 
         Queries the database for the file path of a font with the given ID.
@@ -370,7 +371,7 @@ class FontService:
         self,
         font_id: int,
         char: str
-    ) -> Optional[List[List[List[float]]]]:
+    ) -> list[list[list[float]]] | None:
         """Get saved strokes for a character.
 
         Retrieves previously saved stroke data for a specific character
@@ -425,7 +426,7 @@ class FontService:
         self,
         font_id: int,
         char: str,
-        strokes: List[List[List[float]]]
+        strokes: list[list[list[float]]]
     ) -> bool:
         """Save strokes for a character.
 

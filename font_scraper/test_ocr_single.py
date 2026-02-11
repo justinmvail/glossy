@@ -38,13 +38,11 @@ Attributes:
 """
 
 import argparse
+import json
+import os
 import subprocess
 import tempfile
 import time
-import json
-import os
-import sys
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -289,7 +287,7 @@ print(json.dumps(result))
                 'python3', '/app/ocr.py', f'/data/{image_name}'
             ]
 
-            print(f"  Running: docker run --gpus all trocr:latest ...")
+            print("  Running: docker run --gpus all trocr:latest ...")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
             if result.returncode != 0:
@@ -375,7 +373,7 @@ print(json.dumps(result))
 
         # Check font exists
         if not os.path.exists(font['file_path']):
-            print(f"  ERROR: Font file not found!")
+            print("  ERROR: Font file not found!")
             return
 
         # Step 2: Render sample text
@@ -451,7 +449,7 @@ print(json.dumps(result))
         print(f"    (inference:   {result['timings']['inference']:>7.3f}s)")
         print(f"    (decode:      {result['timings']['decode']:>7.3f}s)")
         print(f"  postprocess:  {self.timings['postprocess']:>7.3f}s")
-        print(f"  ─────────────────────────")
+        print("  ─────────────────────────")
         print(f"  TOTAL:        {total_time:>7.3f}s")
 
         # Estimate for all fonts
@@ -479,12 +477,12 @@ print(json.dumps(result))
 
         # If we keep container running (batch mode)
         batch_total = result['timings']['model_load'] + (per_font_time * 321)
-        print(f"  Batch mode (keep container alive):")
+        print("  Batch mode (keep container alive):")
         print(f"    Estimated total: {batch_total/60:.1f} minutes")
 
         # If we restart container each time
         single_total = 321 * self.timings['docker_total']
-        print(f"  Single mode (restart container each time):")
+        print("  Single mode (restart container each time):")
         print(f"    Estimated total: {single_total/60:.1f} minutes")
 
         print()

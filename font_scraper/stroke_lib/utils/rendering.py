@@ -39,11 +39,9 @@ Example usage:
 """
 
 from __future__ import annotations
-import numpy as np
-from typing import Optional, Tuple
-from PIL import Image, ImageDraw, ImageFont
 
-from ..domain.geometry import BBox
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 # Import canonical implementation from stroke_rendering.
 # NOTE: This creates a dependency on the external stroke_rendering module.
@@ -52,8 +50,12 @@ from ..domain.geometry import BBox
 # For testing, mock stroke_rendering.render_glyph_mask before importing this module.
 from stroke_rendering import render_glyph_mask
 
+from ..domain.geometry import BBox
 
-def get_glyph_bbox(mask: np.ndarray) -> Optional[BBox]:
+__all__ = ['render_glyph_mask', 'get_glyph_bbox', 'render_text_for_analysis']
+
+
+def get_glyph_bbox(mask: np.ndarray) -> BBox | None:
     """Get bounding box of non-zero pixels in mask.
 
     Finds the smallest axis-aligned rectangle that contains all
@@ -88,7 +90,7 @@ def get_glyph_bbox(mask: np.ndarray) -> Optional[BBox]:
     )
 
 
-def render_text_for_analysis(font_path: str, text: str, size: int = 100) -> Optional[np.ndarray]:
+def render_text_for_analysis(font_path: str, text: str, size: int = 100) -> np.ndarray | None:
     """Render text and return as binary array for shape analysis.
 
     Renders a text string (can be multiple characters) and returns

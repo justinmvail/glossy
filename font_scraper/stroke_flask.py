@@ -52,7 +52,6 @@ import os
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
 from urllib.parse import quote as urlquote
 
 from flask import Flask

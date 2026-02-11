@@ -34,10 +34,10 @@ Attributes:
 
 import argparse
 import sqlite3
-from PIL import Image, ImageDraw, ImageFont
+
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
-from pathlib import Path
 
 DB_PATH = 'fonts.db'
 SAMPLE_TEXT = "Hello World!"

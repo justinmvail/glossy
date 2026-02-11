@@ -38,6 +38,7 @@ import logging
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial import cKDTree
+
 from stroke_scoring import score_raw_strokes
 from stroke_shapes import adaptive_radius, make_point_cloud
 

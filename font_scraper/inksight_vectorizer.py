@@ -77,14 +77,13 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple, Optional
-from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from scipy.interpolate import splev, splprep
 from scipy.ndimage import gaussian_filter1d
-from scipy.interpolate import splprep, splev
 
 
 @dataclass
@@ -143,7 +142,7 @@ class InkResult:
         >>> for i, stroke in enumerate(result.strokes):
         ...     print(f"  Stroke {i}: {len(stroke)} points")
     """
-    strokes: List[Stroke]
+    strokes: list[Stroke]
     image: Image.Image
     word: str
     font_path: str
@@ -212,7 +211,6 @@ class InkSightVectorizer:
             return
 
         import tensorflow as tf
-        import tensorflow_text  # Required for model
 
         print(f"Loading InkSight model from {self.model_path}...")
         self.model = tf.saved_model.load(self.model_path)
@@ -225,8 +223,8 @@ class InkSightVectorizer:
         word: str,
         size: int = 120,
         canvas_size: int = 512,
-        bg_color: Tuple[int, int, int] = (255, 255, 255),
-        fg_color: Tuple[int, int, int] = (0, 0, 0)
+        bg_color: tuple[int, int, int] = (255, 255, 255),
+        fg_color: tuple[int, int, int] = (0, 0, 0)
     ) -> Image.Image:
         """Render a word using the specified font.
 
@@ -266,7 +264,7 @@ class InkSightVectorizer:
         draw.text((x, y), word, font=font, fill=fg_color)
         return img
 
-    def _detokenize(self, tokens: List[int]) -> List[np.ndarray]:
+    def _detokenize(self, tokens: list[int]) -> list[np.ndarray]:
         """Convert InkSight tokens to stroke coordinates.
 
         InkSight outputs special tokens that encode coordinates:
@@ -317,7 +315,7 @@ class InkSightVectorizer:
 
         return strokes
 
-    def infer_strokes(self, image: Image.Image) -> List[np.ndarray]:
+    def infer_strokes(self, image: Image.Image) -> list[np.ndarray]:
         """Run InkSight inference on an image.
 
         Encodes the image, runs the model with the "Recognize and derender"
@@ -365,7 +363,7 @@ class InkSightVectorizer:
     # ==================== POST-PROCESSING ====================
 
     @staticmethod
-    def smart_filter(strokes: List[np.ndarray], min_points: int = 2) -> List[np.ndarray]:
+    def smart_filter(strokes: list[np.ndarray], min_points: int = 2) -> list[np.ndarray]:
         """Remove artifact strokes while preserving valid short strokes.
 
         InkSight sometimes produces single-point artifacts at the edges of the
@@ -478,7 +476,7 @@ class InkSightVectorizer:
         ray_dir: np.ndarray,
         seg_start: np.ndarray,
         seg_end: np.ndarray
-    ) -> Tuple[Optional[float], Optional[np.ndarray]]:
+    ) -> tuple[float | None, np.ndarray | None]:
         """Find intersection of a ray with a line segment.
 
         Uses parametric ray-segment intersection to find where a ray
@@ -518,9 +516,9 @@ class InkSightVectorizer:
 
     def extend_to_connect(
         self,
-        strokes: List[np.ndarray],
+        strokes: list[np.ndarray],
         max_extension: float = 8.0
-    ) -> List[np.ndarray]:
+    ) -> list[np.ndarray]:
         """Extend stroke endpoints to connect nearby strokes.
 
         For each stroke endpoint, casts a ray along the stroke's trajectory.
@@ -820,7 +818,6 @@ class OCRValidator:
         if self.model is not None:
             return
 
-        import torch
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
         print(f"Loading TrOCR model: {self.model_name}...")
@@ -833,7 +830,7 @@ class OCRValidator:
 
     def render_strokes(
         self,
-        strokes: List[Stroke],
+        strokes: list[Stroke],
         size: int = 384,
         stroke_width: int = 3,
         padding: int = 20
@@ -1081,7 +1078,7 @@ while True:
         result: InkResult,
         threshold: float = 0.8,
         case_sensitive: bool = False
-    ) -> Tuple[bool, str, float]:
+    ) -> tuple[bool, str, float]:
         """Validate an InkResult by checking if OCR can read it.
 
         Renders the strokes to an image, runs OCR, and compares the
@@ -1129,10 +1126,10 @@ while True:
 
     def filter_results(
         self,
-        results: List[InkResult],
+        results: list[InkResult],
         threshold: float = 0.8,
         verbose: bool = True
-    ) -> List[InkResult]:
+    ) -> list[InkResult]:
         """Filter a list of results, keeping only those that pass OCR validation.
 
         Useful for batch processing where some vectorizations may fail. Only

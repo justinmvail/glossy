@@ -41,8 +41,8 @@ Example usage:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, Set, List, Tuple, Optional
+
+from dataclasses import dataclass
 from enum import Enum
 
 from .geometry import Point
@@ -137,7 +137,7 @@ class JunctionCluster:
         >>> cluster.centroid
         Point(x=10.333333333333334, y=10.333333333333334)
     """
-    pixels: Set[Tuple[int, int]]
+    pixels: set[tuple[int, int]]
     index: int
 
     @property
@@ -156,7 +156,7 @@ class JunctionCluster:
         cy = sum(p[1] for p in self.pixels) / len(self.pixels)
         return Point(cx, cy)
 
-    def contains(self, point: Tuple[int, int]) -> bool:
+    def contains(self, point: tuple[int, int]) -> bool:
         """Check if a pixel is in this cluster.
 
         Args:
@@ -199,12 +199,12 @@ class SkeletonInfo:
         >>> info.is_stop_point((100, 50))
         True
     """
-    skel_set: Set[Tuple[int, int]]
-    adj: Dict[Tuple[int, int], Set[Tuple[int, int]]]
-    endpoints: Set[Tuple[int, int]]
-    junction_pixels: Set[Tuple[int, int]]
-    junction_clusters: List[Set[Tuple[int, int]]]
-    assigned: Dict[Tuple[int, int], int]  # pixel -> cluster index
+    skel_set: set[tuple[int, int]]
+    adj: dict[tuple[int, int], set[tuple[int, int]]]
+    endpoints: set[tuple[int, int]]
+    junction_pixels: set[tuple[int, int]]
+    junction_clusters: list[set[tuple[int, int]]]
+    assigned: dict[tuple[int, int], int]  # pixel -> cluster index
 
     @classmethod
     def from_dict(cls, d: dict) -> SkeletonInfo:
@@ -243,7 +243,7 @@ class SkeletonInfo:
             'assigned': self.assigned,
         }
 
-    def get_cluster_for_pixel(self, pixel: Tuple[int, int]) -> Optional[int]:
+    def get_cluster_for_pixel(self, pixel: tuple[int, int]) -> int | None:
         """Get the junction cluster index for a pixel, or None if not in a cluster.
 
         Args:
@@ -255,7 +255,7 @@ class SkeletonInfo:
         """
         return self.assigned.get(pixel)
 
-    def is_stop_point(self, pixel: Tuple[int, int]) -> bool:
+    def is_stop_point(self, pixel: tuple[int, int]) -> bool:
         """Check if pixel is an endpoint or junction pixel.
 
         Stop points are pixels where stroke tracing should stop,
