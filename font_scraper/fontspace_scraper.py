@@ -105,14 +105,14 @@ class FontSpaceScraper(FontSource):
             A list of FontMetadata objects representing all fonts found in the
             search results across all scraped pages.
         """
-        print(f"\nSearching FontSpace for: {query}")
+        logger.info("Searching FontSpace for: %s", query)
 
         fonts = []
         page = 1
 
         while page <= max_pages:
             url = f"{self.BASE_URL}/search?q={query}&p={page}"
-            print(f"  Page {page}: {url}")
+            logger.debug("Page %d: %s", page, url)
 
             try:
                 resp = self.session.get(url, timeout=30)
@@ -121,17 +121,17 @@ class FontSpaceScraper(FontSource):
                 page_fonts = self._parse_search_results(resp.text)
 
                 if not page_fonts:
-                    print(f"  No fonts found on page {page}, stopping.")
+                    logger.debug("No fonts found on page %d, stopping.", page)
                     break
 
                 fonts.extend(page_fonts)
-                print(f"  Found {len(page_fonts)} fonts (total: {len(fonts)})")
+                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
 
                 page += 1
                 time.sleep(self.rate_limit)
 
             except requests.RequestException as e:
-                print(f"  Error fetching page {page}: {e}")
+                logger.warning("Error fetching page %d: %s", page, e)
                 break
 
         return fonts
@@ -151,14 +151,14 @@ class FontSpaceScraper(FontSource):
             A list of FontMetadata objects representing all fonts found in the
             category across all scraped pages.
         """
-        print(f"\nScraping FontSpace category: {category}")
+        logger.info("Scraping FontSpace category: %s", category)
 
         fonts = []
         page = 1
 
         while page <= max_pages:
             url = f"{self.BASE_URL}/category/{category}?p={page}"
-            print(f"  Page {page}: {url}")
+            logger.debug("Page %d: %s", page, url)
 
             try:
                 resp = self.session.get(url, timeout=30)
@@ -167,17 +167,17 @@ class FontSpaceScraper(FontSource):
                 page_fonts = self._parse_search_results(resp.text)
 
                 if not page_fonts:
-                    print(f"  No fonts found on page {page}, stopping.")
+                    logger.debug("No fonts found on page %d, stopping.", page)
                     break
 
                 fonts.extend(page_fonts)
-                print(f"  Found {len(page_fonts)} fonts (total: {len(fonts)})")
+                logger.debug("Found %d fonts (total: %d)", len(page_fonts), len(fonts))
 
                 page += 1
                 time.sleep(self.rate_limit)
 
             except requests.RequestException as e:
-                print(f"  Error fetching page {page}: {e}")
+                logger.warning("Error fetching page %d: %s", page, e)
                 break
 
         return fonts
@@ -276,7 +276,7 @@ class FontSpaceScraper(FontSource):
                 return url
 
         except Exception as e:
-            print(f"    Error getting download URL: {e}")
+            logger.warning("Error getting download URL for %s: %s", font_url, e)
 
         return ''
 
@@ -298,7 +298,7 @@ class FontSpaceScraper(FontSource):
             return True
 
         try:
-            print(f"  Downloading: {font.name}")
+            logger.debug("Downloading: %s", font.name)
 
             # Get download URL if we don't have it
             if not font.download_url:
@@ -306,7 +306,7 @@ class FontSpaceScraper(FontSource):
                 time.sleep(0.5)
 
             if not font.download_url:
-                print("    Could not find download URL")
+                logger.warning("Could not find download URL for %s", font.name)
                 self.failed.append(font.name)
                 return False
 
@@ -317,11 +317,11 @@ class FontSpaceScraper(FontSource):
             if resp.content[:4] == b'PK\x03\x04':
                 extracted = self._extract_zip(resp.content)
                 if extracted > 0:
-                    print(f"    Extracted {extracted} font file(s)")
+                    logger.debug("Extracted %d font file(s) for %s", extracted, font.name)
                     self.downloaded.add(font.name)
                     return True
                 else:
-                    print("    No TTF/OTF files in ZIP")
+                    logger.warning("No TTF/OTF files in ZIP for %s", font.name)
                     return False
             else:
                 # Might be a direct font file
@@ -331,15 +331,15 @@ class FontSpaceScraper(FontSource):
                     safe_name = self.safe_filename(font.name) + ext
                     out_path = self.output_dir / safe_name
                     out_path.write_bytes(resp.content)
-                    print(f"    Saved {safe_name}")
+                    logger.debug("Saved %s", safe_name)
                     self.downloaded.add(font.name)
                     return True
 
-            print("    Unknown file format")
+            logger.warning("Unknown file format for %s", font.name)
             return False
 
         except Exception as e:
-            print(f"    Error: {e}")
+            logger.error("Error downloading %s: %s", font.name, e)
             self.failed.append(font.name)
             return False
 
@@ -432,12 +432,13 @@ class FontSpaceScraper(FontSource):
         # Support ScraperConfig
         if config is not None:
             return super().scrape_and_download(config)
-        print("=" * 60)
-        print("FontSpace Scraper")
-        print("=" * 60)
-        print(f"Output directory: {self.output_dir}")
-        print(f"Query/Category: {query}")
-        print(f"Max pages: {max_pages}")
+
+        logger.info("=" * 60)
+        logger.info("FontSpace Scraper")
+        logger.info("=" * 60)
+        logger.info("Output directory: %s", self.output_dir)
+        logger.info("Query/Category: %s", query)
+        logger.info("Max pages: %d", max_pages)
 
         # Scrape
         if use_category:
@@ -447,18 +448,18 @@ class FontSpaceScraper(FontSource):
 
         self.fonts_found = fonts
 
-        print(f"\nTotal fonts found: {len(fonts)}")
+        logger.info("Total fonts found: %d", len(fonts))
 
         # Limit if specified
         if max_fonts:
             fonts = fonts[:max_fonts]
-            print(f"Limiting to {max_fonts} fonts")
+            logger.info("Limiting to %d fonts", max_fonts)
 
         # Download
-        print(f"\nDownloading {len(fonts)} fonts...")
+        logger.info("Downloading %d fonts...", len(fonts))
 
         for i, font in enumerate(fonts):
-            print(f"[{i+1}/{len(fonts)}]", end='')
+            logger.debug("[%d/%d] Processing %s", i + 1, len(fonts), font.name)
             self.download_font(font)
             time.sleep(self.rate_limit)
 
@@ -476,12 +477,12 @@ class FontSpaceScraper(FontSource):
         with open(meta_path, 'w') as f:
             json.dump(metadata, f, indent=2)
 
-        print("\n" + "=" * 60)
-        print("COMPLETE")
-        print("=" * 60)
-        print(f"Fonts found: {len(self.fonts_found)}")
-        print(f"Fonts downloaded: {len(self.downloaded)}")
-        print(f"Failed: {len(self.failed)}")
+        logger.info("=" * 60)
+        logger.info("COMPLETE")
+        logger.info("=" * 60)
+        logger.info("Fonts found: %d", len(self.fonts_found))
+        logger.info("Fonts downloaded: %d", len(self.downloaded))
+        logger.info("Failed: %d", len(self.failed))
 
         return metadata
 

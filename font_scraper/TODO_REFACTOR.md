@@ -26,7 +26,7 @@ Generated: 2026-02-11 (Audit #2)
 ### HIGH - Silent Exception Swallowing
 10. [x] stroke_routes_core.py:567-568 - `except Exception:` with no logging - FIXED
 11. [x] stroke_routes_core.py:690-691 - `except Exception:` with no logging - FIXED
-12. [ ] stroke_routes_batch.py:367-370 - `except Exception: pass` (3 locations)
+12. [x] stroke_routes_batch.py:367-370 - `except Exception: pass` - NOT FOUND (may have been fixed previously)
 13. [x] stroke_routes_stream.py:369,409,674,773 - Silent `except Exception:` (4 locations) - FIXED
 14. [x] google_fonts_scraper.py:186,266 - Broad `except Exception as e:` catches - FIXED (print->logging)
 15. [ ] run_ocr_prefilter.py:71,246 - Silent/broad exception catches
@@ -64,11 +64,11 @@ Generated: 2026-02-11 (Audit #2)
 37. [ ] font_utils.py:680-683 - Hash comparison may fail silently
 
 ### HIGH - Inconsistent Logging
-38. [ ] fontspace_scraper.py - Uses print() instead of logger (30+ occurrences)
+38. [x] fontspace_scraper.py - Uses print() instead of logger (30+ occurrences) - FIXED
 39. [x] google_fonts_scraper.py - Mixes print() and logger.debug() - FIXED (all print->logger)
 40. [ ] run_ocr_prefilter.py - Uses print() throughout (50+ occurrences)
 41. [ ] run_connectivity_filter.py - Uses print() throughout (30+ occurrences)
-42. [ ] font_utils.py - Uses print() in utility functions (20+ occurrences)
+42. [x] font_utils.py - Uses print() in utility functions - NOT AN ISSUE (docstrings + CLI test output)
 
 ### HIGH - Missing Retry Logic (Scrapers)
 43. [ ] All scrapers: No retry on transient failures (RequestException breaks loop)
