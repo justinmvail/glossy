@@ -43,6 +43,23 @@ from stroke_shapes import adaptive_radius, make_point_cloud
 
 logger = logging.getLogger(__name__)
 
+# --- Affine optimization hyperparameters ---
+# Parameter bounds for global affine transformation
+AFFINE_TRANSLATE_BOUNDS = (-20, 20)  # pixels
+AFFINE_SCALE_BOUNDS = (0.7, 1.3)  # 70% to 130%
+AFFINE_ROTATION_BOUNDS = (-15, 15)  # degrees
+AFFINE_SHEAR_BOUNDS = (-0.3, 0.3)
+
+# Nelder-Mead optimizer settings
+NM_MAX_FUNC_EVALS = 800  # Maximum function evaluations
+NM_X_TOLERANCE = 0.1  # Parameter convergence tolerance
+NM_F_TOLERANCE = 0.002  # Function value convergence tolerance
+
+# Differential Evolution optimizer settings
+DE_MAX_ITERATIONS = 20  # Maximum generations
+DE_POPULATION_SIZE = 10  # Population size multiplier
+DE_TOLERANCE = 0.005  # Convergence tolerance
+
 
 def affine_transform_strokes(strokes: list[np.ndarray], params: tuple,
                              centroid: tuple[float, float]) -> list[np.ndarray]:
@@ -210,15 +227,17 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
             - Shear: [-0.3, 0.3]
 
         The Nelder-Mead phase uses adaptive simplex sizing and terminates after
-        800 function evaluations or when convergence criteria are met. The DE
-        phase uses a small population (10) and limited iterations (20) for speed.
+        NM_MAX_FUNC_EVALS function evaluations or when convergence criteria are
+        met. The DE phase uses DE_POPULATION_SIZE and DE_MAX_ITERATIONS for speed.
     """
     from scipy.optimize import differential_evolution, minimize
 
-    affine_bounds = [(-20, 20), (-20, 20),  # translate
-                     (0.7, 1.3), (0.7, 1.3),  # scale
-                     (-15, 15),  # rotation degrees
-                     (-0.3, 0.3)]  # shear
+    affine_bounds = [
+        AFFINE_TRANSLATE_BOUNDS, AFFINE_TRANSLATE_BOUNDS,  # translate x, y
+        AFFINE_SCALE_BOUNDS, AFFINE_SCALE_BOUNDS,  # scale x, y
+        AFFINE_ROTATION_BOUNDS,  # rotation degrees
+        AFFINE_SHEAR_BOUNDS,  # shear
+    ]
 
     def _affine_obj(params):
         transformed = affine_transform_strokes(stroke_arrays, params, centroid)
@@ -227,7 +246,9 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
     # Quick NM from identity
     x0 = np.array([0, 0, 1, 1, 0, 0], dtype=float)
     nm = minimize(_affine_obj, x0, method='Nelder-Mead',
-                  options={'maxfev': 800, 'xatol': 0.1, 'fatol': 0.002,
+                  options={'maxfev': NM_MAX_FUNC_EVALS,
+                           'xatol': NM_X_TOLERANCE,
+                           'fatol': NM_F_TOLERANCE,
                            'adaptive': True})
     best_params = nm.x.copy()
     best_score = nm.fun
@@ -235,8 +256,10 @@ def run_global_affine(stroke_arrays: list[np.ndarray], centroid: tuple[float, fl
     # DE refinement (quick)
     try:
         de = differential_evolution(_affine_obj, bounds=affine_bounds,
-                                    x0=best_params, maxiter=20, popsize=10,
-                                    tol=0.005, polish=False)
+                                    x0=best_params,
+                                    maxiter=DE_MAX_ITERATIONS,
+                                    popsize=DE_POPULATION_SIZE,
+                                    tol=DE_TOLERANCE, polish=False)
         if de.fun < best_score:
             best_params = de.x.copy()
             best_score = de.fun
@@ -501,12 +524,3 @@ def optimize_diffvg(font_path: str, char: str, canvas_size: int,
                   float(xs.max()), float(ys.max()))
 
     return diffvg_strokes, diffvg_score, mask, glyph_bbox
-
-
-# Aliases for backwards compatibility
-_affine_transform_strokes = affine_transform_strokes
-_prepare_affine_optimization = prepare_affine_optimization
-_run_global_affine = run_global_affine
-_run_per_stroke_refinement = run_per_stroke_refinement
-_optimize_affine = optimize_affine
-_optimize_diffvg = optimize_diffvg

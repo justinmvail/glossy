@@ -505,10 +505,3 @@ def score_shape_coverage(shape_pts: np.ndarray, tree: cKDTree, radius: float,
         return len(hit)
     unclaimed = hit - claimed
     return len(unclaimed) * 1.0 + len(hit & claimed) * 0.3
-
-
-# Aliases for backwards compatibility
-_score_all_strokes = score_all_strokes
-_score_raw_strokes = score_raw_strokes
-_score_single_shape = score_single_shape
-_quick_stroke_score = quick_stroke_score

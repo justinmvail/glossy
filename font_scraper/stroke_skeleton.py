@@ -27,6 +27,7 @@ Typical usage:
 from collections import defaultdict, deque
 
 import numpy as np
+from scipy.spatial import cKDTree
 from skimage.morphology import skeletonize
 
 # Import shared utilities from stroke_lib (canonical implementations)
@@ -124,8 +125,8 @@ def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
                               adj: dict, merge_dist: int) -> list[set]:
     """Merge nearby junction pixels into clusters.
 
-    Uses BFS to group junction pixels that are within merge_dist of each
-    other along the skeleton.
+    Uses BFS with KD-tree spatial indexing to group junction pixels that are
+    within merge_dist of each other along the skeleton.
 
     Args:
         junction_pixels: List of (x, y) junction pixel positions.
@@ -140,10 +141,18 @@ def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
     Notes:
         - Empty list is returned if no junction pixels exist.
         - A pixel can only belong to one cluster.
+        - Uses KD-tree for O(n log n) neighbor queries instead of O(n²).
     """
     if not junction_pixels:
         return []
 
+    # Build KD-tree for efficient spatial queries
+    skel_list = list(skel_set)
+    skel_array = np.array(skel_list)
+    skel_tree = cKDTree(skel_array)
+    skel_index_to_point = {i: tuple(skel_list[i]) for i in range(len(skel_list))}
+
+    junction_set = set(junction_pixels)
     visited = set()
     clusters = []
 
@@ -160,14 +169,15 @@ def _merge_junction_clusters(junction_pixels: list[tuple], skel_set: set,
                 continue
             visited.add(p)
 
-            if p in junction_pixels or p in cluster:
+            if p in junction_set or p in cluster:
                 cluster.add(p)
-                # Check skeleton pixels within merge distance
-                for sp in skel_set:
+                # Use KD-tree to find skeleton pixels within merge distance
+                indices = skel_tree.query_ball_point(p, merge_dist)
+                for idx in indices:
+                    sp = skel_index_to_point[idx]
                     if sp in visited:
                         continue
-                    d = ((sp[0] - p[0])**2 + (sp[1] - p[1])**2)**0.5
-                    if d <= merge_dist and (sp in junction_pixels or len(adj[sp]) >= 3):
+                    if sp in junction_set or len(adj[sp]) >= 3:
                         queue.append(sp)
 
         if cluster:
@@ -346,12 +356,17 @@ def find_skeleton_segments(info: dict) -> list[dict]:
     return segments
 
 
-def snap_to_skeleton(point: tuple, skel_set: set) -> tuple:
+def snap_to_skeleton(point: tuple, skel_set: set, skel_tree: cKDTree = None,
+                     skel_list: list = None) -> tuple:
     """Find the nearest skeleton pixel to a given point.
 
     Args:
         point: The (x, y) coordinates to snap.
         skel_set: Set of (x, y) skeleton pixel positions.
+        skel_tree: Optional pre-built KD-tree for O(log n) lookup.
+            If provided, skel_list must also be provided.
+        skel_list: Optional list of skeleton points corresponding to skel_tree.
+            Required if skel_tree is provided.
 
     Returns:
         The (x, y) coordinates of the nearest skeleton pixel.
@@ -359,13 +374,19 @@ def snap_to_skeleton(point: tuple, skel_set: set) -> tuple:
         or if the skeleton set is empty.
 
     Notes:
-        - Uses brute-force nearest neighbor search (O(n) where n is
-          skeleton size). For large skeletons, consider using a KD-tree.
+        - If skel_tree is provided, uses O(log n) KD-tree query.
+        - Otherwise falls back to O(n) brute-force search.
     """
     point = tuple(point) if not isinstance(point, tuple) else point
     if point in skel_set or not skel_set:
         return point
 
+    # Use KD-tree if available for O(log n) lookup
+    if skel_tree is not None and skel_list is not None:
+        _, idx = skel_tree.query(point)
+        return tuple(skel_list[idx])
+
+    # Fallback to brute-force O(n) search
     min_dist = float('inf')
     nearest = point
     for p in skel_set:
@@ -459,7 +480,8 @@ def _bfs_trace_path(start: tuple, end: tuple, adj: dict, max_steps: int,
 
 def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
                         max_steps: int = 500, avoid_pixels: set | None = None,
-                        direction: str | None = None) -> list[tuple] | None:
+                        direction: str | None = None, skel_tree: cKDTree = None,
+                        skel_list: list = None) -> list[tuple] | None:
     """Trace a path along skeleton pixels from start to end using BFS.
 
     Finds the shortest path along the skeleton between two points, with
@@ -476,6 +498,8 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
         direction: Optional directional bias for the first few steps.
             One of 'down', 'up', 'left', 'right'. Helps choose the correct
             branch at junctions near the start.
+        skel_tree: Optional pre-built KD-tree for O(log n) snap lookups.
+        skel_list: Optional list of skeleton points for KD-tree index mapping.
 
     Returns:
         A list of (x, y) tuples representing the path from start to end,
@@ -489,8 +513,8 @@ def trace_skeleton_path(start: tuple, end: tuple, adj: dict, skel_set: set,
     if avoid_pixels is None:
         avoid_pixels = set()
 
-    start = snap_to_skeleton(start, skel_set)
-    end = snap_to_skeleton(end, skel_set)
+    start = snap_to_skeleton(start, skel_set, skel_tree, skel_list)
+    end = snap_to_skeleton(end, skel_set, skel_tree, skel_list)
     dir_vec = DIRECTION_VECTORS.get(direction)
 
     # Try with avoidance first
@@ -538,7 +562,8 @@ def trace_segment(start: tuple, end: tuple, config, adj: dict, skel_set: set,
 
 def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
                     skel_set: set, avoid_pixels: set | None = None,
-                    point_in_region_fn=None) -> list[tuple] | None:
+                    point_in_region_fn=None, skel_tree: cKDTree = None,
+                    skel_list: list = None) -> list[tuple] | None:
     """Trace a path from start until it reaches a target numpad region.
 
     Uses BFS to explore the skeleton, stopping when a point falls within
@@ -553,6 +578,8 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
         avoid_pixels: Optional set of pixels to avoid (after initial escape).
         point_in_region_fn: Function(point, region, bbox) -> bool to check
             if a point is in the target region.
+        skel_tree: Optional pre-built KD-tree for O(log n) snap lookups.
+        skel_list: Optional list of skeleton points for KD-tree index mapping.
 
     Returns:
         A list of (x, y) tuples from start to a point in the target region,
@@ -566,7 +593,7 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
     if avoid_pixels is None:
         avoid_pixels = set()
 
-    start = snap_to_skeleton(start, skel_set)
+    start = snap_to_skeleton(start, skel_set, skel_tree, skel_list)
 
     # BFS to find path to region
     queue = deque([(start, [start])])
@@ -598,12 +625,3 @@ def trace_to_region(start: tuple, region: int, bbox: tuple, adj: dict,
 
 # Note: generate_straight_line and resample_path are imported from
 # stroke_lib.utils.geometry (canonical implementations) at the top of this file.
-
-# Aliases for backwards compatibility
-_analyze_skeleton = analyze_skeleton
-_find_skeleton_segments = find_skeleton_segments
-_snap_to_skeleton = snap_to_skeleton
-_trace_skeleton_path = trace_skeleton_path
-_trace_to_region = trace_to_region
-_generate_straight_line = generate_straight_line
-_resample_path = resample_path

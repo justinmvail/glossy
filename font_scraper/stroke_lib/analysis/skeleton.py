@@ -42,7 +42,6 @@ from __future__ import annotations
 import numpy as np
 from typing import Optional, List, Set, Dict, Tuple
 from collections import defaultdict
-from scipy.spatial import cKDTree
 
 from ..domain.skeleton import SkeletonInfo, Marker, MarkerType
 from ..domain.geometry import Point, Stroke

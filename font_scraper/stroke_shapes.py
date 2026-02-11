@@ -539,21 +539,3 @@ def score_shape(shape_pts: np.ndarray, tree, radius: float, claimed: set | None 
         return len(hit)
     unclaimed = hit - claimed
     return len(unclaimed) * 1.0 + len(hit & claimed) * 0.3
-
-
-# Legacy aliases for internal compatibility (underscore prefix)
-# These provide backward compatibility for code that uses the older
-# underscore-prefixed naming convention.
-_make_point_cloud = make_point_cloud
-_adaptive_radius = adaptive_radius
-_score_shape = score_shape
-
-_shape_vline = shape_vline
-_shape_hline = shape_hline
-_shape_diag = shape_diag
-_shape_arc_right = shape_arc_right
-_shape_arc_left = shape_arc_left
-_shape_loop = shape_loop
-_shape_u_arc = shape_u_arc
-_get_param_bounds = get_param_bounds
-_param_vector_to_shapes = param_vector_to_shapes

@@ -162,12 +162,15 @@ def endpoint_cluster(stroke: list[tuple], from_end: bool, assigned: list[set]) -
 
 
 def _build_cluster_endpoint_map(strokes: list[list[tuple]],
-                                 assigned: list[set]) -> dict[int, list[tuple]]:
+                                 assigned: list[set],
+                                 cluster_cache: dict = None) -> dict[int, list[tuple]]:
     """Build a mapping from cluster indices to stroke endpoints.
 
     Args:
         strokes: List of stroke paths.
         assigned: List of junction cluster sets.
+        cluster_cache: Optional dict to populate with (stroke_idx, from_end) -> cluster_id.
+            If provided, will be filled during the map building to avoid redundant lookups.
 
     Returns:
         Dict mapping cluster index to list of (stroke_index, 'start'/'end') tuples.
@@ -175,12 +178,30 @@ def _build_cluster_endpoint_map(strokes: list[list[tuple]],
     cluster_map = defaultdict(list)
     for si, s in enumerate(strokes):
         sc = endpoint_cluster(s, False, assigned)
+        ec = endpoint_cluster(s, True, assigned)
+        if cluster_cache is not None:
+            cluster_cache[(si, False)] = sc
+            cluster_cache[(si, True)] = ec
         if sc >= 0:
             cluster_map[sc].append((si, 'start'))
-        ec = endpoint_cluster(s, True, assigned)
         if ec >= 0:
             cluster_map[ec].append((si, 'end'))
     return cluster_map
+
+
+def _is_loop_stroke_cached(stroke_idx: int, cluster_cache: dict) -> bool:
+    """Check if a stroke has both endpoints in the same cluster using cache.
+
+    Args:
+        stroke_idx: Index of the stroke in strokes list.
+        cluster_cache: Dict mapping (stroke_idx, from_end) -> cluster_id.
+
+    Returns:
+        True if both endpoints are in the same cluster.
+    """
+    sc = cluster_cache.get((stroke_idx, False), -1)
+    ec = cluster_cache.get((stroke_idx, True), -1)
+    return sc >= 0 and sc == ec
 
 
 def _is_loop_stroke(stroke: list[tuple], assigned: list[set]) -> bool:
@@ -200,7 +221,7 @@ def _is_loop_stroke(stroke: list[tuple], assigned: list[set]) -> bool:
 
 def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
                           assigned: list[set], min_len: int, max_angle: float,
-                          max_ratio: float) -> tuple | None:
+                          max_ratio: float, cluster_cache: dict = None) -> tuple | None:
     """Find the best pair of strokes to merge.
 
     Args:
@@ -210,6 +231,8 @@ def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
         min_len: Minimum stroke length for merging.
         max_angle: Maximum angle deviation for merging.
         max_ratio: Maximum length ratio for merging.
+        cluster_cache: Optional dict mapping (stroke_idx, from_end) -> cluster_id
+            for cached lookups. Avoids repeated endpoint_cluster() calls.
 
     Returns:
         Tuple (si, side_i, sj, side_j) for best merge, or None if no valid merge.
@@ -236,11 +259,17 @@ def _find_best_merge_pair(strokes: list[list[tuple]], cluster_map: dict,
                 if max_ratio > 0 and max(li, lj) / max(min(li, lj), 1) > max_ratio:
                     continue
 
-                # Skip loop strokes
-                if _is_loop_stroke(strokes[si], assigned):
-                    continue
-                if _is_loop_stroke(strokes[sj], assigned):
-                    continue
+                # Skip loop strokes (use cache if available)
+                if cluster_cache is not None:
+                    if _is_loop_stroke_cached(si, cluster_cache):
+                        continue
+                    if _is_loop_stroke_cached(sj, cluster_cache):
+                        continue
+                else:
+                    if _is_loop_stroke(strokes[si], assigned):
+                        continue
+                    if _is_loop_stroke(strokes[sj], assigned):
+                        continue
 
                 # Check angle alignment
                 dir_j = seg_dir(strokes[sj], from_end=(side_j == 'end'))
@@ -316,9 +345,11 @@ def run_merge_pass(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
-        cluster_map = _build_cluster_endpoint_map(strokes, assigned)
+        # Build cluster map and cache endpoint lookups to avoid O(n²) repeated calls
+        cluster_cache = {}
+        cluster_map = _build_cluster_endpoint_map(strokes, assigned, cluster_cache)
         best_merge = _find_best_merge_pair(
-            strokes, cluster_map, assigned, min_len, max_angle, max_ratio
+            strokes, cluster_map, assigned, min_len, max_angle, max_ratio, cluster_cache
         )
 
         if best_merge:
@@ -840,17 +871,3 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
                 changed = True
                 break
     return strokes
-
-
-# Aliases for backwards compatibility
-_seg_dir = seg_dir
-_angle = angle_between
-_endpoint_cluster = endpoint_cluster
-_run_merge_pass = run_merge_pass
-_merge_t_junctions = merge_t_junctions
-_get_stroke_tail = get_stroke_tail
-_extend_stroke_to_tip = extend_stroke_to_tip
-_absorb_convergence_stubs = absorb_convergence_stubs
-_absorb_junction_stubs = absorb_junction_stubs
-_absorb_proximity_stubs = absorb_proximity_stubs
-_remove_orphan_stubs = remove_orphan_stubs

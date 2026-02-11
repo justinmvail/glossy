@@ -594,14 +594,3 @@ def find_cross_section_midpoint(point: tuple, tangent: tuple,
     if mask[iy, ix]:
         return point
     return None
-
-
-# Aliases for backwards compatibility
-_flatten_bezier_quad = flatten_bezier_quad
-_flatten_bezier_cubic = flatten_bezier_cubic
-_extract_contours = extract_contours
-_font_to_pixel_transform = font_to_pixel_transform
-_get_pixel_contours = get_pixel_contours
-_contour_segments = contour_segments
-_ray_segment_intersection = ray_segment_intersection
-_find_cross_section_midpoint = find_cross_section_midpoint

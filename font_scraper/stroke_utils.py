@@ -547,18 +547,3 @@ def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
 
     region_features['all_skel'] = skel_list
     return region_features
-
-
-# Aliases for backwards compatibility
-_smooth_stroke = smooth_stroke
-_constrain_to_mask = constrain_to_mask
-_snap_inside = snap_inside
-_snap_deep_inside = snap_deep_inside
-_snap_to_glyph_edge = snap_to_glyph_edge
-_parse_waypoint = parse_waypoint
-_numpad_to_pixel = numpad_to_pixel
-_linear_segment = linear_segment
-_catmull_rom_point = catmull_rom_point
-_catmull_rom_segment = catmull_rom_segment
-_build_guide_path = build_guide_path
-_find_skeleton_waypoints = find_skeleton_waypoints
