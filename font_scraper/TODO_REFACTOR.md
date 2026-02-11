@@ -22,7 +22,7 @@ Generated: 2026-02-11
 12. [x] Extract magic numbers to constants
 13. [x] Add logging to `stroke_merge.py`, `stroke_scoring.py`
 14. [x] Review `pass` in exception handlers
-15. [ ] Split `inksight_vectorizer.py` into 3 modules
+15. [x] Split `inksight_vectorizer.py` into 3 modules
 16. [ ] Add unit tests for design pattern classes
 
 ---
@@ -115,10 +115,12 @@ Worst offenders:
 | `stroke_routes_core.py` | 1115 | Many routes (OK - Flask pattern) |
 | `stroke_routes_batch.py` | 1018 | Many routes (OK - Flask pattern) |
 
-**Action:** Consider splitting `inksight_vectorizer.py` into separate modules:
-- `inksight_vectorizer.py` - core vectorization
-- `ocr_validator.py` - OCR validation
-- `inksight_cli.py` - CLI interface
+**Action:** ✓ Split into 3 modules:
+- `inksight_vectorizer.py` - core vectorization (830 lines, was 1388)
+- `ocr_validator.py` - OCR validation (new, ~370 lines)
+- `inksight_cli.py` - CLI interface (new, ~160 lines)
+
+Backward compatibility maintained via re-exports in inksight_vectorizer.py.
 
 ### 8. Magic Numbers
 
