@@ -20,7 +20,7 @@ Generated: 2026-02-11
 10. [x] Add docstrings to 53 functions (Shape subclasses, strategies)
 11. [x] Add return type hints to 37 functions
 12. [x] Extract magic numbers to constants
-13. [ ] Add logging to `stroke_merge.py`, `stroke_scoring.py`
+13. [x] Add logging to `stroke_merge.py`, `stroke_scoring.py`
 14. [ ] Review `pass` in exception handlers
 15. [ ] Split `inksight_vectorizer.py` into 3 modules
 16. [ ] Add unit tests for design pattern classes
@@ -149,11 +149,13 @@ Only 20 logging statements across 6 files:
 | `stroke_lib/api/services.py` | 8 |
 | `stroke_core.py` | 5 |
 | `stroke_routes_stream.py` | 4 |
+| `stroke_merge.py` | ✓ Added (MergePipeline) |
+| `stroke_scoring.py` | ✓ Added (CompositeScorer) |
 | Others | 3 |
 
 **Modules needing logging:**
-- `stroke_merge.py` - merge operations
-- `stroke_scoring.py` - scoring calculations
+- `stroke_merge.py` - ✓ merge operations logged
+- `stroke_scoring.py` - ✓ scoring calculations logged
 - `stroke_pipeline.py` - pipeline stages
 - Scrapers - download progress
 

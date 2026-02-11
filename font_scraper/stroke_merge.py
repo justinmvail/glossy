@@ -62,11 +62,14 @@ Typical usage:
     strokes = remove_orphan_stubs(strokes, assigned_clusters)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -327,9 +330,19 @@ class MergePipeline:
             assigned=assigned or [],
         )
 
-        for strategy in self.strategies:
-            ctx.strokes = strategy.merge(ctx)
+        initial_count = len(ctx.strokes)
+        logger.debug("MergePipeline starting with %d strokes", initial_count)
 
+        for strategy in self.strategies:
+            before = len(ctx.strokes)
+            ctx.strokes = strategy.merge(ctx)
+            after = len(ctx.strokes)
+            if before != after:
+                logger.debug("%s: %d -> %d strokes",
+                            strategy.__class__.__name__, before, after)
+
+        logger.debug("MergePipeline complete: %d -> %d strokes",
+                    initial_count, len(ctx.strokes))
         return ctx.strokes
 
     def add_strategy(self, strategy: MergeStrategy,

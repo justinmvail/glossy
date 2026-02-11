@@ -52,11 +52,14 @@ Typical usage:
     coverage = quick_stroke_score(strokes, mask)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.spatial import cKDTree
+
+logger = logging.getLogger(__name__)
 
 from stroke_shapes import (
     SHAPES,
@@ -343,15 +346,21 @@ class CompositeScorer:
 
         # Compute all penalties
         total_penalty = 0.0
+        penalty_details = []
         for penalty in self.penalties:
             penalty_value = penalty.compute(
                 all_pts, context,
                 snapped_points=snapped,
                 per_shape_coverage=per_shape
             )
-            total_penalty += penalty.weight * penalty_value
+            weighted = penalty.weight * penalty_value
+            total_penalty += weighted
+            penalty_details.append((penalty.__class__.__name__, weighted))
 
-        return -(coverage - total_penalty)
+        final_score = -(coverage - total_penalty)
+        logger.debug("CompositeScorer: coverage=%.3f, penalties=%s, score=%.3f",
+                    coverage, penalty_details, final_score)
+        return final_score
 
     def add_penalty(self, penalty: ScoringPenalty) -> None:
         """Add a penalty to the scorer.
