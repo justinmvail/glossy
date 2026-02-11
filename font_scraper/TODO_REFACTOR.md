@@ -21,7 +21,7 @@ Generated: 2026-02-11
 11. [x] Add return type hints to 37 functions
 12. [x] Extract magic numbers to constants
 13. [x] Add logging to `stroke_merge.py`, `stroke_scoring.py`
-14. [ ] Review `pass` in exception handlers
+14. [x] Review `pass` in exception handlers
 15. [ ] Split `inksight_vectorizer.py` into 3 modules
 16. [ ] Add unit tests for design pattern classes
 
@@ -163,19 +163,19 @@ Only 20 logging statements across 6 files:
 
 18 `pass` statements found. Review for incomplete implementations:
 
-| File | Line | Context |
-|------|------|---------|
-| `stroke_shapes.py:78,87,93` | Abstract method stubs (OK) |
-| `stroke_affine.py:153` | Abstract method stub (OK) |
-| `stroke_scoring.py:164` | Abstract method stub (OK) |
-| `stroke_merge.py:118` | Abstract method stub (OK) |
-| `template_morph.py:165` | Abstract method stub (OK) |
-| `font_utils.py:166,278,305` | Exception handlers - **review** |
-| `stroke_flask.py:230` | Exception handler - **review** |
-| `google_fonts_scraper.py:206` | Exception handler - **review** |
-| `fontspace_scraper.py:402` | Exception handler - **review** |
+| File | Line | Context | Status |
+|------|------|---------|--------|
+| `stroke_shapes.py:78,87,93` | Abstract method stubs | OK |
+| `stroke_affine.py:153` | Abstract method stub | OK |
+| `stroke_scoring.py:164` | Abstract method stub | OK |
+| `stroke_merge.py:118` | Abstract method stub | OK |
+| `template_morph.py:165` | Abstract method stub | OK |
+| `font_utils.py:166,278,305` | Exception handlers | ✓ Now logs |
+| `stroke_flask.py:230` | Docstring example | OK (not real code) |
+| `google_fonts_scraper.py:206` | Exception handler | ✓ Now logs |
+| `fontspace_scraper.py:402` | Exception handler | ✓ Now logs |
 
-**Action:** Review exception handlers with `pass` - should they log?
+**Action:** ✓ Replaced silent `pass` with `logger.debug()` for visibility when troubleshooting.
 
 ### 11. Test Coverage Gaps
 

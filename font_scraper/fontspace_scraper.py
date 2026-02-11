@@ -39,6 +39,7 @@ Command-line Arguments:
 import argparse
 import io
 import json
+import logging
 import os
 import re
 import time
@@ -46,6 +47,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
+
+logger = logging.getLogger(__name__)
 
 import requests
 from bs4 import BeautifulSoup
@@ -398,8 +401,8 @@ class FontSpaceScraper:
                             with zf.open(name) as src, open(out_path, 'wb') as dst:
                                 dst.write(src.read())
                             extracted += 1
-        except zipfile.BadZipFile:
-            pass
+        except zipfile.BadZipFile as e:
+            logger.debug("Bad zip file: %s", e)
         return extracted
 
     def _safe_filename(self, name: str) -> str:

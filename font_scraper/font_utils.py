@@ -41,10 +41,13 @@ Example:
         print(f"Overall quality: {scores['overall']:.1%}")
 """
 
+import logging
 from collections import defaultdict
 from pathlib import Path
 
 import imagehash
+
+logger = logging.getLogger(__name__)
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
@@ -162,8 +165,8 @@ class FontDeduplicator:
                     if distance <= self.threshold:
                         group.extend(hash_groups[h2])
                         processed.add(h2)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Hash comparison failed: %s", e)
 
             if len(group) > 1:
                 duplicates.append(group)
@@ -274,8 +277,8 @@ class FontScorer:
                 draw.text((5, 5), char, font=font, fill=0)
                 if img.getextrema() != (255, 255):
                     covered += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to render char %r: %s", char, e)
         scores['charset_coverage'] = covered / len(ASCII_PRINTABLE)
 
         # Style score (ink coverage heuristic)
@@ -301,8 +304,8 @@ class FontScorer:
             draw = ImageDraw.Draw(img)
             draw.text((10, 10), "The quick brown", font=font, fill=0)
             scores['phash'] = str(imagehash.phash(img))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to compute phash: %s", e)
 
         # Overall score
         scores['overall'] = (

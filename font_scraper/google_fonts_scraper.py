@@ -41,12 +41,15 @@ Command-line Arguments:
 
 import argparse
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -202,8 +205,8 @@ class GoogleFontsScraper:
             if urls:
                 return urls[0]
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to get font URL for %s: %s", family, e)
 
         return ''
 
