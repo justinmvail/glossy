@@ -4,13 +4,32 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 1. Code Quality
 
-- [ ] Dead code - unused functions/imports/variables
-- [ ] Code duplication - repeated logic across files
-- [ ] Long functions - functions over 50-100 lines
-- [ ] Deep nesting - high cyclomatic complexity
-- [ ] Magic numbers/strings - hardcoded literals
-- [ ] Inconsistent naming - naming convention violations
-- [ ] Missing type hints - unannotated functions
+- [x] Dead code - unused functions/imports/variables
+  - **Status:** 58 potentially unused functions found
+  - Notable: `analyze_skeleton`, `batch_process`, `contour_to_strokes`, etc.
+  - Many are utility functions - need manual review to confirm unused
+- [x] Code duplication - repeated logic across files
+  - **Status:** 1358 duplicate 5-line blocks detected
+  - Hotspots: stroke_routes_*.py (route boilerplate), font_utils.py
+  - Recommendation: Extract common route patterns to decorators/helpers
+- [x] Long functions - functions over 50-100 lines
+  - **Status:** 20 functions over 50 lines found
+  - Worst: run_prefilters.py:run_pipeline() 275 lines
+  - Others: template_morph.py:find_vertices() 225 lines
+  - Note: stroke_editor.py already refactored per earlier plan
+- [x] Deep nesting - high cyclomatic complexity
+  - **Status:** 10 functions with 4+ nesting levels
+  - Worst: template_morph.py:find_vertices() depth 10
+  - Others: run_ocr_prefilter.py:run_batch_ocr() depth 9
+- [x] Magic numbers/strings - hardcoded literals
+  - **Status:** Common values found (3, 60, 5, 90, 400, 500, 80)
+  - Many are already constants in stroke_affine.py
+  - HTTP codes (400, 404, 500) are acceptable
+- [x] Inconsistent naming - naming convention violations
+  - **Status:** PASS - consistent snake_case throughout
+- [x] Missing type hints - unannotated functions
+  - **Status:** 89 public functions without type hints
+  - Hotspots: template_morph.py, font_utils.py, stroke_utils.py
 
 ## 2. Architecture
 
@@ -46,8 +65,9 @@ Systematic review of font_scraper codebase for quality improvements.
 - [x] Missing input validation - unvalidated user input
   - **Status:** FIXED - Changed `int(request.args.get())` to `request.args.get(type=int)` with bounds checking
   - Files: stroke_routes_core.py, stroke_routes_batch.py
-- [ ] Insecure dependencies - known vulnerabilities
-  - **Status:** Unable to run pip-audit (externally managed environment)
+- [x] Insecure dependencies - known vulnerabilities
+  - **Status:** Manual audit - cryptography 41.0.7 has CVE-2023-50782 (needs 42.0.0+)
+  - Note: System Python locked, upgrade requires --break-system-packages or venv
 - [x] Overly permissive CORS/permissions
   - **Status:** PASS - No CORS configured (local tool)
 - [x] Command injection - subprocess with shell=True
@@ -115,4 +135,12 @@ Systematic review of font_scraper codebase for quality improvements.
 - Scanned for deserialization: PASS (no pickle/yaml.load)
 - Fixed input validation in 3 locations
 - Fixed error message leaks in 4 locations
+
+### Session 1: Code Quality Audit
+- Long functions: 20 over 50 lines (worst: 275 lines)
+- Deep nesting: 10 functions with depth 4+ (worst: depth 10)
+- Code duplication: 1358 duplicate blocks (route boilerplate)
+- Dead code: 58 potentially unused functions
+- Type hints: 89 public functions missing annotations
+- Naming: PASS (consistent snake_case)
 
