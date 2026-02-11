@@ -617,10 +617,9 @@ def api_clear_shape_cache(fid: int) -> Response | tuple[str, int]:
 
             {"ok": true}
     """
-    c, db = request.args.get('c'), get_db()
-    db.execute("UPDATE characters SET shape_params_cache = NULL WHERE font_id = ?" + (" AND char = ?" if c else ""), (fid, c) if c else (fid,))
-    db.commit()
-    db.close()
+    from stroke_flask import font_repository
+    c = request.args.get('c')
+    font_repository.clear_shape_cache(fid, c)
     return jsonify(ok=True)
 
 
@@ -729,39 +728,27 @@ def api_minimal_strokes_batch(fid: int) -> Response | tuple[str, int]:
         This endpoint adds a 'template_variant' column to the characters
         table if it doesn't exist (for tracking which template was used).
     """
+    from stroke_flask import font_repository
     _, _, min_strokes, _ = _get_stroke_funcs()
-    with get_db_context() as db:
-        f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
-        if not f:
-            return jsonify(error="Font not found"), 404
-        # Ensure template_variant column exists
-        cursor = db.execute("PRAGMA table_info(characters)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'template_variant' not in columns:
-            try:
-                db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
-                db.commit()
-            except sqlite3.OperationalError as e:
-                # Log but continue - column might have been added by another process
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Could not add template_variant column: %s", e
-                )
-        gen, skp, fail, force = 0, 0, 0, request.args.get('force', '').lower() == 'true'
-        for c in CHARS:
-            if not force and db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL", (fid, c)).fetchone():
-                skp += 1
-                continue
-            st, var = min_strokes(f['file_path'], c, ret_var=True)
-            if not st:
-                fail += 1
-                continue
-            row = db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
-            if row:
-                db.execute("UPDATE characters SET strokes_raw = ?, template_variant = ? WHERE id = ?", (json.dumps(st), var, row['id']))
-            else:
-                db.execute("INSERT INTO characters (font_id, char, strokes_raw, template_variant) VALUES (?, ?, ?, ?)", (fid, c, json.dumps(st), var))
-            gen += 1
+
+    f = font_repository.get_font_by_id(fid)
+    if not f:
+        return jsonify(error="Font not found"), 404
+
+    # Ensure template_variant column exists
+    font_repository.ensure_template_variant_column()
+
+    gen, skp, fail, force = 0, 0, 0, request.args.get('force', '').lower() == 'true'
+    for c in CHARS:
+        if not force and font_repository.has_strokes(fid, c):
+            skp += 1
+            continue
+        st, var = min_strokes(f['file_path'], c, ret_var=True)
+        if not st:
+            fail += 1
+            continue
+        font_repository.save_character_strokes(fid, c, json.dumps(st), template_variant=var)
+        gen += 1
     return jsonify(ok=True, generated=gen, skipped=skp, failed=fail)
 
 
@@ -804,15 +791,16 @@ def api_skeleton_batch(fid: int) -> Response | tuple[str, int]:
         Characters with existing strokes_raw data are skipped.
         The 'results' dict shows status for each character.
     """
+    from stroke_flask import font_repository
     skel_strokes, _, _, auto_fit = _get_stroke_funcs()
-    db = get_db()
-    f = db.execute("SELECT * FROM fonts WHERE id = ?", (fid,)).fetchone()
+
+    f = font_repository.get_font_by_id(fid)
     if not f:
-        db.close()
         return jsonify(error="Font not found"), 404
+
     res = {}
     for c in CHARS:
-        if db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL", (fid, c)).fetchone():
+        if font_repository.has_strokes(fid, c):
             res[c] = 'skipped'
             continue
         st = auto_fit(f['file_path'], c)
@@ -822,14 +810,8 @@ def api_skeleton_batch(fid: int) -> Response | tuple[str, int]:
         if not st:
             res[c] = 'no_skeleton'
             continue
-        row = db.execute("SELECT id FROM characters WHERE font_id = ? AND char = ?", (fid, c)).fetchone()
-        if row:
-            db.execute("UPDATE characters SET strokes_raw = ?, point_count = ? WHERE font_id = ? AND char = ?", (json.dumps(st), sum(len(s) for s in st), fid, c))
-        else:
-            db.execute("INSERT INTO characters (font_id, char, strokes_raw, point_count) VALUES (?, ?, ?, ?)", (fid, c, json.dumps(st), sum(len(s) for s in st)))
+        font_repository.save_character_strokes(fid, c, json.dumps(st), point_count=sum(len(s) for s in st))
         res[c] = f'{len(st)} strokes'
-    db.commit()
-    db.close()
     return jsonify(ok=True, generated=sum(1 for v in res.values() if 'strokes' in v), results=res)
 
 

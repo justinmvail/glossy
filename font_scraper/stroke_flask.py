@@ -691,6 +691,114 @@ class FontRepository:
             )
             return cursor.rowcount
 
+    def clear_shape_cache(self, fid: int, char: str = None) -> int:
+        """Clear shape parameters cache for a font's characters.
+
+        Args:
+            fid: The font ID.
+            char: Optional specific character. If None, clears all.
+
+        Returns:
+            Number of rows updated.
+        """
+        with self._connection_factory() as db:
+            if char:
+                cursor = db.execute(
+                    "UPDATE characters SET shape_params_cache = NULL WHERE font_id = ? AND char = ?",
+                    (fid, char)
+                )
+            else:
+                cursor = db.execute(
+                    "UPDATE characters SET shape_params_cache = NULL WHERE font_id = ?",
+                    (fid,)
+                )
+            return cursor.rowcount
+
+    def has_strokes(self, fid: int, char: str) -> bool:
+        """Check if a character has strokes saved.
+
+        Args:
+            fid: The font ID.
+            char: The character.
+
+        Returns:
+            True if strokes exist, False otherwise.
+        """
+        with self._connection_factory() as db:
+            row = db.execute(
+                "SELECT id FROM characters WHERE font_id = ? AND char = ? AND strokes_raw IS NOT NULL",
+                (fid, char)
+            ).fetchone()
+            return row is not None
+
+    def save_character_strokes(self, fid: int, char: str, strokes_raw: str,
+                               template_variant: str = None, point_count: int = None) -> None:
+        """Save or update character stroke data.
+
+        Args:
+            fid: The font ID.
+            char: The character.
+            strokes_raw: JSON string of stroke data.
+            template_variant: Optional template variant name.
+            point_count: Optional total point count.
+        """
+        with self._connection_factory() as db:
+            row = db.execute(
+                "SELECT id FROM characters WHERE font_id = ? AND char = ?",
+                (fid, char)
+            ).fetchone()
+
+            if row:
+                if template_variant is not None:
+                    db.execute(
+                        "UPDATE characters SET strokes_raw = ?, template_variant = ? WHERE id = ?",
+                        (strokes_raw, template_variant, row['id'])
+                    )
+                elif point_count is not None:
+                    db.execute(
+                        "UPDATE characters SET strokes_raw = ?, point_count = ? WHERE id = ?",
+                        (strokes_raw, point_count, row['id'])
+                    )
+                else:
+                    db.execute(
+                        "UPDATE characters SET strokes_raw = ? WHERE id = ?",
+                        (strokes_raw, row['id'])
+                    )
+            else:
+                if template_variant is not None:
+                    db.execute(
+                        "INSERT INTO characters (font_id, char, strokes_raw, template_variant) VALUES (?, ?, ?, ?)",
+                        (fid, char, strokes_raw, template_variant)
+                    )
+                elif point_count is not None:
+                    db.execute(
+                        "INSERT INTO characters (font_id, char, strokes_raw, point_count) VALUES (?, ?, ?, ?)",
+                        (fid, char, strokes_raw, point_count)
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO characters (font_id, char, strokes_raw) VALUES (?, ?, ?)",
+                        (fid, char, strokes_raw)
+                    )
+
+    def ensure_template_variant_column(self) -> bool:
+        """Ensure the template_variant column exists in characters table.
+
+        Returns:
+            True if column was added, False if it already existed.
+        """
+        import sqlite3
+        with self._connection_factory() as db:
+            cursor = db.execute("PRAGMA table_info(characters)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'template_variant' not in columns:
+                try:
+                    db.execute("ALTER TABLE characters ADD COLUMN template_variant TEXT")
+                    return True
+                except sqlite3.OperationalError:
+                    pass
+            return False
+
 
 # Default repository instance for convenience
 font_repository = FontRepository()

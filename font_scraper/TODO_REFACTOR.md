@@ -29,7 +29,7 @@ Generated: 2026-02-11
 
 ### HIGH - Architecture Issues
 14. [x] stroke_core.py has 10 internal dependencies - create StrokeProcessor service
-15. [ ] Direct DB calls scattered - create CharacterRepository
+15. [x] Direct DB calls scattered - create CharacterRepository
 16. [ ] Rendering logic scattered - consolidate into GlyphRenderer abstraction
 17. [ ] Inconsistent scraper interfaces - create common FontSource base class
 18. [ ] Multiple template systems - unify NUMPAD_TEMPLATES and template_morph.py
