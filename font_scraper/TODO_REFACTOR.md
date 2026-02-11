@@ -13,7 +13,7 @@ Generated: 2026-02-11
 2. [x] Add input validation bounds for limit parameter in stroke_routes_batch.py:199
 3. [x] Fix database connection handling in run_ocr_prefilter.py (use context managers)
 4. [x] Add thread-safe initialization to stroke_routes_batch.py _diffvg (use Lock)
-5. [ ] Fix race condition in ocr_validator.py _worker_process singleton
+5. [x] Fix race condition in ocr_validator.py _worker_process singleton
 
 ### CRITICAL - Performance O(n²) Algorithms
 6. [ ] stroke_merge.py:985-992 - absorb_convergence_stubs uses O(n²) nested loops

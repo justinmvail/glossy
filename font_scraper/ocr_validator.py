@@ -24,6 +24,7 @@ Example:
 from __future__ import annotations
 
 import sys
+import threading
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -216,6 +217,7 @@ class OCRValidator:
     _worker_process = None
     _worker_stdin = None
     _worker_stdout = None
+    _worker_lock = threading.Lock()
 
     def _start_worker(self):
         """Start the persistent OCR worker process.
@@ -223,6 +225,8 @@ class OCRValidator:
         Launches a Python subprocess that loads the TrOCR model and waits
         for images sent via stdin. The worker stays running until explicitly
         stopped with shutdown_worker().
+
+        Thread-safe initialization using double-checked locking pattern.
 
         The worker protocol:
         - Input: Base64-encoded PNG image, one per line
@@ -234,8 +238,13 @@ class OCRValidator:
         if OCRValidator._worker_process is not None:
             return
 
-        # Worker code that stays running and processes requests
-        worker_code = f'''
+        with OCRValidator._worker_lock:
+            # Double-check after acquiring lock
+            if OCRValidator._worker_process is not None:
+                return
+
+            # Worker code that stays running and processes requests
+            worker_code = f'''
 import sys
 import warnings
 warnings.filterwarnings("ignore")
@@ -272,21 +281,21 @@ while True:
         print(f"ERROR: {{e}}", flush=True)
 '''
 
-        print("Starting OCR worker process...")
-        OCRValidator._worker_process = subprocess.Popen(
-            [sys.executable, '-c', worker_code],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
+            print("Starting OCR worker process...")
+            OCRValidator._worker_process = subprocess.Popen(
+                [sys.executable, '-c', worker_code],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1
+            )
 
-        # Wait for READY signal
-        ready = OCRValidator._worker_process.stdout.readline().strip()
-        if ready != "READY":
-            raise RuntimeError(f"Worker failed to start: {ready}")
-        print("OCR worker ready.")
+            # Wait for READY signal
+            ready = OCRValidator._worker_process.stdout.readline().strip()
+            if ready != "READY":
+                raise RuntimeError(f"Worker failed to start: {ready}")
+            print("OCR worker ready.")
 
     def _recognize_subprocess(self, image: Image.Image) -> str:
         """Run OCR via the persistent worker process.
