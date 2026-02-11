@@ -38,9 +38,13 @@ Notes:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 from stroke_flask import resolve_font_path
 from stroke_lib.analysis.skeleton import SkeletonAnalyzer
@@ -414,9 +418,12 @@ def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
 
     if tpl:
         st = pipe.run(tpl, trace_paths=True)
+        logger.debug("min_strokes: char='%s' custom template -> %d strokes", c, len(st) if st else 0)
         return (st, 'custom') if ret_var else st
 
     result = pipe.evaluate_all_variants()
+    logger.debug("min_strokes: char='%s' best variant='%s' score=%.3f strokes=%d",
+                 c, result.variant_name, result.score, len(result.strokes) if result.strokes else 0)
     if ret_var:
         return result.strokes, result.variant_name
     return result.strokes
@@ -469,14 +476,17 @@ def auto_fit(fp: str, c: str, cs: int = 224,
 
     result = optimize_affine(fp, c, cs)
     if result is None:
+        logger.debug("auto_fit: char='%s' optimization returned None", c)
         return (None, []) if ret_mark else None
 
     strokes, _score, _, _ = result
     if not strokes:
+        logger.debug("auto_fit: char='%s' no strokes from optimization", c)
         return (None, []) if ret_mark else None
 
     # Convert to list format
     stroke_list = [[[float(x), float(y)] for x, y in s] for s in strokes if len(s) >= 2]
+    logger.debug("auto_fit: char='%s' -> %d strokes, score=%.3f", c, len(stroke_list), _score)
 
     if ret_mark:
         markers = []

@@ -59,8 +59,12 @@ Example:
 import base64
 import io
 import json
+import logging
 
 import numpy as np
+
+# Module logger
+logger = logging.getLogger(__name__)
 from flask import Response, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageFont
 from PIL.ImageFont import FreeTypeFont
@@ -377,12 +381,15 @@ def api_save_char(fid: int) -> Response | tuple[str, int]:
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
     st, mk = data['strokes'], data.get('markers', [])
+    point_count = sum(len(s) for s in st)
     font_repository.save_character(
         fid, c,
         strokes_raw=json.dumps(st),
-        point_count=sum(len(s) for s in st),
+        point_count=point_count,
         markers=json.dumps(mk) if mk else None
     )
+    logger.info("Saved char '%s' for font %d: %d strokes, %d points",
+                c, fid, len(st), point_count)
     return jsonify(ok=True)
 
 

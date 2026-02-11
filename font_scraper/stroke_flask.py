@@ -60,8 +60,57 @@ from flask import Flask
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'fonts.db')
 
-# Configure logging
+# Module logger
 logger = logging.getLogger(__name__)
+
+
+def configure_logging(level: str = 'INFO', log_file: str | None = None) -> None:
+    """Configure application-wide logging.
+
+    Sets up structured logging with consistent format across all modules.
+    Call this at application startup before importing route modules.
+
+    Args:
+        level: Log level string ('DEBUG', 'INFO', 'WARNING', 'ERROR').
+        log_file: Optional path to log file. If None, logs to stderr only.
+
+    Example:
+        Configure at startup::
+
+            from stroke_flask import configure_logging
+            configure_logging(level='DEBUG', log_file='stroke_editor.log')
+    """
+    log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Create formatter with timestamp, level, module, and message
+    formatter = logging.Formatter(
+        fmt='%(asctime)s %(levelname)-8s [%(name)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # Add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Add file handler if specified
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # Set third-party loggers to WARNING to reduce noise
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+
+    logger.info("Logging configured: level=%s, file=%s", level, log_file or 'stderr')
 
 # Flask application
 app = Flask(__name__)

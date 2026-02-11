@@ -148,9 +148,11 @@ Systematic review of font_scraper codebase for quality improvements.
   - Font paths stored in database, not hardcoded
   - Canvas sizes defined as module constants (easy to find/change)
 - [x] Missing logging - insufficient observability
-  - **Status:** Partial - logging module used in stroke_routes_stream.py
-  - Scrapers use tqdm for progress
-  - Could add more structured logging
+  - **Status:** FIXED - Added structured logging configuration
+  - `configure_logging()` in stroke_flask.py for app-wide setup
+  - Module-level loggers in stroke_routes_core.py, stroke_core.py
+  - Key operations logged: api_save_char, min_strokes, auto_fit
+  - Scrapers use tqdm for progress (appropriate for CLI)
 - [x] No health checks - missing service health endpoints
   - **Status:** N/A - Local development tool, not production service
   - Flask app has basic route availability
@@ -399,4 +401,21 @@ Test runtime: ~0.8s
 - Adds indexes for common query patterns
 - Options: --force (recreate), --sample (add test font)
 - Usage: `python3 setup_database.py`
+
+### Session 4: Structured Logging
+
+#### Added configure_logging() to stroke_flask.py:
+- Configurable log level (INFO default, DEBUG for development)
+- Optional file output via log_file parameter
+- Consistent format: timestamp, level, module, message
+- Suppresses noisy Werkzeug and PIL debug logs
+
+#### Added module-level loggers:
+- stroke_routes_core.py: Logger for route operations
+- stroke_core.py: Logger for core stroke functions
+
+#### Added log statements to key operations:
+- `api_save_char`: Logs char saved with stroke/point counts
+- `min_strokes`: Logs best variant selection with score
+- `auto_fit`: Logs optimization results
 
