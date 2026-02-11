@@ -439,9 +439,13 @@ def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
         - Uses scikit-image skeletonize for morphological skeletonization.
         - The scoring function balances proximity to region center with
           depth inside the glyph (distance from edge).
+        - Uses KD-tree for efficient nearest-neighbor candidate search,
+          reducing complexity from O(9*n) to O(9*k*log(n)) where k is
+          the number of candidates considered per region.
     """
     from collections import defaultdict
 
+    from scipy.spatial import cKDTree
     from skimage.morphology import skeletonize
 
     skel = skeletonize(mask)
@@ -463,25 +467,42 @@ def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple) -> dict | None:
                     adj[(x, y)].append(n)
 
     skel_list = list(skel_set)
+    skel_array = np.array(skel_list)  # Shape: (n, 2) with (x, y) coords
     dist_in = distance_transform_edt(mask)
     max_dist = float(dist_in.max()) if dist_in.max() > 0 else 1.0
 
     x_min, y_min, x_max, y_max = glyph_bbox
     bbox_diag = max(((x_max - x_min) ** 2 + (y_max - y_min) ** 2) ** 0.5, 1.0)
 
+    # Build KD-tree for efficient spatial queries
+    # Number of candidates to consider per region (balances speed vs accuracy)
+    k_candidates = min(50, len(skel_list))
+    tree = cKDTree(skel_array)
+
     region_features = {}
     for r in range(1, 10):
         rc = numpad_to_pixel(r, glyph_bbox)
 
-        def score(p, rc=rc):
+        # Query k-nearest neighbors from KD-tree
+        _, indices = tree.query(rc, k=k_candidates)
+        if k_candidates == 1:
+            indices = [indices]  # Ensure iterable for single result
+
+        # Score only the candidates (not all skeleton pixels)
+        best_score = float('inf')
+        best_pt = skel_list[indices[0]]
+        for idx in indices:
+            p = skel_list[idx]
             dx = p[0] - rc[0]
             dy = p[1] - rc[1]
             proximity = (dx * dx + dy * dy) ** 0.5 / bbox_diag
             depth = dist_in[p[1], p[0]] / max_dist
-            return proximity - 0.3 * depth
+            score = proximity - 0.3 * depth
+            if score < best_score:
+                best_score = score
+                best_pt = p
 
-        best = min(skel_list, key=score)
-        region_features[r] = [best]
+        region_features[r] = [best_pt]
 
     region_features['all_skel'] = skel_list
     return region_features
