@@ -130,6 +130,7 @@ class VLineShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate vertical line points. See Shape.generate."""
         xf, ysf, yef = params
         x0, y0, x1, y1 = bbox
         w, h = x1 - x0, y1 - y0
@@ -140,10 +141,12 @@ class VLineShape(Shape):
         return np.column_stack([np.full(n_pts, x), ys + t * (ye - ys)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds: x_frac [0,1], y_start [0,0.5], y_end [0.5,1]."""
         return [(0.0, 1.0), (0.0, 0.5), (0.5, 1.0)]
 
     @property
     def param_count(self) -> int:
+        """Return 3 (x_frac, y_start_frac, y_end_frac)."""
         return 3
 
 
@@ -158,6 +161,7 @@ class HLineShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate horizontal line points. See Shape.generate."""
         yf, xsf, xef = params
         x0, y0, x1, y1 = bbox
         w, h = x1 - x0, y1 - y0
@@ -168,10 +172,12 @@ class HLineShape(Shape):
         return np.column_stack([xs + t * (xe - xs), np.full(n_pts, y)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds: y_frac [0,1], x_start [0,0.5], x_end [0.5,1]."""
         return [(0.0, 1.0), (0.0, 0.5), (0.5, 1.0)]
 
     @property
     def param_count(self) -> int:
+        """Return 3 (y_frac, x_start_frac, x_end_frac)."""
         return 3
 
 
@@ -187,6 +193,7 @@ class DiagShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate diagonal line points. See Shape.generate."""
         x0f, y0f, x1f, y1f = params
         bx0, by0, bx1, by1 = bbox
         w, h = bx1 - bx0, by1 - by0
@@ -198,10 +205,12 @@ class DiagShape(Shape):
         return np.column_stack([sx + t * (ex - sx), sy + t * (ey - sy)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds: all four position fracs [0,1]."""
         return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
 
     @property
     def param_count(self) -> int:
+        """Return 4 (x0_frac, y0_frac, x1_frac, y1_frac)."""
         return 4
 
 
@@ -219,6 +228,7 @@ class ArcRightShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate right-opening arc points. See Shape.generate."""
         cxf, cyf, rxf, ryf, a0, a1 = params
         bx0, by0, bx1, by1 = bbox
         w, h = bx1 - bx0, by1 - by0
@@ -230,11 +240,13 @@ class ArcRightShape(Shape):
         return np.column_stack([cx + rx * np.cos(angles), cy + ry * np.sin(angles)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds for center, radii, and angles."""
         return [(0.0, 0.8), (0.0, 1.0), (0.05, 0.8), (0.05, 0.8),
                 (-180, 0), (0, 180)]
 
     @property
     def param_count(self) -> int:
+        """Return 6 (cx, cy, rx, ry, ang_start, ang_end)."""
         return 6
 
 
@@ -252,6 +264,7 @@ class ArcLeftShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate left-opening arc points. See Shape.generate."""
         cxf, cyf, rxf, ryf, a0, a1 = params
         bx0, by0, bx1, by1 = bbox
         w, h = bx1 - bx0, by1 - by0
@@ -263,11 +276,13 @@ class ArcLeftShape(Shape):
         return np.column_stack([cx - rx * np.cos(angles), cy + ry * np.sin(angles)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds for center, radii, and angles."""
         return [(0.2, 1.0), (0.0, 1.0), (0.05, 0.8), (0.05, 0.8),
                 (-180, 0), (0, 180)]
 
     @property
     def param_count(self) -> int:
+        """Return 6 (cx, cy, rx, ry, ang_start, ang_end)."""
         return 6
 
 
@@ -283,6 +298,7 @@ class LoopShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 80) -> np.ndarray:
+        """Generate full ellipse points. See Shape.generate."""
         cxf, cyf, rxf, ryf = params
         bx0, by0, bx1, by1 = bbox
         w, h = bx1 - bx0, by1 - by0
@@ -294,10 +310,12 @@ class LoopShape(Shape):
         return np.column_stack([cx + rx * np.cos(angles), cy + ry * np.sin(angles)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds for center and radii."""
         return [(0.1, 0.9), (0.1, 0.9), (0.1, 0.6), (0.1, 0.6)]
 
     @property
     def param_count(self) -> int:
+        """Return 4 (cx_frac, cy_frac, rx_frac, ry_frac)."""
         return 4
 
 
@@ -313,6 +331,7 @@ class UArcShape(Shape):
 
     def generate(self, params: tuple, bbox: tuple, offset: tuple = (0, 0),
                  n_pts: int = 60) -> np.ndarray:
+        """Generate U-arc (bottom half ellipse) points. See Shape.generate."""
         cxf, cyf, rxf, ryf = params
         bx0, by0, bx1, by1 = bbox
         w, h = bx1 - bx0, by1 - by0
@@ -324,10 +343,12 @@ class UArcShape(Shape):
         return np.column_stack([cx - rx * np.cos(angles), cy + ry * np.sin(angles)])
 
     def get_bounds(self) -> list[tuple[float, float]]:
+        """Return bounds for center and radii."""
         return [(0.1, 0.9), (0.2, 1.0), (0.1, 0.6), (0.1, 0.6)]
 
     @property
     def param_count(self) -> int:
+        """Return 4 (cx_frac, cy_frac, rx_frac, ry_frac)."""
         return 4
 
 

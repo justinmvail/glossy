@@ -17,7 +17,7 @@ Generated: 2026-02-11
 7. [x] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
 8. [x] `setup_database.py:256` - SQL injection risk → validate table names
 9. [x] `stroke_flask` -> `stroke_rendering` circular import → review/fix
-10. [ ] Add docstrings to 53 functions (Shape subclasses, strategies)
+10. [x] Add docstrings to 53 functions (Shape subclasses, strategies)
 11. [ ] Add return type hints to 37 functions
 12. [ ] Extract magic numbers to constants
 13. [ ] Add logging to `stroke_merge.py`, `stroke_scoring.py`
@@ -72,11 +72,11 @@ Most are Shape subclass methods that inherit behavior from base class:
 
 | File | Functions Missing Docstrings |
 |------|------------------------------|
-| `stroke_shapes.py` | `generate()`, `get_bounds()`, `param_count()` on all 7 Shape subclasses (21 functions) |
-| `stroke_merge.py` | Strategy class methods |
-| `template_morph.py` | VertexFinder subclass methods |
+| `stroke_shapes.py` | ✓ Added docstrings to all 21 Shape subclass methods |
+| `stroke_merge.py` | Strategy methods (base class documents contract) |
+| `template_morph.py` | VertexFinder methods (base class documents contract) |
 
-**Action:** Add brief docstrings or document "See base class" pattern.
+**Action:** ✓ Added brief docstrings to Shape subclass methods referencing base class.
 
 ### 5. Type Hints Coverage
 
