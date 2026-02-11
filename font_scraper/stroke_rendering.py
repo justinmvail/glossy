@@ -604,6 +604,56 @@ def render_glyph_mask(font_path: str, char: str,
     return result
 
 
+def _render_letter_normalized(pil_font: FreeTypeFont, char: str) -> np.ndarray | None:
+    """Render a letter and return as normalized binary array.
+
+    Renders the character at its natural size with padding, scales to
+    SMALLCAPS_NORM_SIZE, and binarizes.
+
+    Args:
+        pil_font: Loaded PIL font object.
+        char: Single character to render.
+
+    Returns:
+        Binary numpy array of shape (SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE),
+        or None if the character cannot be rendered or is too small.
+    """
+    bbox = pil_font.getbbox(char)
+    if not bbox:
+        return None
+
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+
+    if w < SMALLCAPS_MIN_SIZE or h < SMALLCAPS_MIN_SIZE:
+        return None
+
+    # Render at natural size with padding
+    img = Image.new('L', (w + SMALLCAPS_PADDING * 2, h + SMALLCAPS_PADDING * 2), 255)
+    draw = ImageDraw.Draw(img)
+    draw.text((SMALLCAPS_PADDING - bbox[0], SMALLCAPS_PADDING - bbox[1]), char, fill=0, font=pil_font)
+
+    # Scale to normalized size and binarize
+    scaled = img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
+    return np.array(scaled) < 128
+
+
+def _compute_iou(arr1: np.ndarray, arr2: np.ndarray) -> float:
+    """Compute Intersection over Union between two binary arrays.
+
+    Args:
+        arr1: First binary array.
+        arr2: Second binary array (same shape as arr1).
+
+    Returns:
+        IoU value from 0.0 (no overlap) to 1.0 (identical).
+        Returns 0.0 if union is empty.
+    """
+    intersection = np.sum(arr1 & arr2)
+    union = np.sum(arr1 | arr2)
+    return intersection / union if union > 0 else 0.0
+
+
 def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     """Check if lowercase letters match their uppercase counterparts.
 
@@ -623,66 +673,31 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
         the font cannot be loaded or no mismatches are found.
 
     Notes:
-        - Letters with bounding boxes smaller than 5x5 pixels are skipped.
-        - Each letter pair is rendered at natural size, then scaled to a
-          common 64x64 size for fair comparison.
+        - Letters with bounding boxes smaller than SMALLCAPS_MIN_SIZE are skipped.
+        - Each letter pair is rendered at natural size, then scaled to
+          SMALLCAPS_NORM_SIZE for fair comparison.
         - Uses IoU metric: intersection / union of binarized glyph pixels.
         - Useful for filtering out fonts unsuitable for case-sensitive
           character recognition.
     """
     font_path = resolve_font_path(font_path)
-    letters_to_check = 'abcdefghijklmnopqrstuvwxyz'
     mismatched = []
 
     try:
-        font_size = 100
-        pil_font = ImageFont.truetype(font_path, font_size)
+        pil_font = ImageFont.truetype(font_path, 100)
     except OSError:
         return []
 
-    for lower in letters_to_check:
-        upper = lower.upper()
-
+    for lower in 'abcdefghijklmnopqrstuvwxyz':
         try:
-            l_bbox = pil_font.getbbox(lower)
-            u_bbox = pil_font.getbbox(upper)
+            l_arr = _render_letter_normalized(pil_font, lower)
+            u_arr = _render_letter_normalized(pil_font, lower.upper())
 
-            if not l_bbox or not u_bbox:
+            if l_arr is None or u_arr is None:
                 continue
 
-            l_w = l_bbox[2] - l_bbox[0]
-            l_h = l_bbox[3] - l_bbox[1]
-            u_w = u_bbox[2] - u_bbox[0]
-            u_h = u_bbox[3] - u_bbox[1]
-
-            if l_w < SMALLCAPS_MIN_SIZE or l_h < SMALLCAPS_MIN_SIZE or u_w < SMALLCAPS_MIN_SIZE or u_h < SMALLCAPS_MIN_SIZE:
-                continue
-
-            # Render lowercase at its natural size
-            l_img = Image.new('L', (l_w + SMALLCAPS_PADDING * 2, l_h + SMALLCAPS_PADDING * 2), 255)
-            l_draw = ImageDraw.Draw(l_img)
-            l_draw.text((SMALLCAPS_PADDING - l_bbox[0], SMALLCAPS_PADDING - l_bbox[1]), lower, fill=0, font=pil_font)
-
-            # Render uppercase at its natural size
-            u_img = Image.new('L', (u_w + SMALLCAPS_PADDING * 2, u_h + SMALLCAPS_PADDING * 2), 255)
-            u_draw = ImageDraw.Draw(u_img)
-            u_draw.text((SMALLCAPS_PADDING - u_bbox[0], SMALLCAPS_PADDING - u_bbox[1]), upper, fill=0, font=pil_font)
-
-            # Scale both to same normalized size
-            l_scaled = l_img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
-            u_scaled = u_img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
-
-            l_arr = np.array(l_scaled) < 128
-            u_arr = np.array(u_scaled) < 128
-
-            # Compare using IoU
-            intersection = np.sum(l_arr & u_arr)
-            union = np.sum(l_arr | u_arr)
-
-            if union > 0:
-                iou = intersection / union
-                if iou >= threshold:
-                    mismatched.append(lower)
+            if _compute_iou(l_arr, u_arr) >= threshold:
+                mismatched.append(lower)
 
         except (ValueError, MemoryError, OSError):
             continue

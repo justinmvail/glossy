@@ -65,9 +65,9 @@ Generated: 2026-02-11
 38. [x] stroke_merge.py:1038-1087 - absorb_junction_stubs similar pattern
 
 ### MEDIUM - Long Functions (>50 lines)
-39. [ ] stroke_merge.py - absorb_convergence_stubs (86 lines) - extract helpers
-40. [ ] stroke_merge.py - absorb_junction_stubs (72 lines) - extract helpers
-41. [ ] stroke_rendering.py - check_case_mismatch (84 lines) - extract helpers
+39. [x] stroke_merge.py - absorb_convergence_stubs (86 lines) - extract helpers (done in #37)
+40. [x] stroke_merge.py - absorb_junction_stubs (72 lines) - extract helpers (done in #38)
+41. [x] stroke_rendering.py - check_case_mismatch (84 lines) - extract helpers
 
 ### MEDIUM - Type Hints
 42. [ ] stroke_utils.py - Add precise tuple types to geometry functions
