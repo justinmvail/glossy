@@ -197,6 +197,8 @@ def api_test_history(fid: int) -> Response | tuple[str, int]:
     """
     ensure_test_tables()
     limit = request.args.get('limit', 10, type=int)
+    if limit is None or limit < 1 or limit > 100:
+        limit = 10
     runs = test_run_repository.get_history(fid, limit)
     return jsonify(runs=[dict(r) for r in runs])
 
