@@ -15,7 +15,7 @@ Generated: 2026-02-11
 5. [x] `inksight_vectorizer.py` - `main()` 125 lines → extract CLI subcommands
 6. [x] `stroke_routes_stream.py` - `optimize_stream_generator()` 117 lines → extract phases
 7. [x] `stroke_routes_stream.py` - `api_minimal_strokes_stream()` 102 lines → extract helpers
-8. [ ] `setup_database.py:256` - SQL injection risk → validate table names
+8. [x] `setup_database.py:256` - SQL injection risk → validate table names
 9. [ ] `stroke_flask` -> `stroke_rendering` circular import → review/fix
 10. [ ] Add docstrings to 53 functions (Shape subclasses, strategies)
 11. [ ] Add return type hints to 37 functions
@@ -49,9 +49,9 @@ Functions that should be broken down into smaller pieces:
 
 | File | Line | Issue |
 |------|------|-------|
-| `setup_database.py:256` | `cursor.execute(f"SELECT COUNT(*) FROM {table_name}")` | f-string in SQL |
+| `setup_database.py:266` | `cursor.execute(f"SELECT COUNT(*) FROM {table_name}")` | ✓ FIXED |
 
-**Fix:** Validate `table_name` against allowlist of known tables before executing.
+**Fix:** ✓ Added `KNOWN_TABLES` frozenset allowlist; validate before query.
 
 ### 3. Potential Circular Imports
 

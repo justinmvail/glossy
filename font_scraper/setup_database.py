@@ -140,6 +140,18 @@ CREATE INDEX IF NOT EXISTS idx_font_removals_reason_id ON font_removals(reason_i
 CREATE INDEX IF NOT EXISTS idx_test_runs_font_id ON test_runs(font_id);
 """
 
+# Known tables for validation (prevents SQL injection in print_summary)
+KNOWN_TABLES = frozenset([
+    'fonts',
+    'removal_reasons',
+    'font_removals',
+    'font_checks',
+    'characters',
+    'ocr_runs',
+    'test_runs',
+    'test_run_images',
+])
+
 # Default removal reasons
 REMOVAL_REASONS = [
     (1, 'incomplete', 'Missing required glyphs'),
@@ -253,6 +265,10 @@ def print_summary(conn: sqlite3.Connection) -> None:
     print("-" * 40)
 
     for (table_name,) in tables:
+        # Validate table name against allowlist to prevent SQL injection
+        if table_name not in KNOWN_TABLES:
+            print(f"  {table_name}: (skipped - unknown table)")
+            continue
         count = cursor.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
         print(f"  {table_name}: {count} rows")
 
