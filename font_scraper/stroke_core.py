@@ -162,8 +162,10 @@ class StrokeProcessor:
         """
         return skel_strokes(mask, min_len, junction_clusters)
 
-    def min_strokes(self, font_path: str, char: str, canvas_size: int = 224,
-                    template: list = None, return_variant: bool = False):
+    def min_strokes(
+        self, font_path: str, char: str, canvas_size: int = 224,
+        template: list = None, return_variant: bool = False
+    ) -> list[list[list[float]]] | tuple[list, str] | None:
         """Generate minimal strokes using template-based pipeline.
 
         Delegates to the module-level min_strokes function.
@@ -180,8 +182,10 @@ class StrokeProcessor:
         """
         return min_strokes(font_path, char, canvas_size, template, return_variant)
 
-    def auto_fit(self, font_path: str, char: str, canvas_size: int = 224,
-                 return_markers: bool = False):
+    def auto_fit(
+        self, font_path: str, char: str, canvas_size: int = 224,
+        return_markers: bool = False
+    ) -> list[list[list[float]]] | tuple[list, list] | None:
         """Auto-fit strokes using affine transformation optimization.
 
         Delegates to the module-level auto_fit function.

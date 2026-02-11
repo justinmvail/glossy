@@ -638,7 +638,7 @@ def find_vertices(char: str, font_mask: np.ndarray, bbox: tuple) -> dict:
     return finder.find(font_mask, bbox, outline_xy)
 
 
-def interpolate_stroke(vertices_list: list, n_points: int = 50) -> list:
+def interpolate_stroke(vertices_list: list[tuple[float, float]], n_points: int = 50) -> np.ndarray:
     """Create smooth curve through vertex points.
 
     Generates evenly-spaced points along straight line segments

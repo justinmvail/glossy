@@ -115,11 +115,11 @@ Generated: 2026-02-11 (Audit #2)
 72. [ ] Per-script constants: run_ocr_prefilter.py, run_connectivity_filter.py, render_all_passing.py all define DB_PATH, SAMPLE_TEXT, FONT_SIZE independently
 
 ### MEDIUM - Missing Type Hints (Public Functions)
-73. [ ] stroke_core.py:165 - `min_strokes()` missing return type
-74. [ ] stroke_core.py:183 - `auto_fit()` missing return type
-75. [ ] stroke_pipeline.py:568 - `euclidean_distance()` missing return type
-76. [ ] stroke_pipeline.py:802 - `angle_in_range()` missing return type
-77. [ ] template_morph.py:641 - `interpolate_stroke()` uses bare `list` not `list[tuple]`
+73. [x] stroke_core.py:165 - `min_strokes()` missing return type - FIXED
+74. [x] stroke_core.py:183 - `auto_fit()` missing return type - FIXED
+75. [ ] stroke_pipeline.py:568 - `euclidean_distance()` missing return type - LOCAL INNER FUNCTION (low priority)
+76. [ ] stroke_pipeline.py:802 - `angle_in_range()` missing return type - LOCAL INNER FUNCTION (low priority)
+77. [x] template_morph.py:641 - `interpolate_stroke()` uses bare `list` not `list[tuple]` - FIXED (list[tuple] -> np.ndarray)
 
 ### MEDIUM - Inconsistent APIs
 78. [ ] Tuple vs List returns: stroke_utils.py returns tuples, stroke_contour.py returns lists
