@@ -25,10 +25,16 @@ Typical usage example:
         print(f"Region {wp.region}, is_vertex={wp.is_vertex}")
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from scipy.spatial import cKDTree
 
 
 # --- Segment tracing configuration ---
@@ -126,12 +132,12 @@ class SkeletonAnalysis:
             pixels, corresponding to glyph_rows.
     """
     mask: np.ndarray
-    info: dict  # skeleton info dict
-    segments: list[dict]  # classified segments
-    vertical_segments: list[dict]
+    info: dict[str, Any]  # skeleton info dict
+    segments: list[dict[str, Any]]  # classified segments
+    vertical_segments: list[dict[str, Any]]
     bbox: tuple[float, float, float, float]
     skel_list: list[tuple[int, int]]
-    skel_tree: object  # cKDTree
+    skel_tree: cKDTree
     glyph_rows: np.ndarray  # row indices of glyph pixels
     glyph_cols: np.ndarray  # column indices of glyph pixels
 

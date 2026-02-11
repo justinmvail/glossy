@@ -23,11 +23,16 @@ Typical usage:
     mismatched = check_case_mismatch('path/to/font.ttf')
 """
 
+from __future__ import annotations
 import io
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
+
+if TYPE_CHECKING:
+    from PIL.ImageFont import FreeTypeFont
 
 # Constants for rendering
 CANVAS_FILL_THRESHOLD = 0.9  # Max fraction of canvas a glyph can fill
@@ -178,7 +183,7 @@ def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
     return np.array(img) < BINARIZATION_THRESHOLD
 
 
-def check_case_mismatch(font_path, threshold=0.80):
+def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     """Check if lowercase letters match their uppercase counterparts.
 
     Detects small-caps fonts where lowercase letters are rendered as
@@ -266,7 +271,7 @@ def check_case_mismatch(font_path, threshold=0.80):
     return mismatched
 
 
-def render_text_for_analysis(pil_font, text):
+def render_text_for_analysis(pil_font: FreeTypeFont, text: str) -> np.ndarray | None:
     """Render text and return as a numpy array for shape analysis.
 
     Creates a centered rendering of the given text string suitable for
@@ -345,7 +350,7 @@ def analyze_shape_metrics(arr, width):
     return num_shapes, max_width / width if width > 0 else 0
 
 
-def check_char_holes(pil_font, char):
+def check_char_holes(pil_font: FreeTypeFont, char: str) -> bool:
     """Check if a character has holes (inner contours).
 
     Determines whether the rendered character contains enclosed regions
@@ -390,7 +395,7 @@ def check_char_holes(pil_font, char):
     return bg_count > 1
 
 
-def check_char_shape_count(pil_font, char, expected):
+def check_char_shape_count(pil_font: FreeTypeFont, char: str, expected: int) -> bool:
     """Check if a character has the expected number of connected components.
 
     Useful for validating that characters like 'i' (2 components) or

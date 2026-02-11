@@ -155,7 +155,7 @@ def snap_to_glyph_edge(pos: tuple, centroid: tuple, mask: np.ndarray) -> tuple |
     return None
 
 
-def parse_waypoint(wp) -> tuple[int, str]:
+def parse_waypoint(wp: int | str) -> tuple[int, str]:
     """Parse a waypoint specification into region and kind.
 
     Waypoints can be specified as:

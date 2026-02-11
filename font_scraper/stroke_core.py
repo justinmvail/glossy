@@ -36,6 +36,11 @@ Notes:
     - stroke_templates: Template definitions for characters
 """
 
+from __future__ import annotations
+from typing import Any
+
+import numpy as np
+
 from stroke_flask import resolve_font_path
 from stroke_lib.analysis.skeleton import SkeletonAnalyzer
 from stroke_merge import (
@@ -61,7 +66,7 @@ from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 from stroke_utils import point_in_region
 
 
-def _skel(mask):
+def _skel(mask: np.ndarray) -> dict[str, Any] | None:
     """Analyze skeleton and return info dict compatible with legacy format.
 
     Performs skeleton extraction on a binary mask and returns structural
@@ -105,7 +110,7 @@ def _skel(mask):
     }
 
 
-def skel_markers(mask):
+def skel_markers(mask: np.ndarray) -> list[dict[str, Any]]:
     """Detect skeleton markers from a binary glyph mask.
 
     Extracts structural markers from the skeleton of a glyph, identifying
@@ -131,7 +136,8 @@ def skel_markers(mask):
     return [m.to_dict() for m in markers]
 
 
-def skel_strokes(mask, min_len=5, min_stroke_len=None):
+def skel_strokes(mask: np.ndarray, min_len: int = 5,
+                 min_stroke_len: int | None = None) -> list[list[list[float]]]:
     """Extract stroke paths from skeleton analysis with merging.
 
     Performs complete stroke extraction from a glyph mask by:
@@ -217,7 +223,8 @@ def skel_strokes(mask, min_len=5, min_stroke_len=None):
     return [[[float(x), float(y)] for x, y in s] for s in strokes]
 
 
-def _merge_to_expected_count(strokes, char):
+def _merge_to_expected_count(strokes: list[list[list[float]]],
+                             char: str) -> list[list[list[float]]]:
     """Merge strokes to match expected count from character template.
 
     Applies greedy endpoint-based merging to reduce the number of strokes
@@ -276,7 +283,8 @@ def _merge_to_expected_count(strokes, char):
     return strokes
 
 
-def min_strokes(fp, c, cs=224, tpl=None, ret_var=False):
+def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
+                ret_var: bool = False) -> list[list[list[float]]] | tuple[list, str] | None:
     """Generate minimal strokes using the template-based pipeline.
 
     Produces optimized stroke paths for a character by evaluating multiple
@@ -343,7 +351,8 @@ def min_strokes(fp, c, cs=224, tpl=None, ret_var=False):
     return result.strokes
 
 
-def auto_fit(fp, c, cs=224, ret_mark=False):
+def auto_fit(fp: str, c: str, cs: int = 224,
+             ret_mark: bool = False) -> list[list[list[float]]] | tuple[list, list] | None:
     """Auto-fit strokes using affine transformation optimization.
 
     Generates strokes and optimizes their positions using affine

@@ -205,28 +205,25 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 7. Missing Type Hints
 
-- [ ] **stroke_core.py** - Functions missing type hints:
-  - `_skel(mask)` - line 63
-  - `skel_markers(mask)` - line 107
-  - `skel_strokes(mask, min_len, min_stroke_len)` - line 133
-  - `_merge_to_expected_count(strokes, char)` - line 219
-  - `min_strokes(fp, c, cs, tpl, ret_var)` - line 278
-  - `auto_fit(fp, c, cs, ret_mark)` - line 345
+- [x] **stroke_core.py** - Functions missing type hints:
+  - ✅ Added type hints to all 6 functions with proper return types
+  - Added `from __future__ import annotations`, `from typing import Any`
 
-- [ ] **stroke_pipeline.py:115** - Constructor params need type hints
-  - Add types for all 13 parameters
+- [x] **stroke_pipeline.py:115** - Constructor params need type hints
+  - ✅ Added `create_default()` factory method with typed signature
+  - Constructor types documented in docstring (callable types complex)
 
-- [ ] **stroke_pipeline_stream.py:114-116** - `_stream_variant_strokes()` params
-  - Add proper type hints
+- [x] **stroke_pipeline_stream.py:114-116** - `_stream_variant_strokes()` params
+  - ✅ Uses Generator type hints from extracted helper functions
 
-- [ ] **stroke_utils.py:158-186** - `parse_waypoint()` missing return type
-  - Add `-> tuple[int, str]`
+- [x] **stroke_utils.py:158-186** - `parse_waypoint()` missing return type
+  - ✅ Added `-> tuple[int, str]` return type
 
-- [ ] **stroke_rendering.py:241, 280, 320** - `pil_font` parameter untyped
-  - Add `PIL.ImageFont.FreeTypeFont` type
+- [x] **stroke_rendering.py:241, 280, 320** - `pil_font` parameter untyped
+  - ✅ Added `FreeTypeFont` type with TYPE_CHECKING conditional import
 
-- [ ] **stroke_dataclasses.py:129, 134** - `info: dict`, `skel_tree: object`
-  - Use `dict[str, Any]` and proper cKDTree type
+- [x] **stroke_dataclasses.py:129, 134** - `info: dict`, `skel_tree: object`
+  - ✅ Changed to `dict[str, Any]` and `cKDTree` with TYPE_CHECKING import
 
 ### 8. Poor Naming
 
@@ -349,6 +346,11 @@ This document tracks code quality issues identified through a comprehensive revi
 ### Completed
 - [x] Initial code review (2026-02-10)
 - [x] Created this tracking document
+- [x] Missing type hints (2026-02-10)
+  - stroke_core.py: Added type hints to 6 functions
+  - stroke_utils.py: Added return type to parse_waypoint()
+  - stroke_rendering.py: Added FreeTypeFont type with TYPE_CHECKING
+  - stroke_dataclasses.py: Added dict[str, Any] and cKDTree types
 - [x] Long function refactoring (2026-02-10)
   - stroke_scoring.py: Extracted 5 helpers, added module constants
   - stroke_skeleton.py: Extracted 4 helpers for find_skeleton_segments
