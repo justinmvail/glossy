@@ -58,6 +58,25 @@ from scipy.ndimage import distance_transform_edt
 from scipy.optimize import differential_evolution, minimize
 from scipy.spatial import cKDTree
 
+from stroke_affine import (
+    # Streaming Nelder-Mead parameters
+    NM_STREAM_GLOBAL_MAXFEV,
+    NM_STREAM_GLOBAL_XATOL,
+    NM_STREAM_GLOBAL_FATOL,
+    NM_STREAM_PERSTROKE_MAXFEV,
+    NM_STREAM_PERSTROKE_XATOL,
+    # Streaming Differential Evolution parameters
+    DE_STREAM_MAXITER,
+    DE_STREAM_POPSIZE,
+    DE_STREAM_TOL,
+    # Streaming affine bounds
+    AFFINE_STREAM_TX_BOUNDS,
+    AFFINE_STREAM_TY_BOUNDS,
+    AFFINE_STREAM_SX_BOUNDS,
+    AFFINE_STREAM_SY_BOUNDS,
+    AFFINE_STREAM_ROTATE_BOUNDS,
+    AFFINE_STREAM_SHEAR_BOUNDS,
+)
 from stroke_core import min_strokes, skel_strokes
 from stroke_flask import app, get_font, get_font_or_error
 from stroke_rendering import render_glyph_mask
@@ -66,29 +85,6 @@ from stroke_shapes import adaptive_radius, make_point_cloud
 
 # Logger for optimization errors
 logger = logging.getLogger(__name__)
-
-# Nelder-Mead global optimization parameters
-NM_GLOBAL_MAXFEV = 400  # Maximum function evaluations for global NM
-NM_GLOBAL_XATOL = 0.2  # Position tolerance for global NM
-NM_GLOBAL_FATOL = 0.005  # Function value tolerance
-
-# Per-stroke refinement parameters
-NM_PERSTROKE_MAXFEV = 800  # Maximum function evaluations for per-stroke NM
-NM_PERSTROKE_XATOL = 0.15  # Tighter tolerance for refinement
-
-# Differential Evolution parameters
-DE_MAXITER = 15
-DE_POPSIZE = 8
-DE_TOL = 0.01
-
-# Affine transformation bounds
-# [tx, ty, sx, sy, rotate, shear] - translation, scale, rotation, shear
-AFFINE_TX_BOUNDS = (-15, 15)  # X translation
-AFFINE_TY_BOUNDS = (-15, 15)  # Y translation
-AFFINE_SX_BOUNDS = (0.75, 1.25)  # X scale
-AFFINE_SY_BOUNDS = (0.75, 1.25)  # Y scale
-AFFINE_ROTATE_BOUNDS = (-10, 10)  # Rotation in degrees
-AFFINE_SHEAR_BOUNDS = (-0.2, 0.2)  # Shear factor
 
 
 def _sse_event(data: dict) -> str:
@@ -271,8 +267,8 @@ def _run_nm_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
 
     try:
         nm = minimize(affine_obj, x0, method='Nelder-Mead',
-                      options={'maxfev': NM_GLOBAL_MAXFEV, 'xatol': NM_GLOBAL_XATOL,
-                               'fatol': NM_GLOBAL_FATOL, 'adaptive': True})
+                      options={'maxfev': NM_STREAM_GLOBAL_MAXFEV, 'xatol': NM_STREAM_GLOBAL_XATOL,
+                               'fatol': NM_STREAM_GLOBAL_FATOL, 'adaptive': True})
         best_strokes = _affine_transform(stroke_arrays, tuple(nm.x), centroid)
         return nm.x, nm.fun, best_strokes
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
@@ -302,13 +298,15 @@ def _run_de_optimization(stroke_arrays: list[np.ndarray], centroid: tuple,
         transformed = _affine_transform(stroke_arrays, params, centroid)
         return score_raw_strokes(transformed, *score_args)
 
-    affine_bounds = [AFFINE_TX_BOUNDS, AFFINE_TY_BOUNDS, AFFINE_SX_BOUNDS,
-                     AFFINE_SY_BOUNDS, AFFINE_ROTATE_BOUNDS, AFFINE_SHEAR_BOUNDS]
+    affine_bounds = [AFFINE_STREAM_TX_BOUNDS, AFFINE_STREAM_TY_BOUNDS,
+                     AFFINE_STREAM_SX_BOUNDS, AFFINE_STREAM_SY_BOUNDS,
+                     AFFINE_STREAM_ROTATE_BOUNDS, AFFINE_STREAM_SHEAR_BOUNDS]
 
     try:
         de = differential_evolution(affine_obj, bounds=affine_bounds,
-                                    x0=initial_x, maxiter=DE_MAXITER, popsize=DE_POPSIZE,
-                                    tol=DE_TOL, polish=False)
+                                    x0=initial_x, maxiter=DE_STREAM_MAXITER,
+                                    popsize=DE_STREAM_POPSIZE,
+                                    tol=DE_STREAM_TOL, polish=False)
         if de.fun < best_score:
             return de.fun, _affine_transform(stroke_arrays, tuple(de.x), centroid)
     except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
@@ -349,8 +347,9 @@ def _run_per_stroke_refinement(best_strokes: list[np.ndarray],
 
     try:
         nm2 = minimize(per_stroke_obj, x0_per, method='Nelder-Mead',
-                       options={'maxfev': NM_PERSTROKE_MAXFEV, 'xatol': NM_PERSTROKE_XATOL,
-                                'fatol': NM_GLOBAL_FATOL, 'adaptive': True})
+                       options={'maxfev': NM_STREAM_PERSTROKE_MAXFEV,
+                                'xatol': NM_STREAM_PERSTROKE_XATOL,
+                                'fatol': NM_STREAM_GLOBAL_FATOL, 'adaptive': True})
 
         if nm2.fun < best_score:
             final_strokes = []

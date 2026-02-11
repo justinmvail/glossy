@@ -48,7 +48,7 @@ Example usage:
         result = optimizer.optimize(mask, templates, bbox)
 """
 
-from .optimizer import StrokeOptimizer
+from .optimizer import StrokeOptimizer, create_default_optimizer
 from .strategies import (
     AffineStrategy,
     GreedyStrategy,
@@ -64,4 +64,5 @@ __all__ = [
     'GreedyStrategy',
     'JointRefinementStrategy',
     'StrokeOptimizer',
+    'create_default_optimizer',
 ]

@@ -34,10 +34,12 @@ Example usage:
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+from scipy.optimize import differential_evolution, minimize
 
 from ..domain.geometry import BBox, Point, Stroke
 
@@ -181,8 +183,6 @@ class AffineStrategy:
         Returns:
             OptimizationResult with transformed strokes and coverage score.
         """
-        from scipy.optimize import minimize
-
         if not templates:
             return OptimizationResult([], -1.0)
 
@@ -371,8 +371,6 @@ class GreedyStrategy:
         Returns:
             OptimizationResult with individually optimized strokes.
         """
-        import time
-
         start_time = time.time()
         strokes = []
         total_score = 0.0
@@ -420,8 +418,6 @@ class GreedyStrategy:
         Returns:
             Tuple of (optimized Stroke or None, score for this shape).
         """
-        from scipy.optimize import minimize
-
         try:
             from stroke_shapes import SHAPES
         except ImportError:
@@ -531,10 +527,6 @@ class JointRefinementStrategy:
         Returns:
             OptimizationResult with jointly optimized strokes.
         """
-        import time
-
-        from scipy.optimize import differential_evolution
-
         if initial_params is None or len(templates) == 0:
             return OptimizationResult([], -1.0)
 

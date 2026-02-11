@@ -47,6 +47,10 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+# Default scraper configuration constants
+DAFONT_CATEGORIES = ['601', '603']  # Calligraphy + Handwritten
+FONTSPACE_QUERY = 'handwritten'
+
 
 def run_dafont(output_dir: str, pages: int, max_fonts: int = None) -> dict:
     """Run the DaFont scraper as a subprocess.
@@ -71,7 +75,7 @@ def run_dafont(output_dir: str, pages: int, max_fonts: int = None) -> dict:
         sys.executable, 'dafont_scraper.py',
         '--output', str(Path(output_dir) / 'dafont'),
         '--pages', str(pages),
-        '--categories', '601', '603',  # Calligraphy + Handwritten
+        '--categories', *DAFONT_CATEGORIES,
     ]
     if max_fonts:
         cmd.extend(['--max-fonts', str(max_fonts)])
@@ -108,7 +112,7 @@ def run_fontspace(output_dir: str, pages: int, max_fonts: int = None) -> dict:
     cmd = [
         sys.executable, 'fontspace_scraper.py',
         '--output', str(Path(output_dir) / 'fontspace'),
-        '--query', 'handwritten',
+        '--query', FONTSPACE_QUERY,
         '--pages', str(pages),
     ]
     if max_fonts:

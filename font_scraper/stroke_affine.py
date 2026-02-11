@@ -63,15 +63,40 @@ AFFINE_SCALE_BOUNDS = (0.7, 1.3)  # 70% to 130%
 AFFINE_ROTATION_BOUNDS = (-15, 15)  # degrees
 AFFINE_SHEAR_BOUNDS = (-0.3, 0.3)
 
-# Nelder-Mead optimizer settings
+# Nelder-Mead optimizer settings (batch/high-quality mode)
 NM_MAX_FUNC_EVALS = 800  # Maximum function evaluations
 NM_X_TOLERANCE = 0.1  # Parameter convergence tolerance
 NM_F_TOLERANCE = 0.002  # Function value convergence tolerance
 
-# Differential Evolution optimizer settings
+# Differential Evolution optimizer settings (batch/high-quality mode)
 DE_MAX_ITERATIONS = 20  # Maximum generations
 DE_POPULATION_SIZE = 10  # Population size multiplier
 DE_TOLERANCE = 0.005  # Convergence tolerance
+
+# --- Streaming optimization hyperparameters ---
+# Faster settings for SSE streaming (real-time feedback)
+
+# Nelder-Mead streaming settings (global optimization)
+NM_STREAM_GLOBAL_MAXFEV = 400  # Fewer evals for faster streaming
+NM_STREAM_GLOBAL_XATOL = 0.2  # Looser tolerance
+NM_STREAM_GLOBAL_FATOL = 0.005  # Looser tolerance
+
+# Nelder-Mead streaming settings (per-stroke refinement)
+NM_STREAM_PERSTROKE_MAXFEV = 800
+NM_STREAM_PERSTROKE_XATOL = 0.15
+
+# Differential Evolution streaming settings
+DE_STREAM_MAXITER = 15  # Fewer iterations for streaming
+DE_STREAM_POPSIZE = 8  # Smaller population
+DE_STREAM_TOL = 0.01  # Looser tolerance
+
+# Streaming affine bounds (slightly tighter for faster convergence)
+AFFINE_STREAM_TX_BOUNDS = (-15, 15)  # X translation
+AFFINE_STREAM_TY_BOUNDS = (-15, 15)  # Y translation
+AFFINE_STREAM_SX_BOUNDS = (0.75, 1.25)  # X scale
+AFFINE_STREAM_SY_BOUNDS = (0.75, 1.25)  # Y scale
+AFFINE_STREAM_ROTATE_BOUNDS = (-10, 10)  # Rotation in degrees
+AFFINE_STREAM_SHEAR_BOUNDS = (-0.2, 0.2)  # Shear factor
 
 
 # ---------------------------------------------------------------------------

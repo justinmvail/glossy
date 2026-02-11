@@ -109,8 +109,6 @@ from stroke_services_core import (
     EXPECTED_EXCLAMATION_SHAPES,
 )
 
-# Alias for backward compatibility
-_font = get_font
 
 
 def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> tuple[bool, int, float, list[str]]:
@@ -257,7 +255,7 @@ def edit_char(fid: int) -> str | tuple[str, int]:
     c = request.args.get('c')
     if not c:
         return "Missing character parameter ?c=", 400
-    f = _font(fid)
+    f = get_font(fid)
     return render_template('editor.html', font=f, char=c, char_list=CHARS) if f else ("Font not found", 404)
 
 
@@ -439,7 +437,7 @@ def api_render(fid: int) -> Response | tuple[str, int]:
     c = request.args.get('c')
     if not c:
         return "Missing ?c= parameter", 400
-    f = _font(fid)
+    f = get_font(fid)
     if not f:
         return "Font not found", 404
     img = render_char_image(f['file_path'], c)
@@ -490,7 +488,7 @@ def api_thin_preview(fid: int) -> Response | tuple[str, int]:
     c = request.args.get('c')
     if not c:
         return "Missing ?c= parameter", 400
-    f = _font(fid)
+    f = get_font(fid)
     if not f:
         return "Font not found", 404
     m = render_glyph_mask(f['file_path'], c)
@@ -555,7 +553,7 @@ def api_check_connected(fid: int) -> Response | tuple[str, int]:
 
             {"shapes": 3, "bad": true, "case_mismatches": []}
     """
-    f = _font(fid)
+    f = get_font(fid)
     if not f:
         return jsonify(error="Font not found"), 404
     fp = resolve_font_path(f['file_path'])
@@ -610,7 +608,8 @@ def api_reject_connected() -> Response:
             {"ok": true, "checked": 150, "rejected": 23}
     """
     fonts = font_repository.list_fonts_for_scan()
-    rej, chk = 0, 0
+    chk = 0
+    to_reject: list[tuple[int, str]] = []
     for f in fonts:
         try:
             fp = resolve_font_path(f['file_path'])
@@ -620,10 +619,11 @@ def api_reject_connected() -> Response:
                 continue
             chk += 1
             if is_bad:
-                font_repository.reject_font(f['id'], f'{shape_count} shapes')
-                rej += 1
+                to_reject.append((f['id'], f'{shape_count} shapes'))
         except (OSError, ValueError, MemoryError):
             continue
+    # Batch reject all fonts in a single transaction to avoid N+1 queries
+    rej = font_repository.reject_fonts_batch(to_reject)
     return jsonify(ok=True, checked=chk, rejected=rej)
 
 
@@ -675,7 +675,7 @@ def api_font_sample(fid: int) -> Response | tuple[str, int]:
     h = request.args.get('h', 40, type=int)
     if h is None or h < 10 or h > 500:
         return "Invalid height parameter", 400
-    f = _font(fid)
+    f = get_font(fid)
     if not f:
         return "Font not found", 404
     try:

@@ -38,14 +38,18 @@ Attributes:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -183,6 +187,91 @@ class FontSource(ABC):
     def wait_rate_limit(self) -> None:
         """Wait for the configured rate limit duration."""
         time.sleep(self.rate_limit)
+
+    def request_with_retry(
+        self,
+        method: str,
+        url: str,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        **kwargs
+    ) -> requests.Response:
+        """Make an HTTP request with retry logic for transient failures.
+
+        Handles 429 rate limit responses and connection errors with
+        exponential backoff.
+
+        Args:
+            method: HTTP method ('get', 'post', etc.).
+            url: The URL to request.
+            max_retries: Maximum number of retry attempts. Defaults to 3.
+            base_delay: Base delay in seconds for exponential backoff.
+                Defaults to 1.0.
+            **kwargs: Additional arguments passed to requests.Session.request().
+
+        Returns:
+            The requests.Response object.
+
+        Raises:
+            requests.RequestException: If all retries are exhausted.
+        """
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                response = self.session.request(method, url, **kwargs)
+
+                # Handle rate limiting (429)
+                if response.status_code == 429:
+                    retry_after = response.headers.get('Retry-After')
+                    if retry_after:
+                        delay = float(retry_after)
+                    else:
+                        delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Rate limited (429) on %s, waiting %.1fs (attempt %d/%d)",
+                        url, delay, attempt + 1, max_retries
+                    )
+                    time.sleep(delay)
+                    continue
+
+                # Retry on server errors (5xx)
+                if response.status_code >= 500:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Server error (%d) on %s, waiting %.1fs (attempt %d/%d)",
+                        response.status_code, url, delay, attempt + 1, max_retries
+                    )
+                    time.sleep(delay)
+                    continue
+
+                return response
+
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exception = e
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "Connection error on %s: %s, waiting %.1fs (attempt %d/%d)",
+                    url, e, delay, attempt + 1, max_retries
+                )
+                time.sleep(delay)
+
+        # All retries exhausted
+        if last_exception:
+            raise last_exception
+        raise requests.RequestException(f"Max retries exceeded for {url}")
+
+    def get_with_retry(self, url: str, **kwargs) -> requests.Response:
+        """Convenience method for GET requests with retry logic.
+
+        Args:
+            url: The URL to fetch.
+            **kwargs: Additional arguments passed to request_with_retry().
+
+        Returns:
+            The requests.Response object.
+        """
+        return self.request_with_retry('GET', url, **kwargs)
 
     def safe_filename(self, name: str) -> str:
         """Create a filesystem-safe filename.

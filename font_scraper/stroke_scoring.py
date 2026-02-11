@@ -402,6 +402,10 @@ def _snap_points_to_mask(all_pts: np.ndarray, snap_xi: np.ndarray,
     Returns:
         Nx2 array of snapped (x, y) coordinates.
     """
+    if all_pts.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if w <= 0 or h <= 0:
+        raise ValueError(f"Invalid dimensions: w={w}, h={h}")
     xi = np.clip(np.round(all_pts[:, 0]).astype(int), 0, w - 1)
     yi = np.clip(np.round(all_pts[:, 1]).astype(int), 0, h - 1)
     snapped_x = snap_xi[yi, xi].astype(float)
@@ -646,6 +650,13 @@ def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,
         score = score_raw_strokes(strokes, cloud_tree, n_cloud, radius,
                                   snap_yi, snap_xi, w, h, scorer=scorer)
     """
+    # SCORING PATH SELECTION:
+    # - If `scorer` parameter is provided (not None): use the CompositeScorer pattern
+    #   which provides configurable penalty weights and extensible penalty types.
+    # - If `scorer` is None: use the legacy implementation with fixed penalty functions
+    #   (_compute_snap_penalty, _compute_edge_penalty, _compute_overlap_penalty).
+    # The legacy path is retained for backwards compatibility with existing code
+    # that relies on the default scoring behavior without passing a scorer.
     if scorer is not None:
         # Use the composite scorer pattern
         context = ScoringContext(

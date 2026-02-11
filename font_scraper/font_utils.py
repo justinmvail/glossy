@@ -79,6 +79,16 @@ PHASH_CANVAS_HEIGHT = 64
 # Default render size for quality checks (FontScorer, CursiveDetector, etc.)
 DEFAULT_RENDER_SIZE = 64
 
+# Ink ratio thresholds for style scoring (fraction of pixels that are ink)
+INK_RATIO_IDEAL_MIN = 0.03    # Min ink ratio for ideal score (0.8)
+INK_RATIO_IDEAL_MAX = 0.25    # Max ink ratio for ideal score (0.8)
+INK_RATIO_ACCEPTABLE_MIN = 0.01  # Min ink ratio for acceptable score (0.5)
+INK_RATIO_ACCEPTABLE_MAX = 0.35  # Max ink ratio for acceptable score (0.5)
+
+# Weights for overall font score calculation
+COVERAGE_WEIGHT = 0.6   # Weight for charset coverage in overall score
+STYLE_WEIGHT = 0.4      # Weight for style score in overall score
+
 
 class FontDeduplicator:
     """Find and remove duplicate/similar fonts using perceptual hashing.
@@ -289,12 +299,14 @@ class FontScorer:
             scores['error'] = str(e)
             return scores
 
-        # Character set coverage
+        # Character set coverage - reuse single image for efficiency
         covered = 0
+        img = Image.new('L', (self.render_size * 2, self.render_size * 2), 255)
+        draw = ImageDraw.Draw(img)
         for char in ASCII_PRINTABLE:
             try:
-                img = Image.new('L', (self.render_size * 2, self.render_size * 2), 255)
-                draw = ImageDraw.Draw(img)
+                # Clear image by drawing white rectangle (faster than creating new image)
+                draw.rectangle([0, 0, img.width, img.height], fill=255)
                 draw.text((5, 5), char, font=font, fill=0)
                 if img.getextrema() != (255, 255):
                     covered += 1
@@ -310,9 +322,9 @@ class FontScorer:
             arr = np.array(img)
             ink_ratio = np.sum(arr < 128) / arr.size
 
-            if 0.03 < ink_ratio < 0.25:
+            if INK_RATIO_IDEAL_MIN < ink_ratio < INK_RATIO_IDEAL_MAX:
                 scores['style_score'] = 0.8
-            elif 0.01 < ink_ratio < 0.35:
+            elif INK_RATIO_ACCEPTABLE_MIN < ink_ratio < INK_RATIO_ACCEPTABLE_MAX:
                 scores['style_score'] = 0.5
             else:
                 scores['style_score'] = 0.2
@@ -330,8 +342,8 @@ class FontScorer:
 
         # Overall score
         scores['overall'] = (
-            scores['charset_coverage'] * 0.6 +
-            scores['style_score'] * 0.4
+            scores['charset_coverage'] * COVERAGE_WEIGHT +
+            scores['style_score'] * STYLE_WEIGHT
         )
 
         return scores
@@ -679,11 +691,15 @@ class CursiveDetector:
         pil2 = Image.fromarray(img2)
 
         # Compute perceptual hashes
-        hash1 = imagehash.phash(pil1, hash_size=16)
-        hash2 = imagehash.phash(pil2, hash_size=16)
+        try:
+            hash1 = imagehash.phash(pil1, hash_size=16)
+            hash2 = imagehash.phash(pil2, hash_size=16)
 
-        # Hamming distance (0 = identical, 256 = completely different for hash_size=16)
-        distance = hash1 - hash2
+            # Hamming distance (0 = identical, 256 = completely different for hash_size=16)
+            distance = hash1 - hash2
+        except Exception:
+            # Return max difference on hash computation failure
+            return 1.0
 
         # Normalize to 0-1 range
         # hash_size=16 means 256 bits, so max distance is 256

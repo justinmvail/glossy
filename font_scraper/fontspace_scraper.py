@@ -80,6 +80,10 @@ class FontSpaceScraper(FontSource):
     SOURCE_NAME = "fontspace"
     BASE_URL = "https://www.fontspace.com"
 
+    # HTTP timeout constants (seconds)
+    PAGE_TIMEOUT = 30
+    DOWNLOAD_TIMEOUT = 60
+
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
         """Initialize the FontSpace scraper.
 
@@ -115,7 +119,7 @@ class FontSpaceScraper(FontSource):
             logger.debug("Page %d: %s", page, url)
 
             try:
-                resp = self.session.get(url, timeout=30)
+                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
                 resp.raise_for_status()
 
                 page_fonts = self._parse_search_results(resp.text)
@@ -161,7 +165,7 @@ class FontSpaceScraper(FontSource):
             logger.debug("Page %d: %s", page, url)
 
             try:
-                resp = self.session.get(url, timeout=30)
+                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
                 resp.raise_for_status()
 
                 page_fonts = self._parse_search_results(resp.text)
@@ -254,7 +258,7 @@ class FontSpaceScraper(FontSource):
             string if the download URL could not be found.
         """
         try:
-            resp = self.session.get(font_url, timeout=30)
+            resp = self.get_with_retry(font_url, timeout=self.PAGE_TIMEOUT)
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -310,7 +314,7 @@ class FontSpaceScraper(FontSource):
                 self.failed.append(font.name)
                 return False
 
-            resp = self.session.get(font.download_url, timeout=60)
+            resp = self.get_with_retry(font.download_url, timeout=self.DOWNLOAD_TIMEOUT)
             resp.raise_for_status()
 
             # Check if it's a ZIP file

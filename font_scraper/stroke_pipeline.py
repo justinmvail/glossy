@@ -81,6 +81,25 @@ from stroke_pipeline_core import (
     is_vertical_stroke as core_is_vertical_stroke,
 )
 from stroke_templates import NUMPAD_POS, NUMPAD_TEMPLATE_VARIANTS
+
+# "Truly vertical" angle thresholds (narrower range than VERTICAL_ANGLE_MIN/MAX)
+# Used for preferring strictly vertical segments when available
+TRULY_VERTICAL_ANGLE_MIN = 75
+TRULY_VERTICAL_ANGLE_MAX = 105
+
+# Direction-to-angle range mapping for segment classification
+# Angle 0 = right, 90 = down, 180/-180 = left, -90 = up
+ANGLE_RANGES = {
+    'down': (45, 135),      # 45 to 135 degrees (pointing downward)
+    'up': (-135, -45),      # -135 to -45 degrees (pointing upward)
+    'right': (-45, 45),     # -45 to 45 degrees (pointing right)
+    'left': (135, 180, -180, -135),  # pointing left (wraps around)
+}
+
+# Distance thresholds for junction/segment proximity checks (in pixels)
+DISTANCE_THRESHOLD_LARGE = 10   # Minimum segment length for direction filtering
+DISTANCE_THRESHOLD_SMALL = 3    # Close proximity to segment start
+DISTANCE_THRESHOLD_MEDIUM = 5   # Medium proximity for fallback checks
 from stroke_variant_evaluator import VariantEvaluator, try_skeleton_method
 
 
@@ -494,6 +513,8 @@ class MinimalStrokePipeline:
             KeyError: If region is not in NUMPAD_POS.
         """
         bbox = self.analysis.bbox
+        if bbox is None or len(bbox) < 4:
+            raise ValueError("Invalid bbox: analysis.bbox must have 4 elements")
         frac_x, frac_y = NUMPAD_POS[region]
         x = bbox[0] + frac_x * (bbox[2] - bbox[0])
         y = bbox[1] + frac_y * (bbox[3] - bbox[1])
@@ -541,7 +562,7 @@ class MinimalStrokePipeline:
         vertical_segments = self.analysis.vertical_segments
         if not vertical_segments:
             return None
-        truly_vertical = [s for s in vertical_segments if 75 <= abs(s['angle']) <= 105] or vertical_segments
+        truly_vertical = [s for s in vertical_segments if TRULY_VERTICAL_ANGLE_MIN <= abs(s['angle']) <= TRULY_VERTICAL_ANGLE_MAX] or vertical_segments
         # Build junction-to-segment map and find connected chains
         junc_segs = defaultdict(list)
         for i, seg in enumerate(truly_vertical):
@@ -790,26 +811,17 @@ class MinimalStrokePipeline:
         segments = analysis.segments
         junction_pixels = set(analysis.info.get('junction_pixels', []))
 
-        # Define angle ranges for each direction (segments store angle in degrees)
-        # Angle 0 = right, 90 = down, 180/-180 = left, -90 = up
-        angle_ranges = {
-            'down': (45, 135),      # 45° to 135° (pointing downward)
-            'up': (-135, -45),      # -135° to -45° (pointing upward)
-            'right': (-45, 45),     # -45° to 45° (pointing right)
-            'left': (135, 180, -180, -135),  # pointing left (wraps around)
-        }
-
         def angle_in_range(angle, direction):
             if direction == 'left':
                 return angle > 135 or angle < -135
-            low, high = angle_ranges[direction]
+            low, high = ANGLE_RANGES[direction]
             return low <= angle <= high
 
-        # Find segments that go in the desired direction and have length > 10
+        # Find segments that go in the desired direction and have sufficient length
         # (to avoid tiny stubs)
         good_segments = []
         for seg in segments:
-            if seg['length'] > 10 and angle_in_range(seg['angle'], direction):
+            if seg['length'] > DISTANCE_THRESHOLD_LARGE and angle_in_range(seg['angle'], direction):
                 good_segments.append(seg)
 
         if not good_segments:
@@ -824,7 +836,7 @@ class MinimalStrokePipeline:
                 candidate_junctions.add(start)
             # Also check junction pixels near segment start
             for jp in junction_pixels:
-                if (abs(jp[0] - start[0]) <= 3 and abs(jp[1] - start[1]) <= 3
+                if (abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_SMALL and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_SMALL
                         and (self._point_in_region(jp, region, bbox) or jp in region_pixels)):
                     candidate_junctions.add(jp)
 
@@ -834,7 +846,7 @@ class MinimalStrokePipeline:
                 if jp in region_pixels or self._point_in_region(jp, region, bbox):
                     for seg in good_segments:
                         start = seg['start']
-                        if abs(jp[0] - start[0]) <= 5 and abs(jp[1] - start[1]) <= 5:
+                        if abs(jp[0] - start[0]) <= DISTANCE_THRESHOLD_MEDIUM and abs(jp[1] - start[1]) <= DISTANCE_THRESHOLD_MEDIUM:
                             candidate_junctions.add(jp)
                             break
 

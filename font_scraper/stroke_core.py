@@ -224,7 +224,7 @@ class StrokeProcessor:
         return cls(deps)
 
 
-def _analyze_skeleton_legacy(mask: np.ndarray) -> dict[str, Any] | None:
+def analyze_skeleton_legacy(mask: np.ndarray) -> dict[str, Any] | None:
     """Analyze skeleton and return info dict compatible with legacy format.
 
     Performs skeleton extraction on a binary mask and returns structural
@@ -413,7 +413,7 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     if min_stroke_len is not None:
         min_len = min_stroke_len
 
-    info = _analyze_skeleton_legacy(mask)
+    info = analyze_skeleton_legacy(mask)
     if not info:
         return []
 
@@ -463,6 +463,9 @@ def _find_closest_endpoint_pair(strokes: list[list[list[float]]]) -> tuple[float
         best_dist, best_i, best_j, reverse_j = float('inf'), -1, -1, False
         for i in range(n):
             for j in range(i + 1, n):
+                # Skip empty strokes
+                if len(strokes[i]) == 0 or len(strokes[j]) == 0:
+                    continue
                 for end_i, end_j, rev in [(strokes[i][-1], strokes[j][0], False),
                                           (strokes[i][-1], strokes[j][-1], True),
                                           (strokes[i][0], strokes[j][0], False),
@@ -627,7 +630,7 @@ def min_strokes(fp: str, c: str, cs: int = 224, tpl: list | None = None,
         fp, c, cs,
         resolve_font_path_fn=resolve_font_path,
         render_glyph_mask_fn=render_glyph_mask,
-        analyze_skeleton_fn=_analyze_skeleton_legacy,
+        analyze_skeleton_fn=analyze_skeleton_legacy,
         find_skeleton_segments_fn=find_skeleton_segments,
         point_in_region_fn=point_in_region,
         trace_segment_fn=trace_segment,

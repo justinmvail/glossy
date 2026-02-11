@@ -85,6 +85,10 @@ class GoogleFontsScraper(FontSource):
 
     SOURCE_NAME = "google"
 
+    # HTTP timeout constants (seconds)
+    PAGE_TIMEOUT = 30
+    DOWNLOAD_TIMEOUT = 60
+
     # Known handwriting/script fonts on Google Fonts
     # This list can be expanded
     HANDWRITING_FONTS = [
@@ -173,7 +177,7 @@ class GoogleFontsScraper(FontSource):
             css_url = f"https://fonts.googleapis.com/css?family={family_encoded}:{variant}"
 
         try:
-            resp = self.session.get(css_url, timeout=30)
+            resp = self.get_with_retry(css_url, timeout=self.PAGE_TIMEOUT)
             resp.raise_for_status()
 
             # Extract font URL from CSS
@@ -242,7 +246,7 @@ class GoogleFontsScraper(FontSource):
                 logger.warning("Could not get download URL for %s", family)
                 return False
 
-            resp = self.session.get(url, timeout=60)
+            resp = self.get_with_retry(url, timeout=self.DOWNLOAD_TIMEOUT)
             resp.raise_for_status()
 
             # Determine extension from URL

@@ -635,7 +635,7 @@ def _render_letter_normalized(pil_font: FreeTypeFont, char: str) -> np.ndarray |
 
     # Scale to normalized size and binarize
     scaled = img.resize((SMALLCAPS_NORM_SIZE, SMALLCAPS_NORM_SIZE), Image.Resampling.BILINEAR)
-    return np.array(scaled) < 128
+    return np.array(scaled) < BINARIZATION_THRESHOLD
 
 
 def _compute_iou(arr1: np.ndarray, arr2: np.ndarray) -> float:
@@ -822,13 +822,13 @@ def analyze_shape_metrics(arr: np.ndarray, width: int) -> tuple[int, float]:
 
     Notes:
         - Uses scipy.ndimage.label for connected component analysis.
-        - Threshold of 128 is used for binarization.
+        - Threshold of BINARIZATION_THRESHOLD (128) is used for binarization.
         - max_width_pct can exceed 1.0 if the rendered text is wider than
           the reference width.
     """
     from scipy.ndimage import label
 
-    binary = arr < 128
+    binary = arr < BINARIZATION_THRESHOLD
     _labeled, num_shapes = label(binary)
 
     # Find max contiguous width percentage
@@ -880,7 +880,7 @@ def check_char_holes(pil_font: FreeTypeFont, char: str) -> bool:
         return False
 
     arr = np.array(img)
-    binary = arr < 128
+    binary = arr < BINARIZATION_THRESHOLD
 
     # Label background components
     _bg_labeled, bg_count = label(~binary)

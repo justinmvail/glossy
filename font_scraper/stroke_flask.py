@@ -662,6 +662,41 @@ class FontRepository:
             )
             return True
 
+    def reject_fonts_batch(self, rejections: list[tuple[int, str]]) -> int:
+        """Mark multiple fonts as rejected in a single transaction.
+
+        Args:
+            rejections: List of (font_id, details) tuples to reject.
+
+        Returns:
+            Number of fonts actually rejected (excludes already rejected).
+        """
+        if not rejections:
+            return 0
+        with self._connection_factory() as db:
+            # Get already rejected font IDs to skip
+            font_ids = [r[0] for r in rejections]
+            placeholders = ','.join('?' * len(font_ids))
+            already_rejected = {
+                row[0] for row in db.execute(
+                    f"SELECT font_id FROM font_removals WHERE font_id IN ({placeholders}) "
+                    f"AND reason_id = ?",
+                    (*font_ids, self.REJECTION_REASON_ID)
+                ).fetchall()
+            }
+            # Filter out already rejected fonts
+            to_insert = [
+                (fid, self.REJECTION_REASON_ID, details)
+                for fid, details in rejections
+                if fid not in already_rejected
+            ]
+            if to_insert:
+                db.executemany(
+                    "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+                    to_insert
+                )
+            return len(to_insert)
+
     def unreject_font(self, fid: int) -> int:
         """Remove rejection for a font.
 

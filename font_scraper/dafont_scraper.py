@@ -88,6 +88,10 @@ class DaFontScraper(FontSource):
     SOURCE_NAME = "dafont"
     BASE_URL = "https://www.dafont.com"
 
+    # HTTP timeout constants (seconds)
+    PAGE_TIMEOUT = 30
+    DOWNLOAD_TIMEOUT = 60
+
     # Handwriting-related categories
     CATEGORIES = {
         '601': 'Calligraphy',
@@ -132,7 +136,7 @@ class DaFontScraper(FontSource):
             logger.debug("Page %d: %s", page, url)
 
             try:
-                resp = self.session.get(url, timeout=30)
+                resp = self.get_with_retry(url, timeout=self.PAGE_TIMEOUT)
                 resp.raise_for_status()
 
                 page_fonts = self._parse_font_list(resp.text, category_name)
@@ -294,7 +298,7 @@ class DaFontScraper(FontSource):
         try:
             logger.debug("Downloading: %s", font.name)
 
-            resp = self.session.get(font.download_url, timeout=60)
+            resp = self.get_with_retry(font.download_url, timeout=self.DOWNLOAD_TIMEOUT)
             resp.raise_for_status()
 
             # DaFont serves ZIP files

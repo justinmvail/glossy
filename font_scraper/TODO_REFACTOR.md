@@ -57,10 +57,10 @@ Generated: 2026-02-11 (Audit #2)
 32. [ ] font_utils.py:257-337 - `score_font()` 81 lines, too many responsibilities
 
 ### HIGH - Missing Error Handling
-33. [ ] stroke_core.py:462 - Index access `strokes[i][-1]` without length check
+33. [x] stroke_core.py:462 - Index access `strokes[i][-1]` without length check - FIXED: Added bounds check
 34. [ ] stroke_pipeline.py:498-500 - `bbox[0]` access without verifying bbox is valid
-35. [ ] stroke_scoring.py:407 - Array indexing without bounds verification
-36. [ ] stroke_utils.py:272 - Dynamic import without try/except
+35. [x] stroke_scoring.py:407 - Array indexing without bounds verification - FIXED: Added bounds check
+36. [x] stroke_utils.py:272 - Dynamic import without try/except - FIXED: Added try/except with fallback
 37. [ ] font_utils.py:680-683 - Hash comparison may fail silently
 
 ### HIGH - Inconsistent Logging
@@ -71,20 +71,20 @@ Generated: 2026-02-11 (Audit #2)
 42. [x] font_utils.py - Uses print() in utility functions - NOT AN ISSUE (docstrings + CLI test output)
 
 ### HIGH - Missing Retry Logic (Scrapers)
-43. [ ] All scrapers: No retry on transient failures (RequestException breaks loop)
-44. [ ] All scrapers: No 429 rate limit detection or backoff
-45. [ ] All scrapers: No circuit breaker pattern for consistently failing hosts
+43. [x] All scrapers: No retry on transient failures (RequestException breaks loop) - FIXED: Added get_with_retry() to FontSource base class
+44. [x] All scrapers: No 429 rate limit detection or backoff - FIXED: Added 429 handling with Retry-After header support
+45. [x] All scrapers: No circuit breaker pattern for consistently failing hosts - FIXED: Implemented in font_source.py request_with_retry()
 
 ### MEDIUM - Magic Numbers
-46. [ ] stroke_pipeline.py:544 - Angle thresholds 75, 105 degrees not constants
-47. [ ] stroke_pipeline.py:796-799 - Direction angle ranges 45, 135, -135, -45 hardcoded
-48. [ ] stroke_pipeline.py:810,827,837 - Distance thresholds 10, 3, 5 not constants
-49. [ ] stroke_merge_utils.py:279,288 - Tail point limit 8 appears twice, no constant
-50. [ ] stroke_utils.py:527 - k_candidates=50 magic number in KD-tree query
-51. [ ] stroke_utils.py:183 - `best_depth * 0.5` magic multiplier
-52. [ ] stroke_rendering.py:638,831,883 - Hardcoded 128 threshold (should use BINARIZATION_THRESHOLD)
-53. [ ] font_utils.py:313-318 - Magic ink ratio thresholds 0.03, 0.25, 0.01, 0.35
-54. [ ] font_utils.py:332-335 - Magic weights 0.6 and 0.4 undocumented
+46. [x] stroke_pipeline.py:544 - Angle thresholds 75, 105 degrees not constants - FIXED: Added TRULY_VERTICAL_ANGLE_MIN/MAX
+47. [x] stroke_pipeline.py:796-799 - Direction angle ranges 45, 135, -135, -45 hardcoded - FIXED: Added DIRECTION_ANGLE_* constants
+48. [x] stroke_pipeline.py:810,827,837 - Distance thresholds 10, 3, 5 not constants - FIXED: Added DISTANCE_THRESHOLD_* constants
+49. [x] stroke_merge_utils.py:279,288 - Tail point limit 8 appears twice, no constant - FIXED: Added TAIL_POINT_LIMIT constant
+50. [x] stroke_utils.py:527 - k_candidates=50 magic number in KD-tree query - FIXED: Added KD_TREE_K_CANDIDATES constant
+51. [x] stroke_utils.py:183 - `best_depth * 0.5` magic multiplier - FIXED: Added DEPTH_MULTIPLIER constant
+52. [x] stroke_rendering.py:638,831,883 - Hardcoded 128 threshold (should use BINARIZATION_THRESHOLD) - FIXED: Now uses BINARIZATION_THRESHOLD
+53. [x] font_utils.py:313-318 - Magic ink ratio thresholds 0.03, 0.25, 0.01, 0.35 - FIXED: Added INK_RATIO_* constants
+54. [x] font_utils.py:332-335 - Magic weights 0.6 and 0.4 undocumented - FIXED: Added COVERAGE_WEIGHT, STYLE_WEIGHT constants
 
 ### MEDIUM - Response Format Inconsistencies
 55. [ ] Success responses: Mix of `{"ok": true}`, `{"strokes": [...]}`, plain data
@@ -110,8 +110,8 @@ Generated: 2026-02-11 (Audit #2)
 69. [ ] stroke_merge.py:MergePipeline.run() - Builds cluster maps 4+ times per iteration
 
 ### MEDIUM - Scattered Configuration
-70. [ ] NelderMead params: Defined in both stroke_affine.py and stroke_routes_stream.py
-71. [ ] DE params: Defined in both stroke_affine.py and stroke_routes_stream.py
+70. [x] NelderMead params: Defined in both stroke_affine.py and stroke_routes_stream.py - FIXED: Consolidated in stroke_affine.py, imported elsewhere
+71. [x] DE params: Defined in both stroke_affine.py and stroke_routes_stream.py - FIXED: Consolidated in stroke_affine.py, imported elsewhere
 72. [ ] Per-script constants: run_ocr_prefilter.py, run_connectivity_filter.py, render_all_passing.py all define DB_PATH, SAMPLE_TEXT, FONT_SIZE independently
 
 ### MEDIUM - Missing Type Hints (Public Functions)
@@ -127,12 +127,12 @@ Generated: 2026-02-11 (Audit #2)
 80. [ ] Waypoint formats: stroke_utils.py and stroke_dataclasses.py have separate parsers
 
 ### MEDIUM - N+1 Database Queries
-81. [ ] stroke_routes_batch.py:610-625 - Loop with individual font_repository.reject_font() calls
+81. [x] stroke_routes_core.py:610-625 - Loop with individual font_repository.reject_font() calls - FIXED: Added reject_fonts_batch() method
 
 ### MEDIUM - Tight Coupling
 82. [ ] stroke_core.py manually constructs MinimalStrokePipeline with 11 callbacks
 83. [ ] stroke_pipeline_stream.py duplicates pipeline construction
-84. [ ] stroke_pipeline_stream.py imports private `_analyze_skeleton_legacy()` from stroke_core
+84. [x] stroke_pipeline_stream.py imports private `_analyze_skeleton_legacy()` from stroke_core - FIXED: Renamed to public analyze_skeleton_legacy()
 85. [ ] stroke_scoring.py has both legacy and composite scorer paths in same function
 
 ### LOW - Missing Module Docstrings
@@ -153,18 +153,18 @@ Generated: 2026-02-11 (Audit #2)
 98. [ ] font_utils.py:295-303 - Loop generates discarded intermediate images
 
 ### LOW - Module-Level Aliases
-99. [ ] stroke_routes_core.py:112 - `_font = get_font` alias (still in use, would require changes to 5 call sites)
+99. [x] stroke_routes_core.py:112 - `_font = get_font` alias (still in use, would require changes to 5 call sites) - FIXED: Removed alias, updated call sites
 100. [x] stroke_routes_batch.py:82-85 - Multiple aliases to imported functions - REMOVED (3 unused aliases)
 101. [x] stroke_routes_stream.py:95 - `_font = get_font` alias - REMOVED (unused)
 
 ### LOW - stroke_lib Package Issues
-102. [ ] stroke_lib/optimization/__init__.py - Missing `create_default_optimizer` in __all__
-103. [ ] stroke_lib/optimization/strategies.py - Late imports inside methods (time, scipy)
+102. [x] stroke_lib/optimization/__init__.py - Missing `create_default_optimizer` in __all__ - FIXED: Added to __all__
+103. [x] stroke_lib/optimization/strategies.py - Late imports inside methods (time, scipy) - FIXED: Moved imports to module top
 
 ### LOW - Hard-Coded Scraper Values
-104. [ ] HTTP timeouts hard-coded (30s pages, 60s downloads) - should be configurable
+104. [x] HTTP timeouts hard-coded (30s pages, 60s downloads) - should be configurable - FIXED: Added PAGE_TIMEOUT, DOWNLOAD_TIMEOUT constants to all scrapers
 105. [ ] Regex patterns hard-coded in scraper methods - should be class constants
-106. [ ] scrape_all.py:74,111 - Hard-coded categories and queries
+106. [x] scrape_all.py:74,111 - Hard-coded categories and queries - FIXED: Added DAFONT_CATEGORIES, FONTSPACE_QUERIES constants
 
 ---
 

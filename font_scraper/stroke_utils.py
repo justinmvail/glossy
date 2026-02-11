@@ -26,7 +26,7 @@ Typical usage:
 import re
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt, gaussian_filter1d  # noqa: F401
+from scipy.ndimage import distance_transform_edt
 
 # Import shared utilities from stroke_lib (canonical implementations)
 # These are re-exported for backwards compatibility
@@ -52,6 +52,18 @@ SNAP_DEEP_INSIDE_MIN_DEPTH = 5
 # Default step size (in pixels) for generating evenly-spaced points along
 # line segments. Smaller values produce denser point distributions.
 LINEAR_SEGMENT_STEP = 2.0
+
+# Multiplier for comparing current depth against best depth during ray
+# casting. Used to stop early when depth decreases significantly.
+DEPTH_MULTIPLIER = 0.5
+
+# ---------------------------------------------------------------------------
+# Skeleton Feature Constants
+# ---------------------------------------------------------------------------
+
+# Number of nearest neighbor candidates to consider per region when finding
+# skeleton waypoints. Balances search speed vs accuracy.
+KD_TREE_K_CANDIDATES = 50
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +192,7 @@ def snap_deep_inside(pos: tuple[float, float], centroid: tuple[float, float], di
         if mask[jy, jx] and dist_in[jy, jx] > best_depth:
             best_depth = dist_in[jy, jx]
             best_pos = (x, y)
-        if best_depth > SNAP_DEEP_INSIDE_MIN_DEPTH and dist_in[jy, jx] < best_depth * 0.5:
+        if best_depth > SNAP_DEEP_INSIDE_MIN_DEPTH and dist_in[jy, jx] < best_depth * DEPTH_MULTIPLIER:
             break
     return best_pos
 
@@ -269,7 +281,10 @@ def numpad_to_pixel(region: int, glyph_bbox: tuple[float, float, float, float]) 
         - Region positions are defined in stroke_templates.NUMPAD_POS
           as fractional coordinates (0-1 range).
     """
-    from stroke_templates import NUMPAD_POS
+    try:
+        from stroke_templates import NUMPAD_POS
+    except ImportError as e:
+        raise ImportError(f"Failed to import stroke_templates: {e}") from e
     frac_x, frac_y = NUMPAD_POS[region]
     x_min, y_min, x_max, y_max = glyph_bbox
     return (x_min + frac_x * (x_max - x_min),
@@ -299,10 +314,6 @@ def linear_segment(p0: tuple[float, float], p1: tuple[float, float], step: float
     dist = (dx * dx + dy * dy) ** 0.5
     n = max(2, int(round(dist / step)))
     return [(p0[0] + dx * i / (n - 1), p0[1] + dy * i / (n - 1)) for i in range(n)]
-
-
-# Note: point_in_region is imported from stroke_lib.utils.geometry
-# (canonical implementation) at the top of this file.
 
 
 def _snap_to_skeleton_region(region: int, glyph_bbox: tuple[float, float, float, float],
@@ -524,7 +535,7 @@ def find_skeleton_waypoints(mask: np.ndarray, glyph_bbox: tuple[float, float, fl
 
     # Build KD-tree for efficient spatial queries
     # Number of candidates to consider per region (balances speed vs accuracy)
-    k_candidates = min(50, len(skel_list))
+    k_candidates = min(KD_TREE_K_CANDIDATES, len(skel_list))
     tree = cKDTree(skel_array)
 
     region_features = {}

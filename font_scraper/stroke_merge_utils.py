@@ -13,6 +13,14 @@ from collections import defaultdict
 
 import numpy as np
 
+# ---------------------------------------------------------------------------
+# Stroke Tail Constants
+# ---------------------------------------------------------------------------
+
+# Maximum number of points to include in the tail segment when extracting
+# the approach direction of a stroke toward a junction cluster.
+TAIL_POINT_LIMIT = 8
+
 
 def seg_dir(stroke: list[tuple], from_end: bool = False, n_samples: int = 5) -> tuple[float, float]:
     """Compute the direction vector of a stroke segment.
@@ -276,7 +284,7 @@ def get_stroke_tail(stroke: list[tuple], at_end: bool, cluster: set) -> tuple[li
         tail = []
         for k in range(len(stroke) - 1, -1, -1):
             pt = tuple(stroke[k]) if isinstance(stroke[k], (list, tuple)) else stroke[k]
-            if len(tail) >= 8:
+            if len(tail) >= TAIL_POINT_LIMIT:
                 break
             if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
                 tail.insert(0, pt)
@@ -285,7 +293,7 @@ def get_stroke_tail(stroke: list[tuple], at_end: bool, cluster: set) -> tuple[li
         tail = []
         for k in range(len(stroke)):
             pt = tuple(stroke[k]) if isinstance(stroke[k], (list, tuple)) else stroke[k]
-            if len(tail) >= 8:
+            if len(tail) >= TAIL_POINT_LIMIT:
                 break
             if (int(round(pt[0])), int(round(pt[1]))) not in cluster or not tail:
                 tail.append(pt)
