@@ -223,6 +223,230 @@ def snap_to_outline(x, y, outline_points, y_tolerance=None):
     return int(candidates[idx, 0]), int(candidates[idx, 1])
 
 
+def _rightmost_in_range(outline_xy: np.ndarray, y_start: int, y_end: int):
+    """Find rightmost outline point in a y range.
+
+    Args:
+        outline_xy: Numpy array of (x, y) outline points.
+        y_start: Minimum y coordinate.
+        y_end: Maximum y coordinate.
+
+    Returns:
+        Tuple (x, y) of rightmost point, or None if no points in range.
+    """
+    mask_range = (outline_xy[:, 1] >= y_start) & (outline_xy[:, 1] <= y_end)
+    pts = outline_xy[mask_range]
+    if len(pts) == 0:
+        return None
+    idx = np.argmax(pts[:, 0])
+    return int(pts[idx, 0]), int(pts[idx, 1])
+
+
+def _leftmost_in_range(outline_xy: np.ndarray, y_start: int, y_end: int):
+    """Find leftmost outline point in a y range.
+
+    Args:
+        outline_xy: Numpy array of (x, y) outline points.
+        y_start: Minimum y coordinate.
+        y_end: Maximum y coordinate.
+
+    Returns:
+        Tuple (x, y) of leftmost point, or None if no points in range.
+    """
+    mask_range = (outline_xy[:, 1] >= y_start) & (outline_xy[:, 1] <= y_end)
+    pts = outline_xy[mask_range]
+    if len(pts) == 0:
+        return None
+    idx = np.argmin(pts[:, 0])
+    return int(pts[idx, 0]), int(pts[idx, 1])
+
+
+def _default_vertex_pos(name: str, bbox: tuple, outline_xy: np.ndarray):
+    """Get default position from VERTEX_POS and snap to outline.
+
+    Args:
+        name: Vertex name (e.g., 'TL', 'BR').
+        bbox: Tuple (cmin, rmin, cmax, rmax).
+        outline_xy: Numpy array of (x, y) outline points.
+
+    Returns:
+        Tuple (x, y) snapped to nearest outline point.
+    """
+    cmin, rmin, cmax, rmax = bbox
+    w = cmax - cmin
+    h = rmax - rmin
+    rx, ry = VERTEX_POS[name]
+    x = cmin + int(rx * w)
+    y = rmin + int(ry * h)
+    return snap_to_outline(x, y, outline_xy)
+
+
+def _find_vertices_A(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letter A."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    vertices = {}
+
+    # TC = topmost point (apex)
+    top_idx = np.argmin(outline_xy[:, 1])
+    vertices['TC'] = (int(outline_xy[top_idx, 0]), int(outline_xy[top_idx, 1]))
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+
+    # Find crossbar height: middle of the gap region between legs
+    gap_rows = []
+    for test_y in range(rmin + h // 4, rmax - h // 8):
+        row = font_mask[test_y, :]
+        if not row.any():
+            continue
+        cols_filled = np.where(row)[0]
+        diffs = np.diff(cols_filled)
+        if np.max(diffs) > 3:
+            gap_rows.append(test_y)
+    best_y = gap_rows[len(gap_rows) // 2] if gap_rows else rmin + int(h * 0.6)
+
+    # Find ML/MR by scanning rows around crossbar height
+    scan_range = range(max(rmin, best_y - h // 8), min(rmax, best_y + h // 8 + 1))
+    far_left_x, far_left_y = cmax, best_y
+    far_right_x, far_right_y = cmin, best_y
+    for scan_y in scan_range:
+        rp = np.where(font_mask[scan_y, :])[0]
+        if len(rp) == 0:
+            continue
+        if rp[0] < far_left_x:
+            far_left_x, far_left_y = int(rp[0]), scan_y
+        if rp[-1] > far_right_x:
+            far_right_x, far_right_y = int(rp[-1]), scan_y
+
+    vertices['ML'] = snap_to_outline(far_left_x, far_left_y, outline_xy, y_tolerance=max(5, h // 8))
+    vertices['MR'] = snap_to_outline(far_right_x, far_right_y, outline_xy, y_tolerance=max(5, h // 8))
+    return vertices
+
+
+def _find_vertices_B(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letter B."""
+    cmin, rmin, cmax, rmax = bbox
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+
+    waist_y, _ = _find_waist_height(font_mask, rmin, rmax)
+    vertices['ML'] = _leftmost_in_range(outline_xy, waist_y - 3, waist_y + 3) or \
+        _default_vertex_pos('ML', bbox, outline_xy)
+
+    top_bump = _rightmost_in_range(outline_xy, rmin, waist_y)
+    vertices['TR_TOP'] = top_bump if top_bump else _default_vertex_pos('TR', bbox, outline_xy)
+
+    bot_bump = _rightmost_in_range(outline_xy, waist_y, rmax)
+    vertices['TR_BOT'] = bot_bump if bot_bump else _default_vertex_pos('BR', bbox, outline_xy)
+    return vertices
+
+
+def _find_vertices_D(bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letter D."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+    br = _rightmost_in_range(outline_xy, rmax - h // 3, rmax)
+    vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
+    return vertices
+
+
+def _find_vertices_CG(char: str, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letters C and G."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    vertices = {}
+
+    tr = _rightmost_in_range(outline_xy, rmin, rmin + int(h * 0.3))
+    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+    br = _rightmost_in_range(outline_xy, rmax - int(h * 0.3), rmax)
+    vertices['BR'] = br if br else _default_vertex_pos('BR', bbox, outline_xy)
+    tl = _leftmost_in_range(outline_xy, rmin + int(h * 0.2), rmin + int(h * 0.5))
+    vertices['TL'] = tl if tl else _default_vertex_pos('TL', bbox, outline_xy)
+    bl = _leftmost_in_range(outline_xy, rmin + int(h * 0.5), rmax - int(h * 0.2))
+    vertices['BL'] = bl if bl else _default_vertex_pos('BL', bbox, outline_xy)
+    if char == 'G':
+        vertices['MR'] = _default_vertex_pos('MR', bbox, outline_xy)
+        vertices['MC'] = _default_vertex_pos('MC', bbox, outline_xy)
+    return vertices
+
+
+def _find_vertices_EF(char: str, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letters E and F."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    mid_y = rmin + h // 2
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
+    vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
+    mr = _rightmost_in_range(outline_xy, mid_y - h // 8, mid_y + h // 8)
+    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+    if char == 'E':
+        vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+    return vertices
+
+
+def _find_vertices_HK(bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letters H and K."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    mid_y = rmin + h // 2
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    vertices['TR'] = _default_vertex_pos('TR', bbox, outline_xy)
+    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+    vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
+    vertices['MR'] = snap_to_outline(cmax, mid_y, outline_xy)
+    return vertices
+
+
+def _find_vertices_P(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letter P."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+    best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
+    vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
+    mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
+    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+    return vertices
+
+
+def _find_vertices_R(font_mask: np.ndarray, bbox: tuple, outline_xy: np.ndarray) -> dict:
+    """Find vertices for letter R."""
+    cmin, rmin, cmax, rmax = bbox
+    h = rmax - rmin
+    vertices = {}
+
+    vertices['TL'] = _default_vertex_pos('TL', bbox, outline_xy)
+    vertices['BL'] = _default_vertex_pos('BL', bbox, outline_xy)
+    vertices['BR'] = _default_vertex_pos('BR', bbox, outline_xy)
+    tr = _rightmost_in_range(outline_xy, rmin, rmin + h // 3)
+    vertices['TR'] = tr if tr else _default_vertex_pos('TR', bbox, outline_xy)
+    best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
+    vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
+    mr = _rightmost_in_range(outline_xy, rmin + h // 4, rmin + h // 2)
+    vertices['MR'] = mr if mr else _default_vertex_pos('MR', bbox, outline_xy)
+    return vertices
+
+
 def find_vertices(char, font_mask, bbox):
     """Find letter-specific vertex positions on the font outline.
 
@@ -238,184 +462,37 @@ def find_vertices(char, font_mask, bbox):
         Dict mapping vertex names (e.g., 'TL', 'TC', 'BR') to (x, y)
         pixel coordinates on the outline.
     """
-    cmin, rmin, cmax, rmax = bbox
-    w = cmax - cmin
-    h = rmax - rmin
-
     outline = get_outline(font_mask)
     outline_pts = np.argwhere(outline)  # (row, col)
     if len(outline_pts) == 0:
         return {}
     # Convert to (x, y) = (col, row)
-    outline_xy = outline_pts[:, ::-1]  # now (col, row) = (x, y)
+    outline_xy = outline_pts[:, ::-1]
 
-    def default_pos(name):
-        """Get default position from VERTEX_POS and snap to outline."""
-        rx, ry = VERTEX_POS[name]
-        x = cmin + int(rx * w)
-        y = rmin + int(ry * h)
-        return snap_to_outline(x, y, outline_xy)
-
-    def rightmost_in_range(y_start, y_end):
-        """Find rightmost outline point in a y range."""
-        mask_range = (outline_xy[:, 1] >= y_start) & (outline_xy[:, 1] <= y_end)
-        pts = outline_xy[mask_range]
-        if len(pts) == 0:
-            return None
-        idx = np.argmax(pts[:, 0])
-        return int(pts[idx, 0]), int(pts[idx, 1])
-
-    def leftmost_in_range(y_start, y_end):
-        """Find leftmost outline point in a y range."""
-        mask_range = (outline_xy[:, 1] >= y_start) & (outline_xy[:, 1] <= y_end)
-        pts = outline_xy[mask_range]
-        if len(pts) == 0:
-            return None
-        idx = np.argmin(pts[:, 0])
-        return int(pts[idx, 0]), int(pts[idx, 1])
-
-    vertices = {}
-
+    # Dispatch to character-specific handlers
     if char == 'A':
-        # TC = topmost point (apex)
-        top_idx = np.argmin(outline_xy[:, 1])
-        vertices['TC'] = (int(outline_xy[top_idx, 0]), int(outline_xy[top_idx, 1]))
-        # BL, BR = bottom corners
-        vertices['BL'] = default_pos('BL')
-        vertices['BR'] = default_pos('BR')
-        # ML, MR = crossbar endpoints, perpendicular to BL→TC leg
-        # 1. Find crossbar height: middle of the gap region between legs
-        gap_rows = []
-        for test_y in range(rmin + h // 4, rmax - h // 8):
-            row = font_mask[test_y, :]
-            if not row.any():
-                continue
-            cols_filled = np.where(row)[0]
-            diffs = np.diff(cols_filled)
-            if np.max(diffs) > 3:
-                gap_rows.append(test_y)
-        if gap_rows:
-            best_y = gap_rows[len(gap_rows) // 2]
-        else:
-            best_y = rmin + int(h * 0.6)
-
-        # 2. Find ML/MR by walking horizontally from center at crossbar height
-        # Scan multiple rows around best_y, find the farthest left and right font pixels
-        scan_range = range(max(rmin, best_y - h//8), min(rmax, best_y + h//8 + 1))
-        far_left_x, far_left_y = cmax, best_y
-        far_right_x, far_right_y = cmin, best_y
-        for scan_y in scan_range:
-            rp = np.where(font_mask[scan_y, :])[0]
-            if len(rp) == 0:
-                continue
-            if rp[0] < far_left_x:
-                far_left_x = int(rp[0])
-                far_left_y = scan_y
-            if rp[-1] > far_right_x:
-                far_right_x = int(rp[-1])
-                far_right_y = scan_y
-
-        vertices['ML'] = snap_to_outline(far_left_x, far_left_y, outline_xy, y_tolerance=max(5, h//8))
-        vertices['MR'] = snap_to_outline(far_right_x, far_right_y, outline_xy, y_tolerance=max(5, h//8))
-
+        return _find_vertices_A(font_mask, bbox, outline_xy)
     elif char == 'B':
-        # B has 5 key vertices: TL, BL (spine), TR_TOP (top bump peak),
-        # ML (waist), TR_BOT (bottom bump peak)
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-
-        # Find waist height using helper
-        waist_y, _ = _find_waist_height(font_mask, rmin, rmax)
-        vertices['ML'] = leftmost_in_range(waist_y - 3, waist_y + 3) or default_pos('ML')
-
-        # TR_TOP = rightmost outline point in top half (above waist)
-        waist_y = waist_y  # already computed above
-        top_bump = rightmost_in_range(rmin, waist_y)
-        if top_bump:
-            vertices['TR_TOP'] = top_bump
-        else:
-            vertices['TR_TOP'] = default_pos('TR')
-
-        # TR_BOT = rightmost outline point in bottom half (below waist)
-        bot_bump = rightmost_in_range(waist_y, rmax)
-        if bot_bump:
-            vertices['TR_BOT'] = bot_bump
-        else:
-            vertices['TR_BOT'] = default_pos('BR')
-
-    elif char in ('D',):
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-        tr = rightmost_in_range(rmin, rmin + h//3)
-        vertices['TR'] = tr if tr else default_pos('TR')
-        br = rightmost_in_range(rmax - h//3, rmax)
-        vertices['BR'] = br if br else default_pos('BR')
-
+        return _find_vertices_B(font_mask, bbox, outline_xy)
+    elif char == 'D':
+        return _find_vertices_D(bbox, outline_xy)
     elif char in ('C', 'G'):
-        # TR, BR = rightmost in top/bottom 30%
-        tr = rightmost_in_range(rmin, rmin + int(h * 0.3))
-        vertices['TR'] = tr if tr else default_pos('TR')
-        br = rightmost_in_range(rmax - int(h * 0.3), rmax)
-        vertices['BR'] = br if br else default_pos('BR')
-        # TL, BL = leftmost curve midpoints
-        tl = leftmost_in_range(rmin + int(h * 0.2), rmin + int(h * 0.5))
-        vertices['TL'] = tl if tl else default_pos('TL')
-        bl = leftmost_in_range(rmin + int(h * 0.5), rmax - int(h * 0.2))
-        vertices['BL'] = bl if bl else default_pos('BL')
-        if char == 'G':
-            vertices['MR'] = default_pos('MR')
-            vertices['MC'] = default_pos('MC')
-
+        return _find_vertices_CG(char, bbox, outline_xy)
     elif char in ('E', 'F'):
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-        vertices['TR'] = default_pos('TR')
-        # Find crossbar height
-        mid_y = rmin + h // 2
-        vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
-        mr = rightmost_in_range(mid_y - h//8, mid_y + h//8)
-        vertices['MR'] = mr if mr else default_pos('MR')
-        if char == 'E':
-            vertices['BR'] = default_pos('BR')
-
+        return _find_vertices_EF(char, bbox, outline_xy)
     elif char in ('H', 'K'):
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-        vertices['TR'] = default_pos('TR')
-        vertices['BR'] = default_pos('BR')
-        mid_y = rmin + h // 2
-        vertices['ML'] = snap_to_outline(cmin, mid_y, outline_xy)
-        vertices['MR'] = snap_to_outline(cmax, mid_y, outline_xy)
-
+        return _find_vertices_HK(bbox, outline_xy)
     elif char == 'P':
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-        tr = rightmost_in_range(rmin, rmin + h//3)
-        vertices['TR'] = tr if tr else default_pos('TR')
-        # ML = waist where bump returns
-        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
-        vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
-        mr = rightmost_in_range(rmin + h//4, rmin + h//2)
-        vertices['MR'] = mr if mr else default_pos('MR')
-
+        return _find_vertices_P(font_mask, bbox, outline_xy)
     elif char == 'R':
-        vertices['TL'] = default_pos('TL')
-        vertices['BL'] = default_pos('BL')
-        vertices['BR'] = default_pos('BR')
-        tr = rightmost_in_range(rmin, rmin + h//3)
-        vertices['TR'] = tr if tr else default_pos('TR')
-        best_y, min_right = _find_waist_height(font_mask, rmin, rmax)
-        vertices['ML'] = snap_to_outline(min_right, best_y, outline_xy)
-        mr = rightmost_in_range(rmin + h//4, rmin + h//2)
-        vertices['MR'] = mr if mr else default_pos('MR')
-
+        return _find_vertices_R(font_mask, bbox, outline_xy)
     else:
         # Default: compute all standard positions and snap to outline
+        vertices = {}
         for name in set(sum(TEMPLATES.get(char, {}).get('strokes', []), [])):
             if name in VERTEX_POS:
-                vertices[name] = default_pos(name)
-
-    return vertices
+                vertices[name] = _default_vertex_pos(name, bbox, outline_xy)
+        return vertices
 
 
 def interpolate_stroke(vertices_list, n_points=50):

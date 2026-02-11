@@ -135,6 +135,85 @@ def skel_markers(mask: np.ndarray) -> list[dict[str, Any]]:
     return [m.to_dict() for m in markers]
 
 
+def _trace_skeleton_path(start: tuple, neighbor: tuple, adj: dict,
+                          stop_pixels: set, visited_edges: set) -> list | None:
+    """Trace a path through the skeleton from start to a stop pixel.
+
+    Walks along skeleton edges, marking them as visited, until reaching
+    an endpoint or junction (stop pixel) or running out of unvisited edges.
+
+    Args:
+        start: Starting pixel (x, y).
+        neighbor: First neighbor to walk to.
+        adj: Adjacency dict mapping pixels to their neighbors.
+        stop_pixels: Set of pixels where path should terminate.
+        visited_edges: Set of already-visited edges (modified in place).
+
+    Returns:
+        List of pixels forming the path, or None if edge already visited.
+    """
+    edge = (min(start, neighbor), max(start, neighbor))
+    if edge in visited_edges:
+        return None
+
+    visited_edges.add(edge)
+    path = [start, neighbor]
+    cur, prev = neighbor, start
+
+    while True:
+        if cur in stop_pixels and len(path) > 2:
+            break
+        # Find unvisited neighbors
+        candidates = []
+        for n in adj.get(cur, []):
+            if n != prev:
+                candidate_edge = (min(cur, n), max(cur, n))
+                if candidate_edge not in visited_edges:
+                    candidates.append((n, candidate_edge))
+        if not candidates:
+            break
+        nxt, next_edge = candidates[0]
+        visited_edges.add(next_edge)
+        path.append(nxt)
+        prev, cur = cur, nxt
+
+    return path
+
+
+def _trace_all_paths(adj: dict, endpoints: set, junction_pixels: set) -> list:
+    """Trace all paths in the skeleton graph.
+
+    Starts from endpoints first, then junctions, to ensure complete coverage.
+
+    Args:
+        adj: Adjacency dict mapping pixels to their neighbors.
+        endpoints: Set of endpoint pixels (degree 1).
+        junction_pixels: Set of junction pixels (degree >= 3).
+
+    Returns:
+        List of paths, where each path is a list of (x, y) tuples.
+    """
+    stop_pixels = endpoints | junction_pixels
+    visited_edges = set()
+    paths = []
+
+    # Trace from endpoints first
+    for start_pt in sorted(endpoints):
+        for neighbor in adj.get(start_pt, []):
+            path = _trace_skeleton_path(start_pt, neighbor, adj, stop_pixels, visited_edges)
+            if path and len(path) >= 2:
+                paths.append(path)
+
+    # Then from junctions to catch any remaining edges
+    for start_pt in sorted(junction_pixels):
+        for neighbor in adj.get(start_pt, []):
+            path = _trace_skeleton_path(start_pt, neighbor, adj, stop_pixels, visited_edges)
+            if path and len(path) >= 2:
+                paths.append(path)
+
+    return paths
+
+
 def skel_strokes(mask: np.ndarray, min_len: int = 5,
                  min_stroke_len: int | None = None) -> list[list[list[float]]]:
     """Extract stroke paths from skeleton analysis with merging.
@@ -174,6 +253,7 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     """
     if min_stroke_len is not None:
         min_len = min_stroke_len
+
     info = _analyze_skeleton_legacy(mask)
     if not info:
         return []
@@ -182,39 +262,12 @@ def skel_strokes(mask: np.ndarray, min_len: int = 5,
     endpoints = set(info['endpoints'])
     junction_pixels = set(info['junction_pixels'])
     junction_clusters = info['junction_clusters']
-    stop_pixels = endpoints | junction_pixels
-    visited_edges = set()
-    raw = []
 
-    def trace_path(start, neighbor):
-        edge = (min(start, neighbor), max(start, neighbor))
-        if edge in visited_edges:
-            return None
-        visited_edges.add(edge)
-        path, cur, prev = [start, neighbor], neighbor, start
-        while True:
-            if cur in stop_pixels and len(path) > 2:
-                break
-            cands = [(n, (min(cur, n), max(cur, n))) for n in adj.get(cur, [])
-                     if n != prev and (min(cur, n), max(cur, n)) not in visited_edges]
-            if not cands:
-                break
-            nxt, next_edge = cands[0]
-            visited_edges.add(next_edge)
-            path.append(nxt)
-            prev, cur = cur, nxt
-        return path
+    # Trace all paths through the skeleton
+    raw_paths = _trace_all_paths(adj, endpoints, junction_pixels)
 
-    for start_pt in sorted(endpoints):
-        for neighbor in adj.get(start_pt, []):
-            if (path := trace_path(start_pt, neighbor)) and len(path) >= 2:
-                raw.append(path)
-    for start_pt in sorted(junction_pixels):
-        for neighbor in adj.get(start_pt, []):
-            if (path := trace_path(start_pt, neighbor)) and len(path) >= 2:
-                raw.append(path)
-
-    strokes = [s for s in raw if len(s) >= min_len]
+    # Filter by minimum length and apply merge passes
+    strokes = [s for s in raw_paths if len(s) >= min_len]
     assigned_clusters = [set(c) for c in junction_clusters]
     strokes = merge_t_junctions(strokes, junction_clusters, assigned_clusters)
     strokes = run_merge_pass(strokes, assigned_clusters, min_len=0)

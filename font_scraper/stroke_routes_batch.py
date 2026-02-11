@@ -421,13 +421,73 @@ def compare_page(fid):
     return render_template('compare.html', font=f) if f else ("Font not found", 404)
 
 
+def _cast_ray(mask: np.ndarray, x: float, y: float, dx: float, dy: float,
+               max_dist: int = 300) -> int | None:
+    """Cast a ray from a point in a direction until hitting mask boundary.
+
+    Args:
+        mask: Binary mask where True = inside glyph.
+        x: Starting x coordinate.
+        y: Starting y coordinate.
+        dx: X component of direction (normalized).
+        dy: Y component of direction (normalized).
+        max_dist: Maximum distance to search.
+
+    Returns:
+        Distance to boundary, or None if max_dist reached.
+    """
+    h, w = mask.shape
+    for dist in range(1, max_dist):
+        ix = int(round(x + dx * dist))
+        iy = int(round(y + dy * dist))
+        if ix < 0 or ix >= w or iy < 0 or iy >= h or not mask[iy, ix]:
+            return dist
+    return None
+
+
+def _center_point_in_glyph(x: float, y: float, mask: np.ndarray,
+                            directions: list) -> tuple[float, float]:
+    """Find the centered position for a point within the glyph.
+
+    Casts rays in all directions to find the narrowest width,
+    then returns the center of that width.
+
+    Args:
+        x: Point x coordinate.
+        y: Point y coordinate.
+        mask: Binary mask where True = inside glyph.
+        directions: List of (dx, dy) direction tuples.
+
+    Returns:
+        Tuple (new_x, new_y) of centered position.
+    """
+    best_width = float('inf')
+    best_pos = (x, y)
+
+    for dx, dy in directions:
+        dist_pos = _cast_ray(mask, x, y, dx, dy)
+        dist_neg = _cast_ray(mask, x, y, -dx, -dy)
+        if dist_pos and dist_neg:
+            total_width = dist_pos + dist_neg
+            if total_width < best_width:
+                best_width = total_width
+                # Move to center of this width
+                offset = (dist_pos - dist_neg) / 2.0
+                best_pos = (x + dx * offset, y + dy * offset)
+
+    return best_pos
+
+
+# Pre-compute 36 ray directions (every 10 degrees)
+_RAY_DIRECTIONS = [(np.cos(i * np.pi / 18), np.sin(i * np.pi / 18)) for i in range(36)]
+
+
 @app.route('/api/center-borders/<int:fid>', methods=['POST'])
 def api_center_borders(fid):
     """Center stroke points within the glyph borders using ray casting.
 
     For each point in the provided strokes, casts rays in 36 directions
-    (every 5 degrees) to find the narrowest glyph width, then moves the
-    point to the center of that width.
+    to find the narrowest glyph width, then moves the point to the center.
 
     Args:
         fid: Font ID from URL path.
@@ -438,80 +498,50 @@ def api_center_borders(fid):
     Request:
         POST /api/center-borders/<fid>?c=A
 
-        Body (JSON)::
-
-            {
-                "strokes": [
-                    [[100, 50], [100, 150]],
-                    [[50, 100, 1], [150, 100]]
-                ]
-            }
-
-        Note: Points can optionally have a third value (1) indicating
-        the point is "locked" and should preserve that flag.
+        Body (JSON): {"strokes": [[[x, y], ...], ...]}
 
     Query Parameters:
         c (str, required): Character to render for border detection.
-
-    Response:
-        Success (200)::
-
-            {
-                "strokes": [
-                    [[102.5, 51.2], [99.8, 149.5]],
-                    [[52.1, 100.3, 1], [148.2, 100.1]]
-                ]
-            }
-
-        Error (400)::
-
-            {"error": "Missing ?c= parameter"}
-            {"error": "Missing strokes data"}
-
-        Error (404)::
-
-            {"error": "Font not found"}
-
-        Error (500)::
-
-            {"error": "Could not render glyph"}
     """
     c, data = request.args.get('c'), request.get_json()
     if not c:
         return jsonify(error="Missing ?c= parameter"), 400
     if not data or 'strokes' not in data:
         return jsonify(error="Missing strokes data"), 400
+
     f = _font(fid)
     if not f:
         return jsonify(error="Font not found"), 404
-    m = render_glyph_mask(f['file_path'], c)
-    if m is None:
+
+    mask = render_glyph_mask(f['file_path'], c)
+    if mask is None:
         return jsonify(error="Could not render glyph"), 500
-    dirs = [(np.cos(i * np.pi / 36), np.sin(i * np.pi / 36)) for i in range(36)]
-    h, w = m.shape
-    def ray(x, y, dx, dy):
-        for st in range(1, 300):
-            ix, iy = int(round(x + dx * st)), int(round(y + dy * st))
-            if ix < 0 or ix >= w or iy < 0 or iy >= h or not m[iy, ix]:
-                return st
-        return None
-    res = []
-    for st in data['strokes']:
-        cen = []
-        for p in st:
-            x, y, lk = p[0], p[1], len(p) >= 3 and p[2] == 1
-            ix, iy = int(round(min(max(x, 0), w - 1))), int(round(min(max(y, 0), h - 1)))
-            if not m[iy, ix]:
-                cen.append([p[0], p[1], 1] if lk else [p[0], p[1]])
+
+    h, w = mask.shape
+    result_strokes = []
+
+    for stroke in data['strokes']:
+        centered_points = []
+        for point in stroke:
+            x, y = point[0], point[1]
+            is_locked = len(point) >= 3 and point[2] == 1
+
+            # Clamp to mask bounds
+            ix = int(round(min(max(x, 0), w - 1)))
+            iy = int(round(min(max(y, 0), h - 1)))
+
+            # If point is outside glyph, keep original position
+            if not mask[iy, ix]:
+                centered_points.append([x, y, 1] if is_locked else [x, y])
                 continue
-            bt, bm = float('inf'), (x, y)
-            for dx, dy in dirs:
-                dp, dn = ray(x, y, dx, dy), ray(x, y, -dx, -dy)
-                if dp and dn and dp + dn < bt:
-                    bt, bm = dp + dn, (x + dx * (dp - dn) / 2.0, y + dy * (dp - dn) / 2.0)
-            cen.append([bm[0], bm[1], 1] if lk else [bm[0], bm[1]])
-        res.append(cen)
-    return jsonify(strokes=res)
+
+            # Find centered position
+            new_x, new_y = _center_point_in_glyph(x, y, mask, _RAY_DIRECTIONS)
+            centered_points.append([new_x, new_y, 1] if is_locked else [new_x, new_y])
+
+        result_strokes.append(centered_points)
+
+    return jsonify(strokes=result_strokes)
 
 
 @app.route('/api/detect-markers/<int:fid>', methods=['POST'])
