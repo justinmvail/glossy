@@ -537,6 +537,99 @@ class SkeletonAnalyzer:
 
         return absorbed
 
+    @staticmethod
+    def _trace_single_path(start: Tuple[int, int], neighbor: Tuple[int, int],
+                           info: SkeletonInfo, stop_set: Set,
+                           visited_edges: Set) -> Optional[List[Tuple[int, int]]]:
+        """Trace a single stroke path from start through neighbor.
+
+        Follows the skeleton graph from start, preferring straight paths
+        at junctions. Stops when reaching a stop point (endpoint or junction)
+        or when no unvisited edges remain.
+
+        Args:
+            start: Starting pixel position.
+            neighbor: First neighbor to traverse to.
+            info: SkeletonInfo with adjacency data.
+            stop_set: Set of endpoints and junction pixels to stop at.
+            visited_edges: Set of already-visited edges (modified in place).
+
+        Returns:
+            List of (x, y) tuples forming the path, or None if edge already visited.
+        """
+        edge = (min(start, neighbor), max(start, neighbor))
+        if edge in visited_edges:
+            return None
+        visited_edges.add(edge)
+
+        path = [start, neighbor]
+        current, prev = neighbor, start
+
+        while True:
+            if current in stop_set and len(path) > 2:
+                break
+
+            neighbors = [n for n in info.adj.get(current, []) if n != prev]
+            candidates = []
+            for n in neighbors:
+                e = (min(current, n), max(current, n))
+                if e not in visited_edges:
+                    candidates.append((n, e))
+
+            if not candidates:
+                break
+
+            if len(candidates) == 1:
+                next_pt, next_edge = candidates[0]
+            else:
+                # Pick straightest path
+                next_pt, next_edge = SkeletonAnalyzer._pick_straightest_candidate(
+                    current, path, candidates
+                )
+
+            visited_edges.add(next_edge)
+            path.append(next_pt)
+            prev, current = current, next_pt
+
+        return path
+
+    @staticmethod
+    def _pick_straightest_candidate(current: Tuple[int, int], path: List,
+                                     candidates: List) -> Tuple:
+        """Pick the candidate that continues most straight from current direction.
+
+        Args:
+            current: Current position.
+            path: Path so far (used to compute incoming direction).
+            candidates: List of (neighbor, edge) tuples.
+
+        Returns:
+            Tuple of (next_pt, next_edge) for the straightest continuation.
+        """
+        n_look = min(4, len(path))
+        dx_in = current[0] - path[-n_look][0]
+        dy_in = current[1] - path[-n_look][1]
+        len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
+        if len_in > 0.01:
+            dx_in /= len_in
+            dy_in /= len_in
+
+        best_dot = -2
+        next_pt, next_edge = candidates[0]
+        for n, e in candidates:
+            dx_out = n[0] - current[0]
+            dy_out = n[1] - current[1]
+            len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
+            if len_out > 0.01:
+                dot = (dx_in * dx_out + dy_in * dy_out) / len_out
+            else:
+                dot = 0
+            if dot > best_dot:
+                best_dot = dot
+                next_pt, next_edge = n, e
+
+        return next_pt, next_edge
+
     def _trace_all_strokes(self, info: SkeletonInfo) -> List[List[Tuple[int, int]]]:
         """Trace all stroke paths from the skeleton.
 
@@ -551,75 +644,20 @@ class SkeletonAnalyzer:
             pixel coordinate tuples.
         """
         stop_set = info.endpoints | info.junction_pixels
-        visited_edges = set()
+        visited_edges: Set = set()
         strokes = []
-
-        def trace(start, neighbor):
-            edge = (min(start, neighbor), max(start, neighbor))
-            if edge in visited_edges:
-                return None
-            visited_edges.add(edge)
-
-            path = [start, neighbor]
-            current, prev = neighbor, start
-
-            while True:
-                if current in stop_set and len(path) > 2:
-                    break
-
-                neighbors = [n for n in info.adj.get(current, []) if n != prev]
-                candidates = []
-                for n in neighbors:
-                    e = (min(current, n), max(current, n))
-                    if e not in visited_edges:
-                        candidates.append((n, e))
-
-                if not candidates:
-                    break
-
-                if len(candidates) == 1:
-                    next_pt, next_edge = candidates[0]
-                else:
-                    # Pick straightest path
-                    n_look = min(4, len(path))
-                    dx_in = current[0] - path[-n_look][0]
-                    dy_in = current[1] - path[-n_look][1]
-                    len_in = (dx_in * dx_in + dy_in * dy_in) ** 0.5
-                    if len_in > 0.01:
-                        dx_in /= len_in
-                        dy_in /= len_in
-
-                    best_dot = -2
-                    next_pt, next_edge = candidates[0]
-                    for n, e in candidates:
-                        dx_out = n[0] - current[0]
-                        dy_out = n[1] - current[1]
-                        len_out = (dx_out * dx_out + dy_out * dy_out) ** 0.5
-                        if len_out > 0.01:
-                            dot = (dx_in * dx_out + dy_in * dy_out) / len_out
-                        else:
-                            dot = 0
-                        if dot > best_dot:
-                            best_dot = dot
-                            next_pt, next_edge = n, e
-
-                visited_edges.add(next_edge)
-                path.append(next_pt)
-                prev, current = current, next_pt
-
-            return path
 
         # Trace from endpoints first
         for start in sorted(info.endpoints):
             for neighbor in info.adj.get(start, []):
-                p = trace(start, neighbor)
+                p = self._trace_single_path(start, neighbor, info, stop_set, visited_edges)
                 if p and len(p) >= 2:
                     strokes.append(p)
 
         # Then from junction pixels
         for start in sorted(info.junction_pixels):
             for neighbor in info.adj.get(start, []):
-                p = trace(start, neighbor)
+                p = self._trace_single_path(start, neighbor, info, stop_set, visited_edges)
                 if p and len(p) >= 2:
                     strokes.append(p)
 

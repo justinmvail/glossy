@@ -52,11 +52,26 @@ from stroke_flask import (
 from stroke_rendering import render_glyph_mask
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
 
-try:
-    from docker.diffvg_docker import DiffVGDocker
-    _diffvg = DiffVGDocker()
-except ImportError:
-    _diffvg = None
+# Lazy-loaded DiffVG instance (avoids import overhead if not used)
+_diffvg = None
+_diffvg_initialized = False
+
+
+def get_diffvg():
+    """Get the DiffVG Docker instance, lazily initializing on first use.
+
+    Returns:
+        DiffVGDocker instance, or None if unavailable.
+    """
+    global _diffvg, _diffvg_initialized
+    if not _diffvg_initialized:
+        try:
+            from docker.diffvg_docker import DiffVGDocker
+            _diffvg = DiffVGDocker()
+        except ImportError:
+            _diffvg = None
+        _diffvg_initialized = True
+    return _diffvg
 
 
 # Alias for backward compatibility
@@ -969,7 +984,8 @@ def api_diffvg(fid):
     c = request.args.get('c')
     if not c:
         return jsonify(error="Missing ?c= parameter"), 400
-    if _diffvg is None:
+    diffvg = get_diffvg()
+    if diffvg is None:
         return jsonify(error="DiffVG Docker not available"), 503
     f = _font(fid)
     if not f:
@@ -983,7 +999,7 @@ def api_diffvg(fid):
         if not cst:
             return jsonify(error=f"No template available for '{c}'"), 400
         src = 'generated'
-    r = _diffvg.optimize(font_path=fp, char=c, initial_strokes=cst, canvas_size=DEFAULT_CANVAS_SIZE,
-                          num_iterations=DIFFVG_ITERATIONS, stroke_width=DEFAULT_STROKE_WIDTH,
-                          thin_iterations=int(request.args.get('thin', 0)), timeout=DIFFVG_TIMEOUT)
+    r = diffvg.optimize(font_path=fp, char=c, initial_strokes=cst, canvas_size=DEFAULT_CANVAS_SIZE,
+                        num_iterations=DIFFVG_ITERATIONS, stroke_width=DEFAULT_STROKE_WIDTH,
+                        thin_iterations=int(request.args.get('thin', 0)), timeout=DIFFVG_TIMEOUT)
     return (jsonify(error=r['error']), 500) if 'error' in r else jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0), source=src)

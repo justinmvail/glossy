@@ -33,6 +33,9 @@ Typical usage:
 """
 
 
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 from scipy.spatial import cKDTree
 from stroke_shapes import (
@@ -41,6 +44,46 @@ from stroke_shapes import (
 from stroke_shapes import (
     param_vector_to_shapes as _param_vector_to_shapes,
 )
+
+
+@dataclass
+class ScoringContext:
+    """Context object bundling parameters for stroke scoring.
+
+    Groups related scoring parameters together for cleaner function signatures
+    and easier testing. Use this instead of passing 10+ individual parameters.
+
+    Attributes:
+        cloud_tree: KD-tree of target point cloud for coverage queries.
+        n_cloud: Number of points in the target cloud.
+        radius: Coverage radius for point-to-stroke matching.
+        snap_xi: 2D array mapping (y, x) to nearest mask x-coordinate.
+        snap_yi: 2D array mapping (y, x) to nearest mask y-coordinate.
+        w: Width of the mask/image.
+        h: Height of the mask/image.
+        dist_map: Optional distance transform for edge penalty.
+
+    Example:
+        >>> context = ScoringContext(
+        ...     cloud_tree=cKDTree(points),
+        ...     n_cloud=len(points),
+        ...     radius=5.0,
+        ...     snap_xi=snap_xi,
+        ...     snap_yi=snap_yi,
+        ...     w=224, h=224,
+        ...     dist_map=distance_transform_edt(mask)
+        ... )
+        >>> score = score_all_strokes_ctx(param_vector, shape_types, slices, bbox, context)
+    """
+    cloud_tree: cKDTree
+    n_cloud: int
+    radius: float
+    snap_xi: np.ndarray
+    snap_yi: np.ndarray
+    w: int
+    h: int
+    dist_map: Optional[np.ndarray] = None
+
 
 # Module-level constants for scoring
 FREE_OVERLAP = 0.25       # Fraction of overlap allowed before penalty
@@ -229,6 +272,31 @@ def score_all_strokes(param_vector: np.ndarray, shape_types: list[str],
     overlap_penalty = _compute_overlap_penalty(per_shape)
 
     return -(coverage - overlap_penalty - snap_penalty - edge_penalty)
+
+
+def score_all_strokes_ctx(param_vector: np.ndarray, shape_types: list[str],
+                          slices: list[tuple[int, int]], bbox: tuple,
+                          ctx: ScoringContext) -> float:
+    """Score strokes using a ScoringContext for cleaner API.
+
+    Wrapper around score_all_strokes that accepts a ScoringContext instead
+    of individual parameters. Preferred for new code.
+
+    Args:
+        param_vector: Flat numpy array of shape parameters for all strokes.
+        shape_types: List of shape type strings for each stroke.
+        slices: List of (start, end) tuples for parameter indices.
+        bbox: Bounding box as (x_min, y_min, x_max, y_max).
+        ctx: ScoringContext with cloud, snap arrays, and dimensions.
+
+    Returns:
+        Negative float score for minimization.
+    """
+    return score_all_strokes(
+        param_vector, shape_types, slices, bbox,
+        ctx.cloud_tree, ctx.n_cloud, ctx.radius,
+        ctx.snap_yi, ctx.snap_xi, ctx.w, ctx.h, ctx.dist_map
+    )
 
 
 def score_raw_strokes(stroke_arrays: list[np.ndarray], cloud_tree: cKDTree,

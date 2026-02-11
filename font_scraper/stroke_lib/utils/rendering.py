@@ -45,7 +45,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..domain.geometry import BBox
 
-# Import canonical implementation from stroke_rendering
+# Import canonical implementation from stroke_rendering.
+# NOTE: This creates a dependency on the external stroke_rendering module.
+# The stroke_lib package re-exports this function to provide a unified API,
+# but the actual implementation lives in the parent font_scraper package.
+# For testing, mock stroke_rendering.render_glyph_mask before importing this module.
 from stroke_rendering import render_glyph_mask
 
 

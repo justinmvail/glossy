@@ -205,6 +205,60 @@ class MinimalStrokePipeline:
         self._adjust_stroke_paths = adjust_stroke_paths_fn
         self._quick_stroke_score = quick_stroke_score_fn
 
+    @classmethod
+    def create_default(cls, font_path: str, char: str,
+                       canvas_size: int = 224) -> 'MinimalStrokePipeline':
+        """Factory method to create a pipeline with default dependencies.
+
+        Creates a MinimalStrokePipeline pre-configured with the standard
+        implementation functions. Use this for production code; use the
+        constructor directly for testing with mock functions.
+
+        Args:
+            font_path: Path to the font file.
+            char: Character to process.
+            canvas_size: Canvas size for rendering. Defaults to 224.
+
+        Returns:
+            Configured MinimalStrokePipeline instance.
+
+        Example:
+            >>> pipeline = MinimalStrokePipeline.create_default('fonts/Roboto.ttf', 'A')
+            >>> result = pipeline.evaluate_all_variants()
+        """
+        # Lazy imports to avoid circular dependencies
+        from stroke_core import _skel as analyze_skeleton, skel_strokes
+        from stroke_flask import resolve_font_path
+        from stroke_rendering import render_glyph_mask
+        from stroke_scoring import quick_stroke_score
+        from stroke_skeleton import (
+            find_skeleton_segments,
+            generate_straight_line,
+            resample_path,
+            trace_segment,
+            trace_to_region,
+        )
+        from stroke_utils import point_in_region
+
+        return cls(
+            font_path=font_path,
+            char=char,
+            canvas_size=canvas_size,
+            resolve_font_path_fn=resolve_font_path,
+            render_glyph_mask_fn=render_glyph_mask,
+            analyze_skeleton_fn=analyze_skeleton,
+            find_skeleton_segments_fn=find_skeleton_segments,
+            point_in_region_fn=point_in_region,
+            trace_segment_fn=trace_segment,
+            trace_to_region_fn=trace_to_region,
+            generate_straight_line_fn=generate_straight_line,
+            resample_path_fn=resample_path,
+            skeleton_to_strokes_fn=skel_strokes,
+            apply_stroke_template_fn=lambda st, c: st,  # Default no-op
+            adjust_stroke_paths_fn=lambda st, c, m: st,  # Default no-op
+            quick_stroke_score_fn=quick_stroke_score,
+        )
+
     @property
     def analysis(self) -> SkeletonAnalysis | None:
         """Lazy-load skeleton analysis.
@@ -742,7 +796,7 @@ class MinimalStrokePipeline:
 
     def process_stroke_template(self, stroke_template: list,
                                 global_traced: set[tuple[int, int]],
-                                trace_paths: bool = True) -> list[list[float]] | None:
+                                trace_paths: bool = True) -> tuple[list[list[float]], set[tuple[int, int]]] | None:
         """Process a single stroke template into stroke points.
 
         Converts a stroke template (list of waypoints) into a traced path of
@@ -754,13 +808,15 @@ class MinimalStrokePipeline:
                 - An integer (numpad region)
                 - A tuple like (region, 'v') for vertex
                 - A tuple like (region, 'i') for intersection
-            global_traced: Set of already-traced pixels to avoid (modified in place).
+            global_traced: Set of already-traced pixels to avoid (not modified).
             trace_paths: If True, trace actual skeleton paths between waypoints.
                 If False, return only the resolved waypoint positions.
 
         Returns:
-            List of [x, y] coordinate pairs forming the stroke path, or None
-            if the template could not be processed.
+            Tuple of (stroke_path, new_traced) where:
+                - stroke_path: List of [x, y] coordinate pairs
+                - new_traced: Updated set including newly traced pixels
+            Returns None if the template could not be processed.
 
         Note:
             Vertical strokes (two waypoints in the same numpad column) are
@@ -780,7 +836,7 @@ class MinimalStrokePipeline:
         waist_margin = h * WAIST_MARGIN_RATIO
 
         if self._is_vertical_stroke(stroke_template):
-            return self._process_vertical_stroke(stroke_template)
+            return self._process_vertical_stroke(stroke_template), global_traced
 
         waypoints, segment_configs = parse_stroke_template(stroke_template)
         if len(waypoints) < 2:
@@ -799,7 +855,7 @@ class MinimalStrokePipeline:
             resolved.append(resolved_wp)
 
         if not trace_paths:
-            return [[rw.position[0], rw.position[1]] for rw in resolved]
+            return [[rw.position[0], rw.position[1]] for rw in resolved], global_traced
 
         return self._trace_resolved_waypoints(resolved, segment_configs, global_traced)
 
@@ -925,7 +981,7 @@ class MinimalStrokePipeline:
 
     def _trace_resolved_waypoints(self, resolved: list[ResolvedWaypoint],
                                   segment_configs: list[SegmentConfig],
-                                  global_traced: set[tuple[int, int]]) -> list[list[float]]:
+                                  global_traced: set[tuple[int, int]]) -> tuple[list[list[float]], set[tuple[int, int]]]:
         """Trace paths between resolved waypoints.
 
         Connects the sequence of resolved waypoints by tracing paths along
@@ -936,10 +992,12 @@ class MinimalStrokePipeline:
         Args:
             resolved: List of resolved waypoints with pixel positions.
             segment_configs: Configuration for each segment between waypoints.
-            global_traced: Set of already-traced pixels to avoid (modified in place).
+            global_traced: Set of already-traced pixels to avoid (not modified).
 
         Returns:
-            List of [x, y] coordinate pairs forming the complete stroke path.
+            Tuple of (stroke_path, new_traced) where:
+                - stroke_path: List of [x, y] coordinate pairs
+                - new_traced: Updated set including newly traced pixels
 
         Note:
             The tracing logic handles several special cases:
@@ -982,11 +1040,13 @@ class MinimalStrokePipeline:
                 break
 
         self._apply_apex_extensions(full_path, resolved)
-        global_traced.update(already_traced)
 
         if len(full_path) > 3:
             full_path = self._resample_path(full_path, num_points=min(30, len(full_path)))
-        return [[float(p[0]), float(p[1])] for p in full_path]
+
+        # Return both the path and the new traced set (immutable approach)
+        new_traced = global_traced | already_traced
+        return [[float(p[0]), float(p[1])] for p in full_path], new_traced
 
     def run(self, template: list[list], trace_paths: bool = True) -> list[list[list[float]]] | None:
         """Run the full pipeline for a given template.
@@ -1020,7 +1080,10 @@ class MinimalStrokePipeline:
         global_traced = set()
 
         for stroke_template in template:
-            stroke_points = self.process_stroke_template(stroke_template, global_traced, trace_paths)
+            result = self.process_stroke_template(stroke_template, global_traced, trace_paths)
+            if result is None:
+                continue
+            stroke_points, global_traced = result
             if stroke_points and len(stroke_points) >= 2:
                 strokes.append(stroke_points)
 

@@ -272,7 +272,10 @@ def _stream_variant_strokes(pipe: MinimalStrokePipeline, var_name: str,
                 'markers': all_waypoint_markers + stroke_waypoint_markers
             }
 
-        stroke_points = pipe.process_stroke_template(stroke_template, global_traced, trace_paths=True)
+        result = pipe.process_stroke_template(stroke_template, global_traced, trace_paths=True)
+        if result is None:
+            continue
+        stroke_points, global_traced = result
 
         if stroke_points and len(stroke_points) >= 2:
             strokes.append(stroke_points)

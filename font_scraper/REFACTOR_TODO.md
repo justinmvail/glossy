@@ -126,33 +126,34 @@ This document tracks code quality issues identified through a comprehensive revi
 
 ### 4. Testability Issues
 
-- [ ] **stroke_pipeline.py:115-180** - Constructor requires 11 callback parameters
-  - Create factory method with sensible defaults
-  - Use dependency injection container or config object
+- [x] **stroke_pipeline.py:115-180** - Constructor requires 11 callback parameters
+  - ✅ Added `MinimalStrokePipeline.create_default()` factory method
 
-- [ ] **stroke_lib/api/services.py:306-427** - `FontService` hardcodes sqlite3.connect()
-  - Accept connection/factory as parameter
-  - Enable mock database for testing
+- [x] **stroke_lib/api/services.py:306-427** - `FontService` hardcodes sqlite3.connect()
+  - ✅ Accept optional `connection_factory` parameter for testing
+  - ✅ Added `_get_connection()` helper method
 
 - [ ] **stroke_routes_core.py:93-133** - Routes directly query database
-  - Extract data access layer for testability
+  - Extract data access layer for testability (deferred - requires larger refactor)
 
-- [ ] **stroke_scoring.py:46-152** - `score_all_strokes()` takes 10 parameters
-  - Bundle into `ScoringContext` dataclass
+- [x] **stroke_scoring.py:46-152** - `score_all_strokes()` takes 10 parameters
+  - ✅ Created `ScoringContext` dataclass to bundle parameters
+  - ✅ Added `score_all_strokes_ctx()` wrapper function
 
-- [ ] **stroke_lib/analysis/skeleton.py:552-605** - Complex nested functions
-  - Promote to class methods for direct testing
+- [x] **stroke_lib/analysis/skeleton.py:552-605** - Complex nested functions
+  - ✅ Extracted `_trace_single_path()` and `_pick_straightest_candidate()` as static methods
 
 ### 5. Tight Coupling
 
-- [ ] **stroke_lib/utils/rendering.py:49** - Imports from external stroke_rendering
-  - Clarify dependency or copy implementation
+- [x] **stroke_lib/utils/rendering.py:49** - Imports from external stroke_rendering
+  - ✅ Added documentation explaining the dependency and testing strategy
 
-- [ ] **stroke_pipeline.py:859-928** - `global_traced` set mutated as side effect
-  - Return new set instead of mutating parameter
+- [x] **stroke_pipeline.py:859-928** - `global_traced` set mutated as side effect
+  - ✅ Changed to return tuple (path, new_traced) instead of mutating
+  - ✅ Updated callers to handle new return type
 
-- [ ] **stroke_routes_batch.py:55-59** - Global `_diffvg` variable
-  - Use lazy initialization pattern or dependency injection
+- [x] **stroke_routes_batch.py:55-59** - Global `_diffvg` variable
+  - ✅ Converted to lazy initialization with `get_diffvg()` function
 
 ---
 
@@ -381,6 +382,13 @@ This document tracks code quality issues identified through a comprehensive revi
   - stroke_skeleton.py: Extracted _compute_neighbor_score(), _bfs_trace_path() for trace_skeleton_path()
   - stroke_routes_stream.py: Extracted _get_initial_strokes(), _determine_completion_reason()
   - stroke_pipeline_stream.py: Extracted _create_pipeline(), _consume_subgenerator(), _stream_template_variants()
+- [x] Testability and coupling improvements (2026-02-10)
+  - stroke_pipeline.py: Added create_default() factory, fixed global_traced mutation
+  - stroke_lib/api/services.py: Added connection_factory for testable FontService
+  - stroke_scoring.py: Added ScoringContext dataclass and score_all_strokes_ctx()
+  - stroke_lib/analysis/skeleton.py: Promoted nested trace function to static methods
+  - stroke_routes_batch.py: Lazy init for _diffvg via get_diffvg()
+  - stroke_lib/utils/rendering.py: Documented external dependency
 
 ### In Progress
 - [ ] None currently

@@ -290,23 +290,43 @@ class FontService:
 
     Attributes:
         db_path: Path to the SQLite database file containing font data.
+        connection_factory: Optional callable that returns a database connection.
+            If not provided, uses sqlite3.connect(db_path).
 
     Example:
         >>> service = FontService('/data/fonts.db')
         >>> path = service.get_font_path(123)
         >>> strokes = service.get_character_strokes(123, 'A')
         >>> service.save_character_strokes(123, 'A', strokes)
+
+        # For testing with a mock database:
+        >>> mock_conn = create_mock_connection()
+        >>> service = FontService('/data/fonts.db', connection_factory=lambda: mock_conn)
     """
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, connection_factory=None):
         """Initialize the font service.
 
         Args:
             db_path: Path to the SQLite database file. The database should
                 contain 'fonts' and 'characters' tables with appropriate
                 schema.
+            connection_factory: Optional callable returning a database connection.
+                Useful for testing with mock databases. If None, uses
+                sqlite3.connect(db_path).
         """
         self.db_path = db_path
+        self._connection_factory = connection_factory
+
+    def _get_connection(self):
+        """Get a database connection using the configured factory.
+
+        Returns:
+            Database connection object.
+        """
+        if self._connection_factory:
+            return self._connection_factory()
+        return sqlite3.connect(self.db_path)
 
     def get_font_path(self, font_id: int) -> Optional[str]:
         """Get file path for a font by ID.
@@ -328,7 +348,7 @@ class FontService:
         """
         conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT file_path FROM fonts WHERE id = ?",
@@ -375,7 +395,7 @@ class FontService:
 
         conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT strokes FROM characters WHERE font_id = ? AND char = ?",
@@ -433,7 +453,7 @@ class FontService:
 
         conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             conn.execute(
                 """
                 INSERT OR REPLACE INTO characters (font_id, char, strokes)
