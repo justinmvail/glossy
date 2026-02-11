@@ -32,7 +32,7 @@ Generated: 2026-02-11
 15. [x] Direct DB calls scattered - create CharacterRepository
 16. [x] Rendering logic scattered - consolidate into GlyphRenderer abstraction
 17. [x] Inconsistent scraper interfaces - create common FontSource base class
-18. [ ] Multiple template systems - unify NUMPAD_TEMPLATES and template_morph.py
+18. [x] Multiple template systems - unify NUMPAD_TEMPLATES and template_morph.py
 
 ### HIGH - Code Quality
 19. [ ] stroke_merge.py - Extract magic thresholds (18, 20, 15, 25) to constants

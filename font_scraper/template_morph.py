@@ -65,45 +65,75 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
 
 # Letter templates: vertices connected by strokes
-TEMPLATES = {
-    'A': {'strokes': [['BL', 'TC'], ['TC', 'BR'], ['ML', 'MR']], 'no_morph': [2]},
+# These templates define stroke paths using vertex names from the 9-point grid.
+# Now unified with stroke_templates.py via TemplateRegistry.
+#
+# Local TEMPLATES dict for backward compatibility - uses the unified registry
+# but adds morph-specific stroke definitions (like TR_TOP, TR_BOT for B).
+#
+# For most characters, use get_morph_template() which delegates to the registry.
+# This local dict only contains characters needing special vertex names.
+MORPH_TEMPLATES = {
+    # B needs special vertices for the two bumps
     'B': {'strokes': [['TL', 'BL'], ['TL', 'TR_TOP', 'ML'], ['ML', 'TR_BOT', 'BL']], 'no_morph': [1, 2]},
-    'C': {'strokes': [['TR', 'TL', 'BL', 'BR']]},
-    'D': {'strokes': [['TL', 'BL'], ['TL', 'TR', 'BR', 'BL']]},
-    'E': {'strokes': [['TL', 'BL'], ['TL', 'TR'], ['ML', 'MR'], ['BL', 'BR']]},
-    'F': {'strokes': [['TL', 'BL'], ['TL', 'TR'], ['ML', 'MR']]},
-    'G': {'strokes': [['TR', 'TL', 'BL', 'BR', 'MR'], ['MR', 'MC']]},
-    'H': {'strokes': [['TL', 'BL'], ['TR', 'BR'], ['ML', 'MR']]},
-    'I': {'strokes': [['TC', 'BC']]},
-    'J': {'strokes': [['TR', 'BR', 'BC', 'BL']]},
-    'K': {'strokes': [['TL', 'BL'], ['TR', 'ML'], ['ML', 'BR']]},
-    'L': {'strokes': [['TL', 'BL'], ['BL', 'BR']]},
-    'M': {'strokes': [['BL', 'TL', 'MC', 'TR', 'BR']]},
-    'N': {'strokes': [['BL', 'TL', 'BR', 'TR']]},
-    'O': {'strokes': [['TC', 'TL', 'BL', 'BC', 'BR', 'TR', 'TC']]},
-    'P': {'strokes': [['TL', 'BL'], ['TL', 'TR', 'MR', 'ML']]},
-    'Q': {'strokes': [['TC', 'TL', 'BL', 'BC', 'BR', 'TR', 'TC'], ['MC', 'BR']]},
-    'R': {'strokes': [['TL', 'BL'], ['TL', 'TR', 'MR', 'ML'], ['ML', 'BR']]},
-    'S': {'strokes': [['TR', 'TL', 'ML', 'MR', 'BR', 'BL']]},
-    'T': {'strokes': [['TL', 'TR'], ['TC', 'BC']]},
-    'U': {'strokes': [['TL', 'BL', 'BC', 'BR', 'TR']]},
-    'V': {'strokes': [['TL', 'BC', 'TR']]},
-    'W': {'strokes': [['TL', 'BL', 'MC', 'BR', 'TR']]},
-    'X': {'strokes': [['TL', 'BR'], ['TR', 'BL']]},
-    'Y': {'strokes': [['TL', 'MC'], ['TR', 'MC'], ['MC', 'BC']]},
-    'Z': {'strokes': [['TL', 'TR', 'BL', 'BR']]},
 }
-"""dict: Letter templates defining stroke paths.
+"""dict: Morph-specific templates with special vertex names.
 
-Each entry maps a character to a dict with:
-    - 'strokes': List of stroke paths, where each path is a list of vertex names
-    - 'no_morph': Optional list of stroke indices that should not be morphed
-      (useful for crossbars that intentionally cross the letter shape)
+Most characters use the unified TemplateRegistry. This dict contains
+only characters needing special vertex names not in the standard 9-point grid
+(e.g., TR_TOP, TR_BOT for B's two bumps).
+"""
 
-Vertex names use a grid convention:
-    - T/M/B = Top/Middle/Bottom row
-    - L/C/R = Left/Center/Right column
-    - Special names like TR_TOP, TR_BOT for letters with multiple bumps
+
+def get_morph_template(char: str) -> dict | None:
+    """Get template for morphing, using unified registry with local overrides.
+
+    First checks MORPH_TEMPLATES for characters with special vertices,
+    then falls back to the unified TemplateRegistry.
+
+    Args:
+        char: The character to get template for.
+
+    Returns:
+        Dict with 'strokes' and optional 'no_morph', or None if not found.
+    """
+    # Check local overrides first
+    if char in MORPH_TEMPLATES:
+        return MORPH_TEMPLATES[char]
+
+    # Fall back to unified registry
+    from stroke_templates import get_template_registry
+    registry = get_template_registry()
+    return registry.get_morph_dict(char)
+
+
+# Legacy TEMPLATES alias for backward compatibility
+# Returns morph template dict for a character
+class _TemplatesProxy:
+    """Proxy class to provide dict-like access to unified templates."""
+
+    def __getitem__(self, char: str) -> dict:
+        template = get_morph_template(char)
+        if template is None:
+            raise KeyError(f"No template for character: {char}")
+        return template
+
+    def __contains__(self, char: str) -> bool:
+        return get_morph_template(char) is not None
+
+    def get(self, char: str, default=None) -> dict | None:
+        return get_morph_template(char) or default
+
+    def keys(self):
+        from stroke_templates import get_template_registry
+        return get_template_registry().get_all_chars()
+
+
+TEMPLATES = _TemplatesProxy()
+"""Proxy providing dict-like access to unified templates.
+
+Maintains backward compatibility with code using TEMPLATES[char].
+Delegates to get_morph_template() which uses the unified TemplateRegistry.
 """
 
 # Default vertex positions (relative to bounding box, 0-1)

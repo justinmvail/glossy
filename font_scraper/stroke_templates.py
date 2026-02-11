@@ -2,7 +2,7 @@
 
 This module contains all the template data used by the stroke editor for
 generating strokes from font glyphs. Templates are organized into three
-complementary systems:
+complementary systems, unified via TemplateRegistry.
 
 Template Systems:
     LETTER_TEMPLATES:
@@ -25,6 +25,15 @@ Template Systems:
     SHAPE_TEMPLATES:
         Imported from stroke_shape_templates module.
         Parametric shape primitives (lines, arcs, loops).
+
+Unified Template System:
+    CharacterTemplate:
+        Dataclass that consolidates all template information for a character.
+        Contains region strokes, numpad variants, no_morph flags, etc.
+
+    TemplateRegistry:
+        Central registry providing unified access to all template data.
+        Use get_template(char) to retrieve a CharacterTemplate.
 
 Coordinate Systems:
     Region Grid (LETTER_TEMPLATES):
@@ -55,7 +64,19 @@ Typical usage example:
     [('TC', 'BL'), ('TC', 'BR'), ('ML', 'MR')]
     >>> NUMPAD_TEMPLATES['A']
     [[1, 'v(8)', 3], [4, 6]]
+
+    # Using the unified registry
+    >>> from stroke_templates import TemplateRegistry
+    >>> registry = TemplateRegistry.get_instance()
+    >>> template = registry.get_template('A')
+    >>> template.region_strokes
+    [['TC', 'BL'], ['TC', 'BR'], ['ML', 'MR']]
 """
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
 
 
 # -----------------------------------------------------------------------------
@@ -665,3 +686,199 @@ NUMPAD_POS = {
     2: (0.5, 1.0),  # Bottom-center
     3: (1.0, 1.0),  # Bottom-right
 }
+
+# Region position names - maps region codes to fractional coordinates
+# Same grid as NUMPAD_POS but using letter names
+REGION_POS = {
+    'TL': (0.0, 0.0), 'TC': (0.5, 0.0), 'TR': (1.0, 0.0),
+    'ML': (0.0, 0.5), 'MC': (0.5, 0.5), 'MR': (1.0, 0.5),
+    'BL': (0.0, 1.0), 'BC': (0.5, 1.0), 'BR': (1.0, 1.0),
+}
+
+# Mapping between numpad positions and region names
+NUMPAD_TO_REGION = {
+    7: 'TL', 8: 'TC', 9: 'TR',
+    4: 'ML', 5: 'MC', 6: 'MR',
+    1: 'BL', 2: 'BC', 3: 'BR',
+}
+
+REGION_TO_NUMPAD = {v: k for k, v in NUMPAD_TO_REGION.items()}
+
+
+# -----------------------------------------------------------------------------
+# Unified Template System
+# -----------------------------------------------------------------------------
+
+# Extended template data with morph flags (for template_morph.py compatibility)
+# Format: char -> {'no_morph': [indices]} for strokes that shouldn't be morphed
+MORPH_FLAGS = {
+    'A': {'no_morph': [2]},  # Crossbar crosses diagonal legs
+    'B': {'no_morph': [1, 2]},  # Curved parts follow their own path
+    'E': {'no_morph': []},
+    'F': {'no_morph': []},
+    'H': {'no_morph': []},
+    'T': {'no_morph': []},
+}
+
+
+@dataclass
+class CharacterTemplate:
+    """Unified template for a character.
+
+    Consolidates all template information from different systems into
+    a single dataclass for consistent access.
+
+    Attributes:
+        char: The character this template is for.
+        region_strokes: Stroke definitions using region names (TL, TC, etc.).
+            Each stroke is a list of region names it passes through.
+        numpad_variants: Dict mapping variant name to numpad waypoint sequences.
+        no_morph: List of stroke indices that shouldn't be morphed to fit
+            the font outline (e.g., crossbars that intentionally cross).
+        extra_vertices: Dict of extra vertex names to relative positions
+            (e.g., 'TR_TOP': (0.9, 0.15) for B's upper bump).
+    """
+    char: str
+    region_strokes: list[list[str]] = field(default_factory=list)
+    numpad_variants: dict[str, list[list]] = field(default_factory=dict)
+    no_morph: list[int] = field(default_factory=list)
+    extra_vertices: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+    @property
+    def default_numpad(self) -> list[list] | None:
+        """Get the default numpad variant."""
+        if not self.numpad_variants:
+            return None
+        return next(iter(self.numpad_variants.values()))
+
+    def get_numpad_variant(self, name: str) -> list[list] | None:
+        """Get a specific numpad variant by name."""
+        return self.numpad_variants.get(name)
+
+    def to_morph_dict(self) -> dict:
+        """Convert to template_morph.py TEMPLATES format.
+
+        Returns:
+            Dict with 'strokes' and optional 'no_morph' keys.
+        """
+        result = {'strokes': self.region_strokes}
+        if self.no_morph:
+            result['no_morph'] = self.no_morph
+        return result
+
+
+class TemplateRegistry:
+    """Central registry for all character templates.
+
+    Provides unified access to template data from all systems:
+    - Region-based strokes (LETTER_TEMPLATES)
+    - Numpad variants (NUMPAD_TEMPLATE_VARIANTS)
+    - Morph flags (MORPH_FLAGS)
+
+    Uses singleton pattern - access via get_instance().
+
+    Example:
+        >>> registry = TemplateRegistry.get_instance()
+        >>> template = registry.get_template('A')
+        >>> template.region_strokes
+        [['TC', 'BL'], ['TC', 'BR'], ['ML', 'MR']]
+        >>> template.numpad_variants
+        {'pointed': [[1, 'v(8)', 3], [4, 6]], 'flat_top': [[1, 7, 9, 3], [4, 6]]}
+    """
+
+    _instance: TemplateRegistry | None = None
+
+    def __init__(self):
+        """Initialize the registry by building unified templates."""
+        self._templates: dict[str, CharacterTemplate] = {}
+        self._build_templates()
+
+    @classmethod
+    def get_instance(cls) -> TemplateRegistry:
+        """Get the singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _build_templates(self) -> None:
+        """Build CharacterTemplate objects from all template sources."""
+        # Get all characters from both systems
+        all_chars = set(LETTER_TEMPLATES.keys()) | set(NUMPAD_TEMPLATE_VARIANTS.keys())
+
+        for char in all_chars:
+            # Get region strokes from LETTER_TEMPLATES
+            region_strokes = []
+            if char in LETTER_TEMPLATES:
+                # Convert tuples to lists
+                region_strokes = [list(stroke) for stroke in LETTER_TEMPLATES[char]]
+
+            # Get numpad variants
+            numpad_variants = NUMPAD_TEMPLATE_VARIANTS.get(char, {})
+
+            # Get morph flags
+            morph_info = MORPH_FLAGS.get(char, {})
+            no_morph = morph_info.get('no_morph', [])
+
+            self._templates[char] = CharacterTemplate(
+                char=char,
+                region_strokes=region_strokes,
+                numpad_variants=numpad_variants,
+                no_morph=no_morph,
+            )
+
+    def get_template(self, char: str) -> CharacterTemplate | None:
+        """Get the template for a character.
+
+        Args:
+            char: The character to get template for.
+
+        Returns:
+            CharacterTemplate or None if not found.
+        """
+        return self._templates.get(char)
+
+    def get_all_chars(self) -> list[str]:
+        """Get list of all characters with templates."""
+        return list(self._templates.keys())
+
+    def get_region_strokes(self, char: str) -> list[list[str]] | None:
+        """Get region-based strokes for a character.
+
+        Args:
+            char: The character.
+
+        Returns:
+            List of stroke definitions or None.
+        """
+        template = self._templates.get(char)
+        return template.region_strokes if template else None
+
+    def get_numpad_variants(self, char: str) -> dict[str, list[list]] | None:
+        """Get numpad variants for a character.
+
+        Args:
+            char: The character.
+
+        Returns:
+            Dict of variant_name -> stroke sequences, or None.
+        """
+        template = self._templates.get(char)
+        return template.numpad_variants if template else None
+
+    def get_morph_dict(self, char: str) -> dict | None:
+        """Get template_morph.py compatible dict for a character.
+
+        Args:
+            char: The character.
+
+        Returns:
+            Dict with 'strokes' and optional 'no_morph', or None.
+        """
+        template = self._templates.get(char)
+        return template.to_morph_dict() if template else None
+
+
+# Convenience function for quick access
+def get_template_registry() -> TemplateRegistry:
+    """Get the global template registry instance."""
+    return TemplateRegistry.get_instance()
