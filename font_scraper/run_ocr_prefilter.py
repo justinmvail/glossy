@@ -187,23 +187,21 @@ def get_passing_fonts(db_path: str) -> list:
             - file_path (str): Absolute path to the font file
     """
     import sqlite3
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT f.id, f.name, f.file_path FROM fonts f
-        JOIN font_checks fc ON f.id = fc.font_id
-        WHERE fc.completeness_score >= 0.9
-          AND fc.is_cursive = 0
-          AND (fc.is_duplicate = 0 OR fc.is_duplicate IS NULL)
-          AND fc.prefilter_passed IS NULL
-        ORDER BY f.id
-    """)
+        cursor.execute("""
+            SELECT f.id, f.name, f.file_path FROM fonts f
+            JOIN font_checks fc ON f.id = fc.font_id
+            WHERE fc.completeness_score >= 0.9
+              AND fc.is_cursive = 0
+              AND (fc.is_duplicate = 0 OR fc.is_duplicate IS NULL)
+              AND fc.prefilter_passed IS NULL
+            ORDER BY f.id
+        """)
 
-    fonts = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return fonts
+        return [dict(row) for row in cursor.fetchall()]
 
 
 _BATCH_OCR_SCRIPT = '''
@@ -496,41 +494,39 @@ def _print_sample_results(db_path: str, threshold: float) -> None:
         threshold: Confidence threshold for pass/fail display.
     """
     import sqlite3
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    print("\n" + "=" * 60)
-    print("SAMPLE RESULTS")
-    print("=" * 60)
+        print("\n" + "=" * 60)
+        print("SAMPLE RESULTS")
+        print("=" * 60)
 
-    print("\nHighest confidence (best OCR):")
-    cursor.execute("""
-        SELECT f.name, fc.prefilter_confidence, fc.prefilter_ocr_text
-        FROM fonts f
-        JOIN font_checks fc ON f.id = fc.font_id
-        WHERE fc.prefilter_confidence IS NOT NULL
-        ORDER BY fc.prefilter_confidence DESC
-        LIMIT 5
-    """)
-    for row in cursor.fetchall():
-        status = "PASS" if row['prefilter_confidence'] >= threshold else "FAIL"
-        print(f"  {row['prefilter_confidence']:.1%} [{status}] {row['name'][:30]:30} -> '{row['prefilter_ocr_text']}'")
+        print("\nHighest confidence (best OCR):")
+        cursor.execute("""
+            SELECT f.name, fc.prefilter_confidence, fc.prefilter_ocr_text
+            FROM fonts f
+            JOIN font_checks fc ON f.id = fc.font_id
+            WHERE fc.prefilter_confidence IS NOT NULL
+            ORDER BY fc.prefilter_confidence DESC
+            LIMIT 5
+        """)
+        for row in cursor.fetchall():
+            status = "PASS" if row['prefilter_confidence'] >= threshold else "FAIL"
+            print(f"  {row['prefilter_confidence']:.1%} [{status}] {row['name'][:30]:30} -> '{row['prefilter_ocr_text']}'")
 
-    print("\nLowest confidence (worst OCR):")
-    cursor.execute("""
-        SELECT f.name, fc.prefilter_confidence, fc.prefilter_ocr_text
-        FROM fonts f
-        JOIN font_checks fc ON f.id = fc.font_id
-        WHERE fc.prefilter_confidence IS NOT NULL
-        ORDER BY fc.prefilter_confidence ASC
-        LIMIT 5
-    """)
-    for row in cursor.fetchall():
-        status = "PASS" if row['prefilter_confidence'] >= threshold else "FAIL"
-        print(f"  {row['prefilter_confidence']:.1%} [{status}] {row['name'][:30]:30} -> '{row['prefilter_ocr_text']}'")
-
-    conn.close()
+        print("\nLowest confidence (worst OCR):")
+        cursor.execute("""
+            SELECT f.name, fc.prefilter_confidence, fc.prefilter_ocr_text
+            FROM fonts f
+            JOIN font_checks fc ON f.id = fc.font_id
+            WHERE fc.prefilter_confidence IS NOT NULL
+            ORDER BY fc.prefilter_confidence ASC
+            LIMIT 5
+        """)
+        for row in cursor.fetchall():
+            status = "PASS" if row['prefilter_confidence'] >= threshold else "FAIL"
+            print(f"  {row['prefilter_confidence']:.1%} [{status}] {row['name'][:30]:30} -> '{row['prefilter_ocr_text']}'")
 
 
 def run_prefilter(db_path: str, threshold: float = 0.7) -> None:
