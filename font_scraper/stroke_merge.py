@@ -836,6 +836,23 @@ def absorb_proximity_stubs(strokes: list[list[tuple]], stub_threshold: int = 20,
     return strokes
 
 
+def _build_cluster_index(strokes: list[list[tuple]], assigned: list[set]) -> dict[int, set[int]]:
+    """Build an index mapping cluster IDs to stroke indices with endpoints there.
+
+    Returns:
+        Dict mapping cluster_id -> set of stroke indices.
+    """
+    index = {}
+    for si, s in enumerate(strokes):
+        for is_end in [False, True]:
+            cid = endpoint_cluster(s, is_end, assigned)
+            if cid >= 0:
+                if cid not in index:
+                    index[cid] = set()
+                index[cid].add(si)
+    return index
+
+
 def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
                         stub_threshold: int = 20) -> list[list[tuple]]:
     """Remove orphaned short stubs with no neighbors at their junction clusters.
@@ -861,6 +878,9 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
     changed = True
     while changed:
         changed = False
+        # Build cluster index once per iteration (O(n) instead of O(n²))
+        cluster_index = _build_cluster_index(strokes, assigned)
+
         for si in range(len(strokes)):
             s = strokes[si]
             if len(s) >= stub_threshold:
@@ -872,15 +892,10 @@ def remove_orphan_stubs(strokes: list[list[tuple]], assigned: list[set],
             for cid in [sc, ec]:
                 if cid < 0:
                     continue
-                neighbors = 0
-                for sj in range(len(strokes)):
-                    if sj == si:
-                        continue
-                    if endpoint_cluster(strokes[sj], False, assigned) == cid:
-                        neighbors += 1
-                    if endpoint_cluster(strokes[sj], True, assigned) == cid:
-                        neighbors += 1
-                if neighbors == 0:
+                # Count neighbors using index (O(1) lookup instead of O(n))
+                neighbors_at_cluster = cluster_index.get(cid, set())
+                # Subtract 1 for self (this stroke is in the set)
+                if len(neighbors_at_cluster) <= 1:
                     orphan = True
                     break
 

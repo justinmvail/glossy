@@ -25,11 +25,19 @@ Typical usage:
 
 from __future__ import annotations
 import io
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from stroke_flask import DEFAULT_CANVAS_SIZE, DEFAULT_FONT_SIZE, resolve_font_path
+
+
+# LRU cache for font objects to avoid repeated disk I/O
+@lru_cache(maxsize=32)
+def _cached_font(font_path: str, size: int):
+    """Load a font with caching to avoid repeated disk I/O."""
+    return ImageFont.truetype(font_path, size)
 
 if TYPE_CHECKING:
     from PIL.ImageFont import FreeTypeFont
@@ -71,7 +79,7 @@ def _scale_font_to_fit(font_path: str, pil_font, char: str,
     new_size = int(current_size * scale)
 
     try:
-        scaled_font = ImageFont.truetype(font_path, new_size)
+        scaled_font = _cached_font(font_path, new_size)
         new_bbox = scaled_font.getbbox(char)
         return scaled_font, new_bbox
     except OSError:
@@ -123,7 +131,7 @@ def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=
     """
     font_path = resolve_font_path(font_path)
     try:
-        pil_font = ImageFont.truetype(font_path, font_size)
+        pil_font = _cached_font(font_path, font_size)
     except OSError:
         return None
 
@@ -142,11 +150,16 @@ def render_char_image(font_path, char, font_size=DEFAULT_FONT_SIZE, canvas_size=
     return buf.getvalue()
 
 
+# Cache for rendered glyph masks - key is (font_path, char, canvas_size)
+_mask_cache = {}
+_MASK_CACHE_MAX_SIZE = 256
+
+
 def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
     """Render a glyph as a binary mask for image processing.
 
     Creates a boolean numpy array where True indicates pixels that are
-    part of the glyph (ink pixels).
+    part of the glyph (ink pixels). Results are cached for performance.
 
     Args:
         font_path: Path to the font file. Can be absolute or relative.
@@ -163,10 +176,17 @@ def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
         - Automatically scales down for large glyphs (>90% of canvas).
         - Threshold of 128 is used to binarize the grayscale rendering.
         - The glyph is centered within the canvas.
+        - Results are cached (up to 256 entries) for repeated calls.
     """
     font_path = resolve_font_path(font_path)
+
+    # Check cache first
+    cache_key = (font_path, char, canvas_size)
+    if cache_key in _mask_cache:
+        return _mask_cache[cache_key].copy()  # Return copy to prevent mutation
+
     try:
-        pil_font = ImageFont.truetype(font_path, 200)
+        pil_font = _cached_font(font_path, 200)
     except OSError:
         return None
 
@@ -180,7 +200,16 @@ def render_glyph_mask(font_path, char, canvas_size=DEFAULT_CANVAS_SIZE):
     x, y = _compute_centered_position(bbox, canvas_size)
     draw.text((x, y), char, fill=0, font=pil_font)
 
-    return np.array(img) < BINARIZATION_THRESHOLD
+    result = np.array(img) < BINARIZATION_THRESHOLD
+
+    # Cache the result (with simple LRU eviction)
+    if len(_mask_cache) >= _MASK_CACHE_MAX_SIZE:
+        # Remove oldest entry (first key)
+        oldest = next(iter(_mask_cache))
+        del _mask_cache[oldest]
+    _mask_cache[cache_key] = result.copy()
+
+    return result
 
 
 def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:

@@ -49,12 +49,24 @@ Systematic review of font_scraper codebase for quality improvements.
 
 ## 3. Performance
 
-- [ ] O(n²) algorithms - inefficient loops
-- [ ] Repeated expensive operations - missing caching
-- [ ] N+1 queries - database query patterns
-- [ ] Blocking I/O - synchronous bottlenecks
-- [ ] Memory leaks - reference cycles, unclosed resources
-- [ ] Unindexed queries - slow database operations
+- [x] O(n²) algorithms - inefficient loops
+  - **Status:** FIXED - `remove_orphan_stubs()` O(n²) → O(n) via cluster index
+  - Added `_build_cluster_index()` for O(1) neighbor lookup
+- [x] Repeated expensive operations - missing caching
+  - **Status:** FIXED - Added caching to stroke_rendering.py
+  - `_cached_font()` LRU cache (32 entries) for font loading
+  - `_mask_cache` dict (256 entries) for rendered glyph masks
+- [x] N+1 queries - database query patterns
+  - **Status:** Acceptable - most queries are single-record lookups
+  - Batch operations already use bulk queries
+- [x] Blocking I/O - synchronous bottlenecks
+  - **Status:** Acceptable for CLI/local use
+  - Flask routes handle one request at a time (by design)
+- [x] Memory leaks - reference cycles, unclosed resources
+  - **Status:** PASS - path tracing has natural bounds (skeleton size)
+  - DB connections use context managers
+- [x] Unindexed queries - slow database operations
+  - **Status:** PASS - 13 indexes already exist on common query patterns
 
 ## 4. Reliability
 
@@ -162,4 +174,9 @@ Systematic review of font_scraper codebase for quality improvements.
 - Fixed circular dependency: stroke_core ↔ stroke_pipeline (lazy import)
 - Added TestRunRepository class to stroke_flask.py
 - Migrated stroke_routes_batch.py to use TestRunRepository (6 DB calls)
+
+### Session 1: Performance Fixes
+- stroke_merge.py: `remove_orphan_stubs()` O(n²) → O(n) with cluster index
+- stroke_rendering.py: Added LRU cache for font loading (32 entries)
+- stroke_rendering.py: Added mask cache for glyph rendering (256 entries)
 
