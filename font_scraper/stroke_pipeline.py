@@ -57,6 +57,7 @@ Dependencies:
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -79,6 +80,169 @@ VERTICAL_ANGLE_MAX = 120
 # Waist region calculation ratios (fraction of glyph height)
 WAIST_TOLERANCE_RATIO = 0.15  # For detecting waist pixels near mid_y
 WAIST_MARGIN_RATIO = 0.05  # Margin for middle-third region detection
+
+
+@dataclass
+class PipelineConfig:
+    """Configuration for a stroke pipeline.
+
+    Encapsulates all tunable parameters for pipeline creation, allowing
+    easy creation of different pipeline configurations for various use cases.
+
+    Attributes:
+        canvas_size: Size of the square canvas for glyph rendering. Larger
+            values provide more detail but slower processing. Default: 224.
+        trace_paths: If True, trace actual skeleton paths between waypoints.
+            If False, return only resolved waypoint positions. Default: True.
+        use_skeleton_fallback: If True, fall back to skeleton-based stroke
+            extraction when template-based methods fail. Default: True.
+        min_stroke_len: Minimum stroke length for skeleton extraction.
+            Shorter strokes are filtered out. Default: 5.
+        resample_points: Target number of points when resampling stroke paths.
+            Higher values give smoother paths. Default: 30.
+        score_stroke_penalty: Penalty weight applied per extra/missing stroke
+            compared to expected count. Default: 0.3.
+    """
+    canvas_size: int = 224
+    trace_paths: bool = True
+    use_skeleton_fallback: bool = True
+    min_stroke_len: int = 5
+    resample_points: int = 30
+    score_stroke_penalty: float = 0.3
+
+
+class PipelineFactory:
+    """Factory for creating configured stroke pipelines.
+
+    Provides named configurations for common use cases, making it easy to
+    create pipelines optimized for different scenarios (speed vs. quality).
+
+    Example:
+        >>> # Standard pipeline
+        >>> pipeline = PipelineFactory.create_default('fonts/Roboto.ttf', 'A')
+
+        >>> # Fast pipeline for batch processing
+        >>> pipeline = PipelineFactory.create_fast('fonts/Roboto.ttf', 'A')
+
+        >>> # High quality for final output
+        >>> pipeline = PipelineFactory.create_high_quality('fonts/Roboto.ttf', 'A')
+
+        >>> # Custom configuration
+        >>> config = PipelineConfig(canvas_size=448, resample_points=50)
+        >>> pipeline = PipelineFactory.create_with_config('fonts/Roboto.ttf', 'A', config)
+    """
+
+    @staticmethod
+    def create_default(font_path: str, char: str) -> 'MinimalStrokePipeline':
+        """Create a pipeline with default settings.
+
+        Standard configuration suitable for most use cases. Balances
+        quality and performance.
+
+        Args:
+            font_path: Path to the font file.
+            char: Character to process.
+
+        Returns:
+            Configured MinimalStrokePipeline instance.
+        """
+        return MinimalStrokePipeline.create_default(font_path, char)
+
+    @staticmethod
+    def create_fast(font_path: str, char: str) -> 'MinimalStrokePipeline':
+        """Create a fast pipeline with reduced quality settings.
+
+        Optimized for batch processing where speed is more important than
+        perfect quality. Uses smaller canvas and fewer resample points.
+
+        Args:
+            font_path: Path to the font file.
+            char: Character to process.
+
+        Returns:
+            Configured MinimalStrokePipeline instance with fast settings.
+        """
+        config = PipelineConfig(
+            canvas_size=128,
+            resample_points=20,
+            min_stroke_len=3,
+        )
+        return PipelineFactory.create_with_config(font_path, char, config)
+
+    @staticmethod
+    def create_high_quality(font_path: str, char: str) -> 'MinimalStrokePipeline':
+        """Create a high-quality pipeline for best results.
+
+        Optimized for final output where quality matters most. Uses larger
+        canvas and more resample points for smoother strokes.
+
+        Args:
+            font_path: Path to the font file.
+            char: Character to process.
+
+        Returns:
+            Configured MinimalStrokePipeline instance with high-quality settings.
+        """
+        config = PipelineConfig(
+            canvas_size=448,
+            resample_points=50,
+            min_stroke_len=8,
+        )
+        return PipelineFactory.create_with_config(font_path, char, config)
+
+    @staticmethod
+    def create_with_config(font_path: str, char: str,
+                           config: PipelineConfig) -> 'MinimalStrokePipeline':
+        """Create a pipeline with custom configuration.
+
+        Args:
+            font_path: Path to the font file.
+            char: Character to process.
+            config: Custom pipeline configuration.
+
+        Returns:
+            Configured MinimalStrokePipeline instance.
+        """
+        # Lazy imports to avoid circular dependencies
+        from stroke_core import _analyze_skeleton_legacy as analyze_skeleton
+        from stroke_core import skel_strokes
+        from stroke_flask import resolve_font_path
+        from stroke_rendering import render_glyph_mask
+        from stroke_scoring import quick_stroke_score
+        from stroke_skeleton import (
+            find_skeleton_segments,
+            generate_straight_line,
+            resample_path,
+            trace_segment,
+            trace_to_region,
+        )
+        from stroke_utils import point_in_region
+
+        # Create wrapper functions that use config values
+        def configured_resample_path(path, num_points=None):
+            return resample_path(path, num_points or config.resample_points)
+
+        def configured_skeleton_to_strokes(mask, min_stroke_len=None):
+            return skel_strokes(mask, min_stroke_len or config.min_stroke_len)
+
+        return MinimalStrokePipeline(
+            font_path=font_path,
+            char=char,
+            canvas_size=config.canvas_size,
+            resolve_font_path_fn=resolve_font_path,
+            render_glyph_mask_fn=render_glyph_mask,
+            analyze_skeleton_fn=analyze_skeleton,
+            find_skeleton_segments_fn=find_skeleton_segments,
+            point_in_region_fn=point_in_region,
+            trace_segment_fn=trace_segment,
+            trace_to_region_fn=trace_to_region,
+            generate_straight_line_fn=generate_straight_line,
+            resample_path_fn=configured_resample_path,
+            skeleton_to_strokes_fn=configured_skeleton_to_strokes,
+            apply_stroke_template_fn=lambda st, c: st,
+            adjust_stroke_paths_fn=lambda st, c, m: st,
+            quick_stroke_score_fn=quick_stroke_score,
+        )
 
 
 def extract_region_from_waypoint(wp) -> int | None:

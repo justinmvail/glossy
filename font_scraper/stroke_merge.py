@@ -4,25 +4,34 @@ This module provides functions for cleaning up and simplifying stroke paths by
 merging strokes at junctions and absorbing short stub segments. These operations
 are essential for producing clean, coherent strokes from raw tracing output.
 
+Design Patterns:
+    The module implements the Strategy Pattern for merge operations. Each merge
+    type is encapsulated in a MergeStrategy subclass, and MergePipeline allows
+    combining strategies into configurable pipelines. This enables:
+    - Easy addition of new merge strategies
+    - Configurable merge pipelines per character type
+    - Easy testing of strategies in isolation
+    - Reordering or skipping merge steps as needed
+
 Algorithm Overview:
     The stroke cleanup process typically follows this sequence:
 
-    1. Junction-Based Merging (run_merge_pass):
+    1. Junction-Based Merging (DirectionMergeStrategy):
         - Identifies strokes that meet at junction clusters
         - Merges pairs of strokes that have aligned directions (continuation)
         - Uses angle threshold to determine valid merges
 
-    2. T-Junction Handling (merge_t_junctions):
+    2. T-Junction Handling (TJunctionMergeStrategy):
         - Special case for 3+ strokes meeting at a junction
         - Identifies the main through-stroke and cross-branch
         - Merges main branches while potentially removing short cross-strokes
 
-    3. Stub Absorption (multiple functions):
+    3. Stub Absorption (StubAbsorptionStrategy):
         - Convergence stubs: Short strokes ending at apex points (like top of 'A')
         - Junction stubs: Short strokes at junction clusters
         - Proximity stubs: Short strokes near longer stroke endpoints
 
-    4. Orphan Removal:
+    4. Orphan Removal (OrphanRemovalStrategy):
         - Removes isolated short strokes with no neighboring strokes at their
           junction clusters
 
@@ -35,7 +44,16 @@ Key Concepts:
     - Stub: A short stroke segment, typically a tracing artifact or minor branch.
 
 Typical usage:
-    # After initial stroke tracing
+    # Using the Strategy Pattern:
+    pipeline = MergePipeline([
+        DirectionMergeStrategy(max_angle=np.pi/4),
+        TJunctionMergeStrategy(),
+        StubAbsorptionStrategy(conv_threshold=18, stub_threshold=20),
+        OrphanRemovalStrategy(stub_threshold=20),
+    ])
+    strokes = pipeline.run(strokes, junction_clusters, assigned_clusters)
+
+    # Or using legacy functions directly:
     strokes = run_merge_pass(strokes, assigned_clusters, max_angle=np.pi/4)
     strokes = merge_t_junctions(strokes, junction_clusters, assigned_clusters)
     strokes = absorb_convergence_stubs(strokes, junction_clusters, assigned_clusters)
@@ -44,9 +62,307 @@ Typical usage:
     strokes = remove_orphan_stubs(strokes, assigned_clusters)
 """
 
+from abc import ABC, abstractmethod
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Merge Strategy Pattern
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MergeContext:
+    """Context object for merge operations.
+
+    Bundles the data needed by merge strategies to avoid passing
+    multiple arguments through the pipeline.
+
+    Attributes:
+        strokes: List of stroke paths to merge (modified in place).
+        junction_clusters: Original junction cluster sets from skeleton.
+        assigned: Assigned junction cluster sets.
+    """
+    strokes: list[list[tuple]]
+    junction_clusters: list[set] = field(default_factory=list)
+    assigned: list[set] = field(default_factory=list)
+
+
+class MergeStrategy(ABC):
+    """Base class for stroke merge strategies.
+
+    Each strategy implements a specific type of merge operation.
+    Strategies can be combined using MergePipeline.
+
+    Subclasses must implement the merge() method.
+
+    Example:
+        >>> class CustomMergeStrategy(MergeStrategy):
+        ...     def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        ...         # Custom merge logic
+        ...         return ctx.strokes
+    """
+
+    @abstractmethod
+    def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        """Apply merge strategy to strokes.
+
+        Args:
+            ctx: MergeContext with strokes and cluster data.
+
+        Returns:
+            Modified strokes list (also modifies ctx.strokes in place).
+        """
+        pass
+
+    @property
+    def name(self) -> str:
+        """Return the strategy name for logging/debugging."""
+        return self.__class__.__name__
+
+
+class DirectionMergeStrategy(MergeStrategy):
+    """Merge strokes based on direction alignment at junctions.
+
+    Merges pairs of strokes that meet at a junction cluster and have
+    aligned directions (one stroke appears to continue into the other).
+
+    Attributes:
+        max_angle: Maximum angle (radians) for valid merge. Default pi/4.
+        min_len: Minimum stroke length to consider. Default 0.
+        max_ratio: Maximum length ratio for merging. Default 0 (no limit).
+    """
+
+    def __init__(self, max_angle: float = np.pi/4, min_len: int = 0,
+                 max_ratio: float = 0):
+        self.max_angle = max_angle
+        self.min_len = min_len
+        self.max_ratio = max_ratio
+
+    def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        """Apply direction-based merging."""
+        return run_merge_pass(
+            ctx.strokes, ctx.assigned,
+            min_len=self.min_len,
+            max_angle=self.max_angle,
+            max_ratio=self.max_ratio
+        )
+
+
+class TJunctionMergeStrategy(MergeStrategy):
+    """Merge strokes at T-junctions.
+
+    Handles junctions with 3+ strokes by merging the two longest
+    strokes that form the main "through" path.
+    """
+
+    def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        """Apply T-junction merging."""
+        return merge_t_junctions(
+            ctx.strokes, ctx.junction_clusters, ctx.assigned
+        )
+
+
+class StubAbsorptionStrategy(MergeStrategy):
+    """Absorb short stub strokes into longer neighbors.
+
+    Combines convergence, junction, and proximity stub absorption
+    into a single strategy for convenience.
+
+    Attributes:
+        conv_threshold: Max length for convergence stubs. Default 18.
+        stub_threshold: Max length for junction/proximity stubs. Default 20.
+        prox_threshold: Max distance for proximity merging. Default 20.
+        absorb_convergence: Whether to absorb convergence stubs. Default True.
+        absorb_junction: Whether to absorb junction stubs. Default True.
+        absorb_proximity: Whether to absorb proximity stubs. Default True.
+    """
+
+    def __init__(self, conv_threshold: int = 18, stub_threshold: int = 20,
+                 prox_threshold: int = 20, absorb_convergence: bool = True,
+                 absorb_junction: bool = True, absorb_proximity: bool = True):
+        self.conv_threshold = conv_threshold
+        self.stub_threshold = stub_threshold
+        self.prox_threshold = prox_threshold
+        self.absorb_convergence = absorb_convergence
+        self.absorb_junction = absorb_junction
+        self.absorb_proximity = absorb_proximity
+
+    def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        """Apply stub absorption."""
+        if self.absorb_convergence:
+            ctx.strokes = absorb_convergence_stubs(
+                ctx.strokes, ctx.junction_clusters, ctx.assigned,
+                conv_threshold=self.conv_threshold
+            )
+        if self.absorb_junction:
+            ctx.strokes = absorb_junction_stubs(
+                ctx.strokes, ctx.assigned,
+                stub_threshold=self.stub_threshold
+            )
+        if self.absorb_proximity:
+            ctx.strokes = absorb_proximity_stubs(
+                ctx.strokes,
+                stub_threshold=self.stub_threshold,
+                prox_threshold=self.prox_threshold
+            )
+        return ctx.strokes
+
+
+class OrphanRemovalStrategy(MergeStrategy):
+    """Remove orphaned short stubs with no neighbors.
+
+    Removes short strokes at junction clusters where no other
+    strokes have endpoints.
+
+    Attributes:
+        stub_threshold: Max length for a stroke to be considered. Default 20.
+    """
+
+    def __init__(self, stub_threshold: int = 20):
+        self.stub_threshold = stub_threshold
+
+    def merge(self, ctx: MergeContext) -> list[list[tuple]]:
+        """Apply orphan removal."""
+        return remove_orphan_stubs(
+            ctx.strokes, ctx.assigned,
+            stub_threshold=self.stub_threshold
+        )
+
+
+class MergePipeline:
+    """Run multiple merge strategies in sequence.
+
+    Chains merge strategies together into a configurable pipeline.
+    Each strategy's output becomes the input to the next.
+
+    Example:
+        >>> pipeline = MergePipeline([
+        ...     DirectionMergeStrategy(max_angle=np.pi/4),
+        ...     TJunctionMergeStrategy(),
+        ...     StubAbsorptionStrategy(),
+        ...     OrphanRemovalStrategy(),
+        ... ])
+        >>> strokes = pipeline.run(strokes, junction_clusters, assigned)
+
+        # Or create a default pipeline:
+        >>> pipeline = MergePipeline.create_default()
+        >>> strokes = pipeline.run(strokes, junction_clusters, assigned)
+    """
+
+    def __init__(self, strategies: list[MergeStrategy]):
+        """Initialize with list of strategies.
+
+        Args:
+            strategies: List of MergeStrategy instances to run in order.
+        """
+        self.strategies = strategies
+
+    @classmethod
+    def create_default(cls) -> 'MergePipeline':
+        """Create the default merge pipeline.
+
+        Returns:
+            MergePipeline with standard strategy sequence.
+        """
+        return cls([
+            DirectionMergeStrategy(max_angle=np.pi/4),
+            TJunctionMergeStrategy(),
+            StubAbsorptionStrategy(conv_threshold=18, stub_threshold=20),
+            OrphanRemovalStrategy(stub_threshold=20),
+        ])
+
+    @classmethod
+    def create_aggressive(cls) -> 'MergePipeline':
+        """Create an aggressive merge pipeline.
+
+        Uses wider angle tolerance and lower thresholds for more merging.
+
+        Returns:
+            MergePipeline with aggressive settings.
+        """
+        return cls([
+            DirectionMergeStrategy(max_angle=np.pi/3),  # 60 degrees
+            TJunctionMergeStrategy(),
+            StubAbsorptionStrategy(conv_threshold=25, stub_threshold=25,
+                                   prox_threshold=25),
+            OrphanRemovalStrategy(stub_threshold=25),
+        ])
+
+    @classmethod
+    def create_conservative(cls) -> 'MergePipeline':
+        """Create a conservative merge pipeline.
+
+        Uses stricter angle tolerance and higher thresholds for less merging.
+
+        Returns:
+            MergePipeline with conservative settings.
+        """
+        return cls([
+            DirectionMergeStrategy(max_angle=np.pi/6),  # 30 degrees
+            TJunctionMergeStrategy(),
+            StubAbsorptionStrategy(conv_threshold=12, stub_threshold=15,
+                                   prox_threshold=15),
+            OrphanRemovalStrategy(stub_threshold=15),
+        ])
+
+    def run(self, strokes: list[list[tuple]],
+            junction_clusters: list[set] = None,
+            assigned: list[set] = None) -> list[list[tuple]]:
+        """Run all strategies in sequence.
+
+        Args:
+            strokes: List of stroke paths to merge (modified in place).
+            junction_clusters: Original junction cluster sets.
+            assigned: Assigned junction cluster sets.
+
+        Returns:
+            Modified strokes list.
+        """
+        ctx = MergeContext(
+            strokes=strokes,
+            junction_clusters=junction_clusters or [],
+            assigned=assigned or [],
+        )
+
+        for strategy in self.strategies:
+            ctx.strokes = strategy.merge(ctx)
+
+        return ctx.strokes
+
+    def add_strategy(self, strategy: MergeStrategy,
+                     position: int = None) -> None:
+        """Add a strategy to the pipeline.
+
+        Args:
+            strategy: MergeStrategy instance to add.
+            position: Index to insert at. If None, appends to end.
+        """
+        if position is None:
+            self.strategies.append(strategy)
+        else:
+            self.strategies.insert(position, strategy)
+
+    def remove_strategy_by_type(self, strategy_type: type) -> bool:
+        """Remove all strategies of a specific type.
+
+        Args:
+            strategy_type: Type of strategy to remove.
+
+        Returns:
+            True if any strategies were removed.
+        """
+        original_len = len(self.strategies)
+        self.strategies = [s for s in self.strategies
+                          if not isinstance(s, strategy_type)]
+        return len(self.strategies) < original_len
+
+
+# ---------------------------------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------------------------------
 
 
 def seg_dir(stroke: list[tuple], from_end: bool = False, n_samples: int = 5) -> tuple[float, float]:
