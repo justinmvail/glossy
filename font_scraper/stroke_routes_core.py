@@ -1260,17 +1260,62 @@ def api_reset_and_scrape() -> Response:
                 )
 
                 if result.returncode == 0:
-                    # Try to extract font count from output
                     yield f'data: {json.dumps({"status": "scraping", "message": f"{name} complete."})}\n\n'
                 else:
                     yield f'data: {json.dumps({"status": "warning", "message": f"{name} had issues: {result.stderr[:200]}"})}\n\n'
 
-            # Count total fonts
+            # Step 3: Scan font directories and register fonts in database
+            yield f'data: {json.dumps({"status": "registering", "message": "Registering fonts in database..."})}\n\n'
+
+            font_dirs = [
+                ('fonts/dafont', 'dafont'),
+                ('fonts/fontspace', 'fontspace'),
+                ('fonts/google', 'google'),
+            ]
+
             db = sqlite3.connect(str(db_path))
+            total_registered = 0
+
+            for font_dir, source in font_dirs:
+                font_path = Path(__file__).parent / font_dir
+                if not font_path.exists():
+                    continue
+
+                for font_file in font_path.glob('*.[ot]tf'):
+                    # Extract font name from filename (remove extension)
+                    name = font_file.stem
+                    rel_path = f"{font_dir}/{font_file.name}"
+
+                    try:
+                        db.execute("""
+                            INSERT OR IGNORE INTO fonts (name, file_path, source)
+                            VALUES (?, ?, ?)
+                        """, (name, rel_path, source))
+                        total_registered += 1
+                    except Exception as e:
+                        logger.warning("Failed to register font %s: %s", rel_path, e)
+
+                # Also check for .TTF (uppercase)
+                for font_file in font_path.glob('*.[OT]TF'):
+                    name = font_file.stem
+                    rel_path = f"{font_dir}/{font_file.name}"
+
+                    try:
+                        db.execute("""
+                            INSERT OR IGNORE INTO fonts (name, file_path, source)
+                            VALUES (?, ?, ?)
+                        """, (name, rel_path, source))
+                        total_registered += 1
+                    except Exception as e:
+                        logger.warning("Failed to register font %s: %s", rel_path, e)
+
+            db.commit()
+
+            # Count total fonts in database
             total_fonts = db.execute('SELECT COUNT(*) FROM fonts').fetchone()[0]
             db.close()
 
-            yield f'data: {json.dumps({"status": "complete", "message": f"Done! Scraped {total_fonts} fonts."})}\n\n'
+            yield f'data: {json.dumps({"status": "complete", "message": f"Done! Registered {total_fonts} fonts."})}\n\n'
 
         except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"status": "error", "message": "Scraper timed out after 2 hours"})}\n\n'
