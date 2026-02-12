@@ -317,7 +317,7 @@ async function verifyFonts() {
           extestCell.style.color = d.exclaim_ok ? '#8f8' : '#f88';
         }
 
-        // Case mismatch column
+        // Case mismatch column - any case issues = red/fail
         if (casetestCell) {
           const count = d.case_mismatch_count || 0;
           const letters = d.case_mismatches || [];
@@ -327,7 +327,7 @@ async function verifyFonts() {
             casetestCell.title = '';
           } else {
             casetestCell.textContent = count;
-            casetestCell.style.color = count > 5 ? '#f88' : '#ff8';
+            casetestCell.style.color = 'rgb(255, 136, 136)';
             casetestCell.title = `Lowercase = Uppercase: ${letters.join(', ')}`;
           }
         }
