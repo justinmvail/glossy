@@ -1236,11 +1236,11 @@ def api_reset_and_scrape() -> Response:
                 yield f'data: {json.dumps({"status": "error", "message": f"Database setup failed: {result.stderr}"})}\n\n'
                 return
 
-            # Step 2: Run scrapers
+            # Step 2: Run scrapers (no page/font limits - scrape everything)
             scrapers = [
-                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--pages', '50', '--categories', '601', '603']),
-                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--pages', '50', '--query', 'handwritten']),
-                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google', '--styles', 'handwriting']),
+                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--categories', '601', '603']),
+                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'handwritten']),
+                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google']),
             ]
 
             total_fonts = 0
@@ -1252,7 +1252,7 @@ def api_reset_and_scrape() -> Response:
                     cwd=str(Path(__file__).parent),
                     capture_output=True,
                     text=True,
-                    timeout=1800  # 30 minute timeout per scraper
+                    timeout=7200  # 2 hour timeout per scraper
                 )
 
                 if result.returncode == 0:
@@ -1269,7 +1269,7 @@ def api_reset_and_scrape() -> Response:
             yield f'data: {json.dumps({"status": "complete", "message": f"Done! Scraped {total_fonts} fonts."})}\n\n'
 
         except subprocess.TimeoutExpired:
-            yield f'data: {json.dumps({"status": "error", "message": "Scraper timed out after 30 minutes"})}\n\n'
+            yield f'data: {json.dumps({"status": "error", "message": "Scraper timed out after 2 hours"})}\n\n'
         except Exception as e:
             yield f'data: {json.dumps({"status": "error", "message": f"Error: {str(e)}"})}\n\n'
 
