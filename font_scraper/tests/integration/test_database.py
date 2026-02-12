@@ -329,6 +329,438 @@ class TestDatabaseSchema(unittest.TestCase):
         self.assertEqual(reason_codes, expected_codes)
 
 
+class TestFontRepositoryExtended(unittest.TestCase):
+    """Extended tests for FontRepository covering more methods."""
+
+    def setUp(self):
+        """Set up test fixtures with in-memory database."""
+        self.conn = create_in_memory_db()
+
+        def connection_factory():
+            return in_memory_db_context(self.conn)
+
+        from stroke_flask import FontRepository
+        self.repo = FontRepository(connection_factory=connection_factory)
+
+        # Insert test fonts
+        self.conn.execute(
+            "INSERT INTO fonts (id, name, source, file_path) VALUES (?, ?, ?, ?)",
+            (1, 'TestFont', 'test', '/fonts/test.ttf')
+        )
+        self.conn.execute(
+            "INSERT INTO fonts (id, name, source, file_path) VALUES (?, ?, ?, ?)",
+            (2, 'AnotherFont', 'test', '/fonts/another.ttf')
+        )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_list_fonts_non_rejected(self):
+        """Test list_fonts returns non-rejected fonts."""
+        fonts = self.repo.list_fonts(show_rejected=False)
+        self.assertEqual(len(fonts), 2)
+        font_names = {f['name'] for f in fonts}
+        self.assertEqual(font_names, {'TestFont', 'AnotherFont'})
+
+    def test_list_fonts_shows_rejected(self):
+        """Test list_fonts with show_rejected returns only rejected fonts."""
+        # Reject font 1
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (1, self.repo.REJECTION_REASON_ID, 'Test rejection')
+        )
+        self.conn.commit()
+
+        fonts = self.repo.list_fonts(show_rejected=True)
+        self.assertEqual(len(fonts), 1)
+        self.assertEqual(fonts[0]['name'], 'TestFont')
+
+    def test_list_fonts_excludes_duplicates(self):
+        """Test list_fonts excludes fonts marked as duplicates."""
+        # Mark font 2 as duplicate
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (2, self.repo.DUPLICATE_REASON_ID, 'Duplicate of font 1')
+        )
+        self.conn.commit()
+
+        fonts = self.repo.list_fonts(show_rejected=False)
+        self.assertEqual(len(fonts), 1)
+        self.assertEqual(fonts[0]['name'], 'TestFont')
+
+    def test_get_font_characters(self):
+        """Test get_font_characters returns characters with strokes."""
+        # Add characters with strokes
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw, point_count) VALUES (?, ?, ?, ?)",
+            (1, 'A', '[[[0,0],[100,100]]]', 2)
+        )
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw, point_count) VALUES (?, ?, ?, ?)",
+            (1, 'B', '[[[0,0],[50,50]]]', 2)
+        )
+        self.conn.commit()
+
+        chars = self.repo.get_font_characters(1)
+        self.assertEqual(len(chars), 2)
+        char_names = {c['char'] for c in chars}
+        self.assertEqual(char_names, {'A', 'B'})
+
+    def test_get_character(self):
+        """Test get_character returns character with strokes and markers."""
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw, markers) VALUES (?, ?, ?, ?)",
+            (1, 'A', '[[[0,0]]]', '{"test": true}')
+        )
+        self.conn.commit()
+
+        char = self.repo.get_character(1, 'A')
+        self.assertIsNotNone(char)
+        self.assertEqual(char['strokes_raw'], '[[[0,0]]]')
+        self.assertEqual(char['markers'], '{"test": true}')
+
+    def test_get_character_returns_none_for_missing(self):
+        """Test get_character returns None for missing character."""
+        char = self.repo.get_character(1, 'Z')
+        self.assertIsNone(char)
+
+    def test_save_character(self):
+        """Test save_character saves new character."""
+        self.repo.save_character(1, 'C', '[[[0,0]]]', 1, '{}')
+
+        cursor = self.conn.execute(
+            "SELECT strokes_raw, point_count, markers FROM characters WHERE font_id = ? AND char = ?",
+            (1, 'C')
+        )
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row['strokes_raw'], '[[[0,0]]]')
+        self.assertEqual(row['point_count'], 1)
+
+    def test_save_character_updates_existing(self):
+        """Test save_character updates existing character."""
+        # Insert initial
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw, point_count, markers) VALUES (?, ?, ?, ?, ?)",
+            (1, 'D', '[[[0,0]]]', 1, '{}')
+        )
+        self.conn.commit()
+
+        # Update
+        self.repo.save_character(1, 'D', '[[[1,1],[2,2]]]', 2, '{"updated": true}')
+
+        cursor = self.conn.execute(
+            "SELECT strokes_raw, point_count FROM characters WHERE font_id = ? AND char = ?",
+            (1, 'D')
+        )
+        row = cursor.fetchone()
+        self.assertEqual(row['point_count'], 2)
+
+    def test_get_character_strokes(self):
+        """Test get_character_strokes returns strokes_raw only."""
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw) VALUES (?, ?, ?)",
+            (1, 'E', '[[[5,5]]]')
+        )
+        self.conn.commit()
+
+        char = self.repo.get_character_strokes(1, 'E')
+        self.assertIsNotNone(char)
+        self.assertEqual(char['strokes_raw'], '[[[5,5]]]')
+
+    def test_list_fonts_for_scan(self):
+        """Test list_fonts_for_scan returns non-rejected fonts."""
+        # Reject font 1
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (1, self.repo.REJECTION_REASON_ID, 'Rejected')
+        )
+        self.conn.commit()
+
+        fonts = self.repo.list_fonts_for_scan()
+        self.assertEqual(len(fonts), 1)
+        self.assertEqual(fonts[0]['file_path'], '/fonts/another.ttf')
+
+    def test_reject_font(self):
+        """Test reject_font marks font as rejected."""
+        result = self.repo.reject_font(1, 'Test rejection')
+        self.assertTrue(result)
+
+        cursor = self.conn.execute(
+            "SELECT details FROM font_removals WHERE font_id = ? AND reason_id = ?",
+            (1, self.repo.REJECTION_REASON_ID)
+        )
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row['details'], 'Test rejection')
+
+    def test_reject_font_returns_false_for_missing(self):
+        """Test reject_font returns False for non-existent font."""
+        result = self.repo.reject_font(999, 'Should fail')
+        self.assertFalse(result)
+
+    def test_reject_font_returns_false_if_already_rejected(self):
+        """Test reject_font returns False if already rejected."""
+        # Pre-reject
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (1, self.repo.REJECTION_REASON_ID, 'Already')
+        )
+        self.conn.commit()
+
+        result = self.repo.reject_font(1, 'Again')
+        self.assertFalse(result)
+
+    def test_reject_fonts_batch_empty(self):
+        """Test reject_fonts_batch with empty list returns 0."""
+        result = self.repo.reject_fonts_batch([])
+        self.assertEqual(result, 0)
+
+    def test_unreject_font(self):
+        """Test unreject_font removes rejection."""
+        # Reject first
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (1, self.repo.REJECTION_REASON_ID, 'Rejected')
+        )
+        self.conn.commit()
+
+        result = self.repo.unreject_font(1)
+        self.assertEqual(result, 1)
+
+        cursor = self.conn.execute(
+            "SELECT id FROM font_removals WHERE font_id = ? AND reason_id = ?",
+            (1, self.repo.REJECTION_REASON_ID)
+        )
+        self.assertIsNone(cursor.fetchone())
+
+    def test_unreject_font_returns_zero_if_not_rejected(self):
+        """Test unreject_font returns 0 if font not rejected."""
+        result = self.repo.unreject_font(1)
+        self.assertEqual(result, 0)
+
+    def test_unreject_all_fonts(self):
+        """Test unreject_all_fonts removes all rejections."""
+        # Reject both fonts
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (1, self.repo.REJECTION_REASON_ID, 'Rejected 1')
+        )
+        self.conn.execute(
+            "INSERT INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+            (2, self.repo.REJECTION_REASON_ID, 'Rejected 2')
+        )
+        self.conn.commit()
+
+        result = self.repo.unreject_all_fonts()
+        self.assertEqual(result, 2)
+
+    def test_clear_shape_cache_for_char(self):
+        """Test clear_shape_cache clears cache for specific character."""
+        # Insert character with cache
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, shape_params_cache) VALUES (?, ?, ?)",
+            (1, 'F', '{"cached": true}')
+        )
+        self.conn.commit()
+
+        result = self.repo.clear_shape_cache(1, 'F')
+        self.assertEqual(result, 1)
+
+        cursor = self.conn.execute(
+            "SELECT shape_params_cache FROM characters WHERE font_id = ? AND char = ?",
+            (1, 'F')
+        )
+        row = cursor.fetchone()
+        self.assertIsNone(row['shape_params_cache'])
+
+    def test_clear_shape_cache_for_all_chars(self):
+        """Test clear_shape_cache clears cache for all characters."""
+        # Insert characters with cache
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, shape_params_cache) VALUES (?, ?, ?)",
+            (1, 'G', '{"cached": true}')
+        )
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, shape_params_cache) VALUES (?, ?, ?)",
+            (1, 'H', '{"cached": true}')
+        )
+        self.conn.commit()
+
+        result = self.repo.clear_shape_cache(1)
+        self.assertEqual(result, 2)
+
+    def test_has_strokes_true(self):
+        """Test has_strokes returns True when strokes exist."""
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw) VALUES (?, ?, ?)",
+            (1, 'I', '[[[0,0]]]')
+        )
+        self.conn.commit()
+
+        result = self.repo.has_strokes(1, 'I')
+        self.assertTrue(result)
+
+    def test_has_strokes_false(self):
+        """Test has_strokes returns False when no strokes."""
+        result = self.repo.has_strokes(1, 'Z')
+        self.assertFalse(result)
+
+    def test_save_character_strokes_without_variant_or_count(self):
+        """Test save_character_strokes with only strokes_raw."""
+        self.repo.save_character_strokes(1, 'J', '[[[0,0]]]')
+
+        cursor = self.conn.execute(
+            "SELECT strokes_raw FROM characters WHERE font_id = ? AND char = ?",
+            (1, 'J')
+        )
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row['strokes_raw'], '[[[0,0]]]')
+
+    def test_save_character_strokes_update_without_variant_or_count(self):
+        """Test save_character_strokes update with only strokes_raw."""
+        # Insert initial
+        self.conn.execute(
+            "INSERT INTO characters (font_id, char, strokes_raw) VALUES (?, ?, ?)",
+            (1, 'K', '[[[0,0]]]')
+        )
+        self.conn.commit()
+
+        self.repo.save_character_strokes(1, 'K', '[[[1,1]]]')
+
+        cursor = self.conn.execute(
+            "SELECT strokes_raw FROM characters WHERE font_id = ? AND char = ?",
+            (1, 'K')
+        )
+        row = cursor.fetchone()
+        self.assertEqual(row['strokes_raw'], '[[[1,1]]]')
+
+    def test_ensure_template_variant_column(self):
+        """Test ensure_template_variant_column handles existing column."""
+        # Column already exists from SCHEMA
+        result = self.repo.ensure_template_variant_column()
+        self.assertFalse(result)
+
+
+class TestTestRunRepository(unittest.TestCase):
+    """Tests for TestRunRepository."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.conn = create_in_memory_db()
+
+        def connection_factory():
+            return in_memory_db_context(self.conn)
+
+        from stroke_flask import TestRunRepository
+        self.repo = TestRunRepository(connection_factory=connection_factory)
+
+        # Insert test font
+        self.conn.execute(
+            "INSERT INTO fonts (id, name, source, file_path) VALUES (?, ?, ?, ?)",
+            (1, 'TestFont', 'test', '/fonts/test.ttf')
+        )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_save_run(self):
+        """Test save_run creates a test run record."""
+        run_id = self.repo.save_run(
+            font_id=1,
+            run_date='2024-01-15 10:00:00',
+            chars_tested=26,
+            chars_ok=24,
+            avg_score=0.85,
+            avg_coverage=0.75,
+            avg_overshoot=0.01,
+            avg_stroke_count=1.5,
+            avg_topology=0.90,
+            results_json='{"A": {"score": 0.9}}'
+        )
+
+        self.assertIsNotNone(run_id)
+        self.assertGreater(run_id, 0)
+
+        cursor = self.conn.execute("SELECT * FROM test_runs WHERE id = ?", (run_id,))
+        row = cursor.fetchone()
+        self.assertEqual(row['chars_tested'], 26)
+        self.assertEqual(row['avg_score'], 0.85)
+
+    def test_get_history(self):
+        """Test get_history returns test runs for a font."""
+        # Insert multiple runs
+        self.conn.execute(
+            """INSERT INTO test_runs (font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (1, '2024-01-15 10:00:00', 26, 24, 0.85, 0.75, 0.01, 1.5, 0.9)
+        )
+        self.conn.execute(
+            """INSERT INTO test_runs (font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (1, '2024-01-16 10:00:00', 26, 25, 0.90, 0.80, 0.01, 1.4, 0.95)
+        )
+        self.conn.commit()
+
+        history = self.repo.get_history(1, limit=10)
+        self.assertEqual(len(history), 2)
+        # Most recent first
+        self.assertEqual(history[0]['avg_score'], 0.90)
+
+    def test_get_run(self):
+        """Test get_run returns a specific run."""
+        self.conn.execute(
+            """INSERT INTO test_runs (id, font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (42, 1, '2024-01-15', 26, 24, 0.85, 0.75, 0.01, 1.5, 0.9)
+        )
+        self.conn.commit()
+
+        run = self.repo.get_run(42)
+        self.assertIsNotNone(run)
+        self.assertEqual(run['id'], 42)
+        self.assertEqual(run['chars_tested'], 26)
+
+    def test_get_run_returns_none_for_missing(self):
+        """Test get_run returns None for non-existent run."""
+        run = self.repo.get_run(999)
+        self.assertIsNone(run)
+
+    def test_get_recent_runs(self):
+        """Test get_recent_runs returns most recent run IDs."""
+        # Insert runs
+        self.conn.execute(
+            """INSERT INTO test_runs (id, font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (1, 1, '2024-01-15', 26, 24, 0.85, 0.75, 0.01, 1.5, 0.9)
+        )
+        self.conn.execute(
+            """INSERT INTO test_runs (id, font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (2, 1, '2024-01-16', 26, 25, 0.90, 0.80, 0.01, 1.4, 0.95)
+        )
+        self.conn.execute(
+            """INSERT INTO test_runs (id, font_id, run_date, chars_tested, chars_ok,
+               avg_score, avg_coverage, avg_overshoot, avg_stroke_count, avg_topology)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (3, 1, '2024-01-17', 26, 26, 0.95, 0.85, 0.00, 1.3, 0.98)
+        )
+        self.conn.commit()
+
+        recent = self.repo.get_recent_runs(1, count=2)
+        self.assertEqual(len(recent), 2)
+        # Most recent IDs
+        self.assertEqual(recent, [3, 2])
+
+
 class TestDatabaseContext(unittest.TestCase):
     """Tests for database context management."""
 
