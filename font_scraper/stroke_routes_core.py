@@ -111,11 +111,12 @@ from stroke_services_core import (
     MAX_SHAPE_COUNT,
     MAX_WIDTH_RATIO,
     EXPECTED_EXCLAMATION_SHAPES,
+    get_char_shape_count,
 )
 
 
 
-def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> tuple[bool, int, float, list[str]]:
+def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> dict:
     """Check font quality based on standard criteria.
 
     Args:
@@ -123,29 +124,47 @@ def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> tuple[bool, i
         font_path: Path to the font file (for case mismatch check).
 
     Returns:
-        Tuple of (is_bad, shape_count, max_width, case_mismatches) where:
+        Dict with quality check results:
             - is_bad: True if font fails quality checks
             - shape_count: Number of shapes in "Hello World" rendering
             - max_width: Maximum width ratio from analysis
             - case_mismatches: List of case mismatch issues
+            - l_has_hole: True if 'l' character has holes
+            - exclaim_shapes: Number of shapes in '!' character
+            - exclaim_ok: True if '!' has expected shape count
     """
     arr = render_text_for_analysis(pil_font, "Hello World")
     if arr is None:
-        return True, 0, 0, []
+        return {
+            'is_bad': True, 'shape_count': 0, 'max_width': 0,
+            'case_mismatches': [], 'l_has_hole': False,
+            'exclaim_shapes': -1, 'exclaim_ok': False
+        }
 
     shape_count, max_width = analyze_shape_metrics(arr, arr.shape[1])
     case_mismatches = check_case_mismatch(font_path)
+    l_has_hole = check_char_holes(pil_font, 'l')
+    exclaim_shapes = get_char_shape_count(pil_font, '!')
+    exclaim_ok = exclaim_shapes == EXPECTED_EXCLAMATION_SHAPES
 
     is_bad = (
         shape_count < MIN_SHAPE_COUNT or
         shape_count > MAX_SHAPE_COUNT or
         max_width > MAX_WIDTH_RATIO or
-        check_char_holes(pil_font, 'l') or
-        not check_char_shape_count(pil_font, '!', EXPECTED_EXCLAMATION_SHAPES) or
+        l_has_hole or
+        not exclaim_ok or
         bool(case_mismatches)
     )
 
-    return is_bad, int(shape_count), max_width, case_mismatches
+    return {
+        'is_bad': is_bad,
+        'shape_count': int(shape_count),
+        'max_width': max_width,
+        'case_mismatches': case_mismatches,
+        'l_has_hole': l_has_hole,
+        'exclaim_shapes': exclaim_shapes,
+        'exclaim_ok': exclaim_ok
+    }
 
 
 @app.route('/')
@@ -563,10 +582,19 @@ def api_check_connected(fid: int) -> Response | tuple[str, int]:
     fp = resolve_font_path(f['file_path'])
     try:
         pf = ImageFont.truetype(fp, 60)
-        is_bad, shape_count, _max_width, case_mismatches = _check_font_quality(pf, fp)
-        if shape_count == 0:
+        result = _check_font_quality(pf, fp)
+        if result['shape_count'] == 0:
             return jsonify(error="Could not render"), 500
-        return jsonify(shapes=shape_count, bad=is_bad, case_mismatches=case_mismatches)
+        return jsonify(
+            shapes=result['shape_count'],
+            bad=result['is_bad'],
+            case_mismatches=result['case_mismatches'],
+            case_mismatch_count=len(result['case_mismatches']),
+            max_width_pct=round(result['max_width'] * 100, 1),
+            l_has_hole=result['l_has_hole'],
+            exclaim_shapes=result['exclaim_shapes'],
+            exclaim_ok=result['exclaim_ok']
+        )
     except Exception as e:
         logger.warning("Font quality check failed for font %d: %s", fid, e)
         return jsonify(error="Could not check font"), 500
@@ -618,12 +646,12 @@ def api_reject_connected() -> Response:
         try:
             fp = resolve_font_path(f['file_path'])
             pf = ImageFont.truetype(fp, 60)
-            is_bad, shape_count, _max_width, _case_mismatches = _check_font_quality(pf, fp)
-            if shape_count == 0:
+            result = _check_font_quality(pf, fp)
+            if result['shape_count'] == 0:
                 continue
             chk += 1
-            if is_bad:
-                to_reject.append((f['id'], f'{shape_count} shapes'))
+            if result['is_bad']:
+                to_reject.append((f['id'], f"{result['shape_count']} shapes"))
         except (OSError, ValueError, MemoryError):
             continue
     # Batch reject all fonts in a single transaction to avoid N+1 queries

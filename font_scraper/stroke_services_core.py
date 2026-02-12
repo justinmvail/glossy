@@ -31,6 +31,7 @@ from stroke_rendering import (
     check_case_mismatch,
     check_char_holes,
     check_char_shape_count,
+    get_char_shape_count,
     render_char_image,
     render_glyph_mask,
     render_text_for_analysis,

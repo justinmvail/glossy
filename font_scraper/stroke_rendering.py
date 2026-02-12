@@ -889,6 +889,37 @@ def check_char_holes(pil_font: FreeTypeFont, char: str) -> bool:
     return bg_count > 1
 
 
+def get_char_shape_count(pil_font: FreeTypeFont, char: str) -> int:
+    """Get the number of connected components for a character.
+
+    Args:
+        pil_font: A PIL ImageFont object.
+        char: The character to analyze.
+
+    Returns:
+        Number of connected components, or -1 if rendering fails.
+    """
+    from scipy.ndimage import label
+
+    canvas = 150
+    img = Image.new('L', (canvas, canvas), 255)
+    draw = ImageDraw.Draw(img)
+
+    try:
+        bbox = pil_font.getbbox(char)
+        if not bbox:
+            return -1
+        draw.text((-bbox[0] + 5, -bbox[1] + 5), char, fill=0, font=pil_font)
+    except Exception:
+        return -1
+
+    arr = np.array(img)
+    binary = arr < 128
+    _, num_shapes = label(binary)
+
+    return num_shapes
+
+
 def check_char_shape_count(pil_font: FreeTypeFont, char: str, expected: int) -> bool:
     """Check if a character has the expected number of connected components.
 
@@ -909,22 +940,5 @@ def check_char_shape_count(pil_font: FreeTypeFont, char: str, expected: int) -> 
         - Returns False if the character cannot be rendered.
         - Uses a 150x150 canvas for rendering.
     """
-    from scipy.ndimage import label
-
-    canvas = 150
-    img = Image.new('L', (canvas, canvas), 255)
-    draw = ImageDraw.Draw(img)
-
-    try:
-        bbox = pil_font.getbbox(char)
-        if not bbox:
-            return False
-        draw.text((-bbox[0] + 5, -bbox[1] + 5), char, fill=0, font=pil_font)
-    except Exception:
-        return False
-
-    arr = np.array(img)
-    binary = arr < 128
-    _, num_shapes = label(binary)
-
+    num_shapes = get_char_shape_count(pil_font, char)
     return num_shapes == expected
