@@ -657,7 +657,7 @@ def _compute_iou(arr1: np.ndarray, arr2: np.ndarray) -> float:
 # Letters that are naturally symmetric between upper/lower case
 # These are excluded from case mismatch detection since many fonts
 # legitimately render them identically (just scaled)
-CASE_SYMMETRIC_LETTERS = frozenset('cvwxoszu')
+CASE_SYMMETRIC_LETTERS = frozenset('cvwxoszui')
 
 
 def check_case_mismatch(font_path: str, threshold: float = 0.70) -> list[str]:
