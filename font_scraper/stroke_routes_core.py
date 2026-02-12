@@ -1180,3 +1180,97 @@ def api_unreject_all() -> Response:
     """
     restored = font_repository.unreject_all_fonts()
     return success_response(restored=restored)
+
+
+@app.route('/api/reset-and-scrape', methods=['POST'])
+def api_reset_and_scrape() -> Response:
+    """Reset database and re-scrape all fonts.
+
+    WARNING: This is a destructive operation that:
+    1. Deletes all data from fonts.db
+    2. Runs all scrapers (DaFont, FontSpace, Google Fonts)
+    3. Re-populates the database with fresh font data
+
+    This operation runs in the background and streams progress via SSE.
+
+    Returns:
+        flask.Response: SSE stream with progress updates.
+
+    Example:
+        Request::
+
+            POST /api/reset-and-scrape
+
+        SSE Events::
+
+            data: {"status": "starting", "message": "Resetting database..."}
+            data: {"status": "scraping", "message": "Running DaFont scraper..."}
+            data: {"status": "scraping", "message": "Running FontSpace scraper..."}
+            data: {"status": "complete", "message": "Done! Scraped 2500 fonts."}
+    """
+    import os
+    import subprocess
+    import sqlite3
+    from pathlib import Path
+
+    def generate():
+        try:
+            # Step 1: Reset database
+            yield f'data: {json.dumps({"status": "starting", "message": "Resetting database..."})}\n\n'
+
+            db_path = Path(__file__).parent / 'fonts.db'
+
+            # Close any existing connections and delete the file
+            if db_path.exists():
+                os.remove(db_path)
+
+            # Recreate database with schema
+            yield f'data: {json.dumps({"status": "starting", "message": "Creating fresh database..."})}\n\n'
+            result = subprocess.run(
+                ['python3', 'setup_database.py'],
+                cwd=str(Path(__file__).parent),
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                yield f'data: {json.dumps({"status": "error", "message": f"Database setup failed: {result.stderr}"})}\n\n'
+                return
+
+            # Step 2: Run scrapers
+            scrapers = [
+                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--pages', '50', '--categories', '601', '603']),
+                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--pages', '50', '--query', 'handwritten']),
+                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google', '--styles', 'handwriting']),
+            ]
+
+            total_fonts = 0
+            for name, cmd in scrapers:
+                yield f'data: {json.dumps({"status": "scraping", "message": f"Running {name} scraper..."})}\n\n'
+
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(Path(__file__).parent),
+                    capture_output=True,
+                    text=True,
+                    timeout=1800  # 30 minute timeout per scraper
+                )
+
+                if result.returncode == 0:
+                    # Try to extract font count from output
+                    yield f'data: {json.dumps({"status": "scraping", "message": f"{name} complete."})}\n\n'
+                else:
+                    yield f'data: {json.dumps({"status": "warning", "message": f"{name} had issues: {result.stderr[:200]}"})}\n\n'
+
+            # Count total fonts
+            db = sqlite3.connect(str(db_path))
+            total_fonts = db.execute('SELECT COUNT(*) FROM fonts').fetchone()[0]
+            db.close()
+
+            yield f'data: {json.dumps({"status": "complete", "message": f"Done! Scraped {total_fonts} fonts."})}\n\n'
+
+        except subprocess.TimeoutExpired:
+            yield f'data: {json.dumps({"status": "error", "message": "Scraper timed out after 30 minutes"})}\n\n'
+        except Exception as e:
+            yield f'data: {json.dumps({"status": "error", "message": f"Error: {str(e)}"})}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream')

@@ -52,6 +52,7 @@
     <button class="btn test" id="testBtn" onclick="testFirst10()" style="border-color:#58f;color:#8cf;">Test First 10</button>
     <button class="btn reject" id="rejectBtn" onclick="rejectConnected()">Reject</button>
   {% endif %}
+  <button class="btn" id="resetBtn" onclick="resetAndScrape()" style="border-color:#f55;color:#f88;margin-left:20px;">Reset & Scrape</button>
   <span id="statusMsg" style="color:#888;font-size:13px;"></span>
 </div>
 <table>
@@ -434,6 +435,80 @@ async function testFirst10() {
   const avgScore = tested > 0 ? (totalScore / tested).toFixed(3) : 'N/A';
   status.textContent = `Tested ${tested} fonts. Avg score: ${avgScore}`;
   testBtn.disabled = false;
+}
+
+function resetAndScrape() {
+  const warnings = [
+    '⚠️ WARNING: This will DELETE ALL DATA! ⚠️',
+    '',
+    'This operation will:',
+    '1. Delete the entire fonts.db database',
+    '2. Delete all stroke data and rejections',
+    '3. Re-scrape fonts from DaFont, FontSpace, and Google Fonts',
+    '',
+    'This takes 30-60 minutes and cannot be undone.',
+    '',
+    'Type "DELETE" to confirm:'
+  ];
+
+  const confirmation = prompt(warnings.join('\n'));
+  if (confirmation !== 'DELETE') {
+    alert('Operation cancelled.');
+    return;
+  }
+
+  const status = document.getElementById('statusMsg');
+  const resetBtn = document.getElementById('resetBtn');
+  resetBtn.disabled = true;
+  status.textContent = 'Starting reset and scrape...';
+  status.style.color = '#f88';
+
+  const eventSource = new EventSource('/api/reset-and-scrape');
+
+  // POST to start the operation
+  fetch('/api/reset-and-scrape', {method: 'POST'})
+    .then(response => {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      function read() {
+        reader.read().then(({done, value}) => {
+          if (done) {
+            resetBtn.disabled = false;
+            return;
+          }
+
+          const text = decoder.decode(value);
+          const lines = text.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                status.textContent = data.message;
+                if (data.status === 'complete') {
+                  status.style.color = '#8f8';
+                  setTimeout(() => location.reload(), 2000);
+                } else if (data.status === 'error') {
+                  status.style.color = '#f88';
+                  resetBtn.disabled = false;
+                } else if (data.status === 'warning') {
+                  status.style.color = '#ff8';
+                }
+              } catch (e) {}
+            }
+          }
+
+          read();
+        });
+      }
+
+      read();
+    })
+    .catch(err => {
+      status.textContent = 'Error: ' + err;
+      status.style.color = '#f88';
+      resetBtn.disabled = false;
+    });
 }
 
 // Populate rejection details for rejected fonts on page load
