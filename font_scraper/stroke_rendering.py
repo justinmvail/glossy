@@ -654,6 +654,12 @@ def _compute_iou(arr1: np.ndarray, arr2: np.ndarray) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+# Letters that are naturally symmetric between upper/lower case
+# These are excluded from case mismatch detection since many fonts
+# legitimately render them identically (just scaled)
+CASE_SYMMETRIC_LETTERS = frozenset('cvwxosz')
+
+
 def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
     """Check if lowercase letters match their uppercase counterparts.
 
@@ -679,6 +685,8 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
         - Uses IoU metric: intersection / union of binarized glyph pixels.
         - Useful for filtering out fonts unsuitable for case-sensitive
           character recognition.
+        - Naturally symmetric letters (c, o, s, v, w, x, z) are excluded
+          since they often look identical between cases in many fonts.
     """
     font_path = resolve_font_path(font_path)
     mismatched = []
@@ -689,6 +697,9 @@ def check_case_mismatch(font_path: str, threshold: float = 0.80) -> list[str]:
         return []
 
     for lower in 'abcdefghijklmnopqrstuvwxyz':
+        # Skip naturally symmetric letters
+        if lower in CASE_SYMMETRIC_LETTERS:
+            continue
         try:
             l_arr = _render_letter_normalized(pil_font, lower)
             u_arr = _render_letter_normalized(pil_font, lower.upper())
