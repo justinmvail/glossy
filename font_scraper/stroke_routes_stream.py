@@ -654,7 +654,7 @@ def api_optimize_stream(fid: int) -> Response:
     if err:
         return err
 
-    f, err = get_font_or_error(fid, response_type='sse')
+    f, err = get_font_or_error(fid, response_format='sse')
     if err:
         return err
 
@@ -748,7 +748,7 @@ def api_minimal_strokes_stream(fid: int) -> Response:
     if err:
         return err
 
-    f, err = get_font_or_error(fid, response_type='sse')
+    f, err = get_font_or_error(fid, response_format='sse')
     if err:
         return err
 

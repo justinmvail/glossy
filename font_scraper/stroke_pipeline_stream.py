@@ -37,6 +37,7 @@ from stroke_pipeline import MinimalStrokePipeline
 from stroke_rendering import render_glyph_mask
 from stroke_scoring import quick_stroke_score
 from stroke_templates import NUMPAD_TEMPLATE_VARIANTS
+from stroke_utils import infer_direction_from_regions
 
 # Maximum skeleton pixels to visualize (for performance)
 MAX_SKELETON_MARKERS = 500
@@ -193,7 +194,6 @@ def _resolve_waypoint_marker(pipe: MinimalStrokePipeline, wp: Any, wp_idx: int,
         'type': 'waypoint',
         'label': f'WP{wp_idx + 1}',
         'wp_type': wp_type,
-        '_resolved': resolved_wp,
         '_template_pos': pipe.numpad_to_pixel(wp.region)
     }
 
@@ -276,7 +276,7 @@ def _stream_variant_strokes(pipe: MinimalStrokePipeline, var_name: str,
 
     score = 0.0
     if strokes:
-        score = quick_stroke_score_fn(strokes, pipe.mask)
+        score = quick_stroke_score_fn(strokes, pipe.analysis.mask)
         yield {
             'phase': 'Score',
             'step': f'{var_name}: Score = {score:.3f}',
