@@ -808,40 +808,45 @@ def analyze_shape_metrics(arr: np.ndarray, width: int) -> tuple[int, float]:
     """Analyze shape metrics from a rendered text array.
 
     Computes basic shape statistics useful for character classification
-    and validation.
+    and validation. Used to detect connected/script fonts where individual
+    letters span a large portion of the total text width.
 
     Args:
         arr: 2D numpy array containing rendered text (grayscale).
         width: Reference width for computing width percentage.
 
     Returns:
-        A tuple of (shape_count, max_width_pct) where:
+        A tuple of (shape_count, max_component_width_pct) where:
             - shape_count: Number of connected components in the binarized image
-            - max_width_pct: Maximum horizontal span of any row as a fraction
-              of the reference width
+            - max_component_width_pct: Width of the largest connected component
+              as a fraction of the reference width. For normal fonts, each letter
+              is a separate component. For script/cursive fonts, connected letters
+              form larger components that span more of the total width.
 
     Notes:
         - Uses scipy.ndimage.label for connected component analysis.
         - Threshold of BINARIZATION_THRESHOLD (128) is used for binarization.
-        - max_width_pct can exceed 1.0 if the rendered text is wider than
-          the reference width.
+        - A max_component_width_pct > 0.225 typically indicates a script font
+          where letters are connected.
     """
     from scipy.ndimage import label
 
     binary = arr < BINARIZATION_THRESHOLD
-    _labeled, num_shapes = label(binary)
+    labeled, num_shapes = label(binary)
 
-    # Find max contiguous width percentage
-    max_width = 0
-    rows, cols = np.where(binary)
-    if len(rows) > 0:
-        for r in np.unique(rows):
-            row_cols = cols[rows == r]
-            if len(row_cols) > 0:
-                span = row_cols.max() - row_cols.min() + 1
-                max_width = max(max_width, span)
+    # Find the width of the largest connected component
+    max_width_pct = 0.0
+    if num_shapes > 0:
+        for i in range(1, num_shapes + 1):
+            component = (labeled == i)
+            # Get columns that contain this component
+            cols_with_component = np.any(component, axis=0)
+            comp_width = np.sum(cols_with_component)
+            width_pct = comp_width / width if width > 0 else 0
+            if width_pct > max_width_pct:
+                max_width_pct = width_pct
 
-    return num_shapes, max_width / width if width > 0 else 0
+    return num_shapes, max_width_pct
 
 
 def check_char_holes(pil_font: FreeTypeFont, char: str) -> bool:

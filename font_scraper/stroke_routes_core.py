@@ -600,63 +600,48 @@ def api_check_connected(fid: int) -> Response | tuple[str, int]:
         return jsonify(error="Could not check font"), 500
 
 
-@app.route('/api/reject-connected', methods=['POST'])
-def api_reject_connected() -> Response:
-    """Batch check and reject all fonts with connected letters or quality issues.
+@app.route('/api/reject-batch', methods=['POST'])
+def api_reject_batch() -> Response:
+    """Reject multiple fonts by ID.
 
-    Iterates through all non-rejected fonts in the database, applies the same
-    quality checks as api_check_connected, and automatically marks failing
-    fonts as rejected with reason_id 8.
+    Accepts a list of font IDs and marks them all as rejected with reason_id 8.
+    This is used by the UI to reject fonts that have already been verified as bad.
+
+    Request Body:
+        JSON object with a 'font_ids' array::
+
+            {"font_ids": [1, 2, 3]}
 
     Returns:
         flask.Response: JSON response::
 
             {
                 "ok": true,
-                "checked": 150,   // Number of fonts successfully checked
-                "rejected": 23    // Number of fonts rejected in this run
+                "rejected": 3    // Number of fonts rejected
             }
 
-    Quality Checks:
-        Same as api_check_connected:
-        - Shape count for "Hello World" must be between 10-15
-        - Maximum stroke width ratio must not exceed 0.225
-        - Letter 'l' must not have holes
-        - Character '!' must have exactly 2 shapes
-        - No case mismatches between upper and lower case letters
-
     Note:
-        - Skips fonts that are already rejected (reason_id = 8)
-        - Silently skips fonts that cannot be loaded or rendered
-        - This is a potentially long-running operation for large font databases
+        - Skips fonts that are already rejected
+        - Invalid font IDs are silently ignored
 
     Example:
         Request::
 
-            POST /api/reject-connected
+            POST /api/reject-batch
+            {"font_ids": [42, 57, 123]}
 
         Response::
 
-            {"ok": true, "checked": 150, "rejected": 23}
+            {"ok": true, "rejected": 3}
     """
-    fonts = font_repository.list_fonts_for_scan()
-    chk = 0
-    to_reject: list[tuple[int, str]] = []
-    for f in fonts:
-        try:
-            fp = resolve_font_path(f['file_path'])
-            pf = ImageFont.truetype(fp, 60)
-            result = _check_font_quality(pf, fp)
-            if result['shape_count'] == 0:
-                continue
-            chk += 1
-            if result['is_bad']:
-                to_reject.append((f['id'], f"{result['shape_count']} shapes"))
-        except (OSError, ValueError, MemoryError):
-            continue
-    # Batch reject all fonts in a single transaction to avoid N+1 queries
+    data = request.get_json() or {}
+    font_ids = data.get('font_ids', [])
+    if not font_ids:
+        return success_response(rejected=0)
+
+    to_reject = [(fid, "Failed quality check") for fid in font_ids]
     rej = font_repository.reject_fonts_batch(to_reject)
-    return success_response(checked=chk, rejected=rej)
+    return success_response(rejected=rej)
 
 
 @app.route('/api/font-sample/<int:fid>')
