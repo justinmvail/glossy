@@ -1237,9 +1237,12 @@ def api_reset_and_scrape() -> Response:
                 return
 
             # Step 2: Run scrapers (no page/font limits - scrape everything)
+            # DaFont: scrapes all categories defined in CATEGORIES dict
+            # FontSpace: searches for 'font' which matches virtually all fonts
+            # Google Fonts: downloads all fonts from curated handwriting list
             scrapers = [
-                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--categories', '601', '603']),
-                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'handwritten']),
+                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont']),
+                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'font']),
                 ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google']),
             ]
 

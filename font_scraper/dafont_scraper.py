@@ -88,10 +88,63 @@ class DaFontScraper(FontSource):
     PAGE_TIMEOUT = 30
     DOWNLOAD_TIMEOUT = 60
 
-    # Handwriting-related categories
+    # All DaFont categories
     CATEGORIES = {
-        '601': 'Calligraphy',
-        '603': 'Handwritten',
+        # Fancy
+        '101': 'Fancy - Curly',
+        '102': 'Fancy - Western',
+        '103': 'Fancy - Eroded',
+        '104': 'Fancy - Distorted',
+        '105': 'Fancy - Destroy',
+        '106': 'Fancy - Horror',
+        '107': 'Fancy - Fire-Ice',
+        '108': 'Fancy - Old School',
+        '109': 'Fancy - Various',
+        '110': 'Fancy - Initials',
+        '111': 'Fancy - Decorative',
+        '112': 'Fancy - Groovy',
+        '113': 'Fancy - Modern',
+        '114': 'Fancy - Hearts',
+        '115': 'Fancy - Cartoon',
+        '116': 'Fancy - Rounded',
+        '117': 'Fancy - Stencil Army',
+        '118': 'Fancy - Retro',
+        # Foreign Look
+        '201': 'Foreign Look - Arabic',
+        '202': 'Foreign Look - Chinese',
+        '203': 'Foreign Look - Mexican',
+        '204': 'Foreign Look - Roman Greek',
+        '205': 'Foreign Look - Russian',
+        '206': 'Foreign Look - Various',
+        # Techno
+        '301': 'Techno - LCD',
+        '302': 'Techno - Sci-Fi',
+        '303': 'Techno - Square',
+        '304': 'Techno - Various',
+        # Bitmap
+        '401': 'Bitmap - Pixel',
+        '402': 'Bitmap - Bitmap',
+        # Gothic
+        '501': 'Gothic - Medieval',
+        '502': 'Gothic - Modern',
+        '503': 'Gothic - Celtic',
+        '504': 'Gothic - Initials',
+        '505': 'Gothic - Various',
+        # Script
+        '601': 'Script - Calligraphy',
+        '602': 'Script - School',
+        '603': 'Script - Handwritten',
+        '604': 'Script - Brush',
+        '605': 'Script - Trash',
+        '606': 'Script - Various',
+        '607': 'Script - Graffiti',
+        # Basic
+        '801': 'Basic - Sans Serif',
+        '802': 'Basic - Serif',
+        '803': 'Basic - Fixed Width',
+        '804': 'Basic - Various',
+        # Dingbats (skip for now as they're symbols, not text)
+        # '901': 'Dingbats - Various',
     }
 
     # Regex patterns for HTML parsing (compiled once for efficiency)
