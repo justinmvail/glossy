@@ -1236,14 +1236,15 @@ def api_reset_and_scrape() -> Response:
                 yield f'data: {json.dumps({"status": "error", "message": f"Database setup failed: {result.stderr}"})}\n\n'
                 return
 
-            # Step 2: Run scrapers (no page/font limits - scrape everything)
+            # Step 2: Run scrapers
+            # TODO: Remove --max-fonts 10 after testing
             # DaFont: scrapes all categories defined in CATEGORIES dict
             # FontSpace: searches for 'font' which matches virtually all fonts
             # Google Fonts: downloads all fonts from curated handwriting list
             scrapers = [
-                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont']),
-                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'font']),
-                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google']),
+                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--max-fonts', '10']),
+                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'font', '--max-fonts', '10']),
+                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google', '--max-fonts', '10']),
             ]
 
             total_fonts = 0
