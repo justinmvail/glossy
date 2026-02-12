@@ -157,13 +157,13 @@ def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> dict:
     )
 
     return {
-        'is_bad': is_bad,
+        'is_bad': bool(is_bad),
         'shape_count': int(shape_count),
-        'max_width': max_width,
+        'max_width': float(max_width),
         'case_mismatches': case_mismatches,
-        'l_has_hole': l_has_hole,
-        'exclaim_shapes': exclaim_shapes,
-        'exclaim_ok': exclaim_ok
+        'l_has_hole': bool(l_has_hole),
+        'exclaim_shapes': int(exclaim_shapes),
+        'exclaim_ok': bool(exclaim_ok)
     }
 
 
