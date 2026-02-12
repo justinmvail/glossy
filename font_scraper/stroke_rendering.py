@@ -660,7 +660,7 @@ def _compute_iou(arr1: np.ndarray, arr2: np.ndarray) -> float:
 CASE_SYMMETRIC_LETTERS = frozenset('cvwxoszui')
 
 
-def check_case_mismatch(font_path: str, threshold: float = 0.70) -> list[str]:
+def check_case_mismatch(font_path: str, threshold: float = 0.75) -> list[str]:
     """Check if lowercase letters match their uppercase counterparts.
 
     Detects small-caps fonts where lowercase letters are rendered as
