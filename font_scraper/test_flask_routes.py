@@ -368,9 +368,11 @@ class TestEdgeCases(FlaskRoutesTestCase):
         response = self.client.get(f'/api/render/{self.test_font_id}?c=')
         self.assertEqual(response.status_code, 400)
 
+    @unittest.skip("Modifies real database - run manually only")
     def test_batch_reject_empty_list(self):
         """POST /api/reject-connected with no qualifying fonts succeeds."""
         # This tests that the batch operation handles empty results gracefully
+        # WARNING: This actually rejects fonts in the real database!
         response = self.client.post('/api/reject-connected')
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.data)
