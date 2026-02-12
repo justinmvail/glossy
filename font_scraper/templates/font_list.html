@@ -69,7 +69,7 @@
   </tr></thead>
   <tbody id="fontTable">
   {% for f in fonts %}
-    <tr data-name="{{ f.name|lower }}" data-id="{{ f.id }}" {% if f.rejected %}class="rejected"{% endif %}>
+    <tr data-name="{{ f.name|lower }}" data-id="{{ f.id }}" {% if f.rejected %}class="rejected" data-details="{{ f.rejection_details|default('', true)|e }}"{% endif %}>
       <td><a href="/font/{{ f.id }}">{{ f.name }}</a></td>
       <td><img class="font-sample" src="/api/font-sample/{{ f.id }}" loading="lazy" alt=""></td>
       <td class="shapes" data-id="{{ f.id }}">-</td>
@@ -180,7 +180,7 @@ function restoreAll() {
 function rejectConnected() {
   // Find fonts with failed quality checks (red cells in table)
   const rows = document.querySelectorAll('#fontTable tr');
-  const badFontIds = [];
+  const rejections = [];
 
   rows.forEach(row => {
     const fontId = row.dataset.id;
@@ -198,25 +198,56 @@ function rejectConnected() {
 
     if (isRed(shapesCell) || isRed(widthCell) || isRed(ltestCell) ||
         isRed(extestCell) || isRed(casetestCell)) {
-      badFontIds.push(parseInt(fontId));
+      // Collect quality check data from cells
+      const rejection = {font_id: parseInt(fontId)};
+
+      if (shapesCell) {
+        const txt = shapesCell.textContent;
+        if (txt === 'ERR') {
+          rejection.error = shapesCell.title || 'Could not verify';
+        } else if (txt !== '-' && txt !== '?') {
+          rejection.shapes = parseInt(txt) || null;
+        }
+      }
+      if (widthCell && widthCell.textContent !== '-') {
+        rejection.max_width_pct = parseFloat(widthCell.textContent) || null;
+      }
+      if (ltestCell) {
+        rejection.l_has_hole = ltestCell.textContent === 'FAIL';
+      }
+      if (extestCell) {
+        rejection.exclaim_ok = extestCell.textContent === 'PASS';
+        if (extestCell.textContent.includes('FAIL')) {
+          const match = extestCell.textContent.match(/\((\d+)\)/);
+          if (match) rejection.exclaim_shapes = parseInt(match[1]);
+        }
+      }
+      if (casetestCell && casetestCell.title) {
+        const match = casetestCell.title.match(/Lowercase = Uppercase: (.+)/);
+        if (match) {
+          rejection.case_mismatches = match[1].split(', ');
+        }
+      }
+
+      rejections.push(rejection);
     }
   });
 
-  if (badFontIds.length === 0) {
+  if (rejections.length === 0) {
     const status = document.getElementById('statusMsg');
     status.textContent = 'No failed fonts to reject. Run "Verify Fonts" first.';
     return;
   }
 
-  if (!confirm(`Reject ${badFontIds.length} fonts that failed quality checks?`)) return;
+  if (!confirm(`Reject ${rejections.length} fonts that failed quality checks?`)) return;
 
   const status = document.getElementById('statusMsg');
-  status.textContent = `Rejecting ${badFontIds.length} fonts...`;
+  status.textContent = `Rejecting ${rejections.length} fonts...`;
 
   fetch('/api/reject-batch', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({font_ids: badFontIds})
+    body: JSON.stringify({rejections: rejections})
   })
     .then(r => r.json())
     .then(d => {
@@ -404,6 +435,79 @@ async function testFirst10() {
   status.textContent = `Tested ${tested} fonts. Avg score: ${avgScore}`;
   testBtn.disabled = false;
 }
+
+// Populate rejection details for rejected fonts on page load
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('#fontTable tr.rejected').forEach(row => {
+    const details = row.dataset.details;
+    if (!details) return;
+
+    try {
+      const d = JSON.parse(details);
+      const shapesCell = row.querySelector('td.shapes');
+      const widthCell = row.querySelector('td.width');
+      const ltestCell = row.querySelector('td.ltest');
+      const extestCell = row.querySelector('td.extest');
+      const casetestCell = row.querySelector('td.casetest');
+
+      // Error case
+      if (d.error) {
+        if (shapesCell) {
+          shapesCell.textContent = 'ERR';
+          shapesCell.title = d.error;
+          shapesCell.style.color = '#f88';
+        }
+        return;
+      }
+
+      // Shapes
+      if (shapesCell && d.shapes != null) {
+        shapesCell.textContent = d.shapes;
+        const badShapes = d.shapes < 10 || d.shapes > 15;
+        shapesCell.style.color = badShapes ? '#f88' : '#8f8';
+      }
+
+      // Width
+      if (widthCell && d.max_width_pct != null) {
+        widthCell.textContent = d.max_width_pct + '%';
+        const badWidth = d.max_width_pct > 22.5;
+        widthCell.style.color = badWidth ? '#f88' : '#8f8';
+      }
+
+      // L test
+      if (ltestCell && d.l_has_hole != null) {
+        ltestCell.textContent = d.l_has_hole ? 'FAIL' : 'PASS';
+        ltestCell.style.color = d.l_has_hole ? '#f88' : '#8f8';
+      }
+
+      // Exclaim test
+      if (extestCell && d.exclaim_ok != null) {
+        if (d.exclaim_ok) {
+          extestCell.textContent = 'PASS';
+          extestCell.style.color = '#8f8';
+        } else {
+          extestCell.textContent = d.exclaim_shapes != null ? `FAIL (${d.exclaim_shapes})` : 'FAIL';
+          extestCell.style.color = '#f88';
+        }
+      }
+
+      // Case mismatches
+      if (casetestCell && d.case_mismatches) {
+        const count = d.case_mismatches.length;
+        if (count === 0) {
+          casetestCell.textContent = 'OK';
+          casetestCell.style.color = '#8f8';
+        } else {
+          casetestCell.textContent = count;
+          casetestCell.style.color = '#f88';
+          casetestCell.title = `Lowercase = Uppercase: ${d.case_mismatches.join(', ')}`;
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing rejection details:', e);
+    }
+  });
+});
 
 </script>
 </body>

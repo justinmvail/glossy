@@ -739,7 +739,8 @@ class FontRepository:
                 query = """
                     SELECT f.id, f.name, f.source, f.file_path,
                            COALESCE(cs.char_count, 0) as char_count,
-                           1 as rejected
+                           1 as rejected,
+                           fr.details as rejection_details
                     FROM fonts f
                     JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = ?
                     LEFT JOIN (

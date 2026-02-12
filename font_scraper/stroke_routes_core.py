@@ -633,13 +633,44 @@ def api_reject_batch() -> Response:
         Response::
 
             {"ok": true, "rejected": 3}
+
+    Request Body (with details)::
+
+        {
+            "rejections": [
+                {"font_id": 42, "shapes": 5, "max_width_pct": 30.5, "case_mismatches": ["r", "n"]},
+                {"font_id": 57, "shapes": 11, "l_has_hole": true}
+            ]
+        }
     """
     data = request.get_json() or {}
-    font_ids = data.get('font_ids', [])
-    if not font_ids:
-        return success_response(rejected=0)
 
-    to_reject = [(fid, "Failed quality check") for fid in font_ids]
+    # Support both old format (font_ids) and new format (rejections with details)
+    rejections = data.get('rejections', [])
+    if rejections:
+        to_reject = []
+        for r in rejections:
+            fid = r.get('font_id')
+            if not fid:
+                continue
+            # Store quality check results as JSON details
+            details = json.dumps({
+                'shapes': r.get('shapes'),
+                'max_width_pct': r.get('max_width_pct'),
+                'l_has_hole': r.get('l_has_hole'),
+                'exclaim_ok': r.get('exclaim_ok'),
+                'exclaim_shapes': r.get('exclaim_shapes'),
+                'case_mismatches': r.get('case_mismatches', []),
+                'error': r.get('error')
+            })
+            to_reject.append((fid, details))
+    else:
+        # Fallback to old format
+        font_ids = data.get('font_ids', [])
+        if not font_ids:
+            return success_response(rejected=0)
+        to_reject = [(fid, "Failed quality check") for fid in font_ids]
+
     rej = font_repository.reject_fonts_batch(to_reject)
     return success_response(rejected=rej)
 
