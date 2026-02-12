@@ -265,9 +265,10 @@ async function verifyFonts() {
       if (!r.ok || d.error) {
         const errMsg = d.error || `HTTP ${r.status}`;
         console.error('API error for font', fontId, errMsg);
-        shapeCell.textContent = '-';
+        // Mark as FAIL (red) so these fonts get included in batch reject
+        shapeCell.textContent = 'ERR';
         shapeCell.title = errMsg;
-        shapeCell.style.color = '#888';
+        shapeCell.style.color = 'rgb(255, 136, 136)';
         if (widthCell) {
           widthCell.textContent = '-';
           widthCell.title = errMsg;
