@@ -180,24 +180,17 @@ class DaFontAdapter:
             category=font_data.get('category', '')
         )
         try:
-            before = self._get_font_files()
+            # Ensure cache is loaded
+            self._ensure_cache()
+
             success = self._scraper.download_font(font)
 
-            # Scan only for NEW files (cheap os.listdir diff against cache)
-            new_files = self._get_new_files(before)
-
-            if new_files:
-                new_file = sorted(new_files)[0]
-                # Update cache with new files
-                self._file_cache.update(new_files)
-                return True, f"fonts/{self.source_name}/{new_file}"
-
             if success:
-                file_path = self._find_file_by_name(font_data['name'])
-                if file_path:
-                    return True, file_path
-                return True, None
+                # Try to find the new file by name (fast, searches cache + disk fallback)
+                file_path = self._find_new_file(font_data['name'])
+                return True, file_path
 
+            # Download returned False - check if file already exists
             file_path = self._find_file_by_name(font_data['name'])
             if file_path:
                 return True, file_path
@@ -207,25 +200,42 @@ class DaFontAdapter:
             logger.error("Download failed for %s: %s", font_data['name'], e)
             return False, None
 
-    def _get_font_files(self) -> set[str]:
-        """Get cached set of font file names. Loads from disk once."""
-        if self._file_cache is None:
-            output_dir = self._scraper.output_dir
-            self._file_cache = set()
-            for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-                for match in output_dir.glob(f"*{ext}"):
-                    self._file_cache.add(match.name)
-            logger.info("Font file cache loaded: %d files", len(self._file_cache))
-        return self._file_cache
-
-    def _get_new_files(self, before: set[str]) -> set[str]:
-        """Fast scan for new files by diffing os.listdir against cache."""
+    def _ensure_cache(self) -> None:
+        """Load file cache from disk on first call."""
+        if self._file_cache is not None:
+            return
         output_dir = self._scraper.output_dir
+        self._file_cache = set()
+        for name in os.listdir(output_dir):
+            if name.lower().endswith(('.ttf', '.otf')):
+                self._file_cache.add(name)
+        logger.info("Font file cache loaded: %d files", len(self._file_cache))
+
+    def _find_new_file(self, font_name: str) -> str | None:
+        """Find a newly downloaded file by constructing expected name, with disk fallback."""
+        output_dir = self._scraper.output_dir
+        safe_name = self._scraper.safe_filename(font_name)
+
+        # Check common naming patterns on disk directly
+        for ext in ('.ttf', '.otf'):
+            for candidate in (safe_name, safe_name.replace(' ', '_'), safe_name.replace(' ', '')):
+                path = output_dir / f"{candidate}{ext}"
+                if path.exists() and path.name not in self._file_cache:
+                    self._file_cache.add(path.name)
+                    return f"fonts/{self.source_name}/{path.name}"
+
+        # Fallback: quick listdir diff to catch any new files
         current = set()
         for name in os.listdir(output_dir):
             if name.lower().endswith(('.ttf', '.otf')):
                 current.add(name)
-        return current - before
+        new_files = current - self._file_cache
+        if new_files:
+            self._file_cache.update(new_files)
+            return f"fonts/{self.source_name}/{sorted(new_files)[0]}"
+
+        # Already existed in cache - search by name
+        return self._find_file_by_name(font_name)
 
     def _find_file_by_name(self, font_name: str) -> str | None:
         """Search cached file list for a matching font name."""
@@ -234,10 +244,9 @@ class DaFontAdapter:
 
         search_norm = normalize(font_name)
         first_word = font_name.split()[0].lower() if ' ' in font_name else None
-        cached = self._get_font_files()
 
         candidates = []
-        for filename in cached:
+        for filename in self._file_cache:
             stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
             file_norm = normalize(stem)
 
@@ -300,45 +309,45 @@ class FontSpaceAdapter:
             category=font_data.get('category', '')
         )
         try:
-            before = self._get_font_files()
+            self._ensure_cache()
             success = self._scraper.download_font(font)
             if success:
-                new_files = self._get_new_files(before)
-                if new_files:
-                    new_file = sorted(new_files)[0]
-                    self._file_cache.update(new_files)
-                    return True, f"fonts/{self.source_name}/{new_file}"
-                file_path = self._find_file_by_name(font_data['name'])
+                file_path = self._find_new_file(font_data['name'])
                 return True, file_path
             return False, None
         except Exception as e:
             logger.error("Download failed for %s: %s", font_data['name'], e)
             return False, None
 
-    def _get_font_files(self) -> set[str]:
-        """Get cached set of font file names. Loads from disk once."""
-        if self._file_cache is None:
-            output_dir = self._scraper.output_dir
-            self._file_cache = set()
-            for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-                for match in output_dir.glob(f"*{ext}"):
-                    self._file_cache.add(match.name)
-            logger.info("Font file cache loaded: %d files", len(self._file_cache))
-        return self._file_cache
-
-    def _get_new_files(self, before: set[str]) -> set[str]:
-        """Fast scan for new files by diffing os.listdir against cache."""
+    def _ensure_cache(self) -> None:
+        """Load file cache from disk on first call."""
+        if self._file_cache is not None:
+            return
         output_dir = self._scraper.output_dir
+        self._file_cache = set()
+        for name in os.listdir(output_dir):
+            if name.lower().endswith(('.ttf', '.otf')):
+                self._file_cache.add(name)
+        logger.info("Font file cache loaded: %d files", len(self._file_cache))
+
+    def _find_new_file(self, font_name: str) -> str | None:
+        """Find a newly downloaded file with disk fallback."""
+        output_dir = self._scraper.output_dir
+        # Quick listdir diff
         current = set()
         for name in os.listdir(output_dir):
             if name.lower().endswith(('.ttf', '.otf')):
                 current.add(name)
-        return current - before
+        new_files = current - self._file_cache
+        if new_files:
+            self._file_cache.update(new_files)
+            return f"fonts/{self.source_name}/{sorted(new_files)[0]}"
+        return self._find_file_by_name(font_name)
 
     def _find_file_by_name(self, font_name: str) -> str | None:
         """Search cached file list for a matching font name."""
         search_terms = font_name.lower().replace(' ', '').replace('-', '').replace('_', '')
-        for filename in self._get_font_files():
+        for filename in self._file_cache:
             stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
             file_base = stem.lower().replace(' ', '').replace('-', '').replace('_', '')
             if search_terms in file_base or file_base in search_terms:
