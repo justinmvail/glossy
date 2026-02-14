@@ -768,6 +768,10 @@ function addLog(containerId, message, type = 'info') {
   entry.className = 'log-entry ' + type;
   entry.textContent = new Date().toLocaleTimeString() + ' - ' + message;
   container.appendChild(entry);
+  // Keep only last 200 visible log entries to prevent browser freeze
+  while (container.children.length > 200) {
+    container.removeChild(container.firstChild);
+  }
   container.scrollTop = container.scrollHeight;
 }
 
@@ -782,7 +786,7 @@ function clearLog(containerId) {
 
 let verificationResults = [];
 
-async function verifyFonts() {
+function verifyFonts() {
   const btn = document.getElementById('verifyBtn');
   const rejectBtn = document.getElementById('rejectBtn');
   const status = document.getElementById('verifyStatus');
@@ -791,75 +795,58 @@ async function verifyFonts() {
   rejectBtn.disabled = true;
   verificationResults = [];
   clearLog('verifyLog');
-  addLog('verifyLog', 'Starting font verification...', 'info');
+  addLog('verifyLog', 'Starting server-side font verification...', 'info');
+  status.textContent = 'Connecting...';
 
-  try {
-    const response = await fetch('/api/fonts-list');
-    const fonts = await response.json();
+  const evtSource = new EventSource('/api/verify-all-stream');
+  let startTime = Date.now();
 
-    let checked = 0;
-    let failed = 0;
+  evtSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
 
-    for (const font of fonts) {
-      status.textContent = `Checking ${checked + 1}/${fonts.length}...`;
+    if (data.type === 'start') {
+      addLog('verifyLog', `Checking ${data.total} fonts...`, 'info');
+      status.textContent = `Checking 0/${data.total}...`;
+      return;
+    }
 
-      try {
-        const checkResp = await fetch(`/api/check-connected/${font.id}`);
-        const result = await checkResp.json();
+    if (data.type === 'progress') {
+      const pct = ((data.checked / data.total) * 100).toFixed(1);
+      const elapsed = (Date.now() - startTime) / 1000;
+      const rate = data.checked / elapsed;
+      const remaining = Math.round((data.total - data.checked) / rate);
+      const eta = remaining > 60 ? `${Math.round(remaining / 60)}m` : `${remaining}s`;
+      const passed = data.checked - data.failed;
+      status.textContent = `Checking ${data.checked}/${data.total} (${pct}%) — ${Math.round(rate)}/sec — ETA ${eta} — ${passed} passed, ${data.failed} failed`;
 
-        checked++;
-
-        let issues = [];
-        if (result.shapes !== null && (result.shapes < 10 || result.shapes > 15)) {
-          issues.push(`shapes=${result.shapes}`);
-        }
-        if (result.max_width_pct !== null && result.max_width_pct > 22.5) {
-          issues.push(`width=${result.max_width_pct.toFixed(1)}%`);
-        }
-        if (result.l_has_hole === true) {
-          issues.push('l_has_hole');
-        }
-        if (result.exclaim_ok === false) {
-          issues.push(`exclaim_shapes=${result.exclaim_shapes}`);
-        }
-        if (result.case_mismatches && result.case_mismatches.length > 0) {
-          issues.push(`case_issues=${result.case_mismatches.join(',')}`);
-        }
-        if (result.error) {
-          issues.push(`error: ${result.error}`);
-        }
-
-        if (issues.length > 0) {
-          failed++;
-          addLog('verifyLog', `FAIL: ${font.name} - ${issues.join(', ')}`, 'error');
-          verificationResults.push({
-            font_id: font.id,
-            name: font.name,
-            ...result,
-            issues: issues
-          });
-        } else {
-          addLog('verifyLog', `OK: ${font.name}`, 'success');
-        }
-      } catch (e) {
-        addLog('verifyLog', `ERROR checking ${font.name}: ${e}`, 'error');
+      if (data.status === 'ok') {
+        addLog('verifyLog', `OK: ${data.name}`, 'success');
       }
+      return;
     }
 
-    status.textContent = `Done! ${checked} checked, ${failed} failed`;
-    addLog('verifyLog', `Verification complete: ${failed} fonts have issues`, failed > 0 ? 'warning' : 'success');
+    if (data.type === 'done') {
+      evtSource.close();
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      status.textContent = `Done! ${data.checked} checked, ${data.failed} failed (${elapsed}s)`;
+      addLog('verifyLog', `Verification complete: ${data.failed} fonts have issues (${elapsed}s)`, data.failed > 0 ? 'warning' : 'success');
 
-    if (failed > 0) {
-      rejectBtn.disabled = false;
-      rejectBtn.textContent = `Reject ${failed} Failed Fonts`;
+      verificationResults = data.failed_fonts || [];
+
+      if (data.failed > 0) {
+        rejectBtn.disabled = false;
+        rejectBtn.textContent = `Reject ${data.failed} Failed Fonts`;
+      }
+      btn.disabled = false;
     }
+  };
 
-  } catch (e) {
-    addLog('verifyLog', `Error: ${e}`, 'error');
-    status.textContent = 'Error during verification';
-  }
-
-  btn.disabled = false;
+  evtSource.onerror = function() {
+    evtSource.close();
+    addLog('verifyLog', 'Connection lost. Verification may still be running server-side.', 'error');
+    status.textContent = 'Connection lost';
+    btn.disabled = false;
+  };
 }
 
 async function rejectBadFonts() {

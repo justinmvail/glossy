@@ -591,6 +591,104 @@ def api_check_connected(fid: int) -> Response | tuple[str, int]:
         return jsonify(error="Could not check font"), 500
 
 
+@app.route('/api/verify-all-stream')
+def api_verify_all_stream() -> Response:
+    """Stream font quality verification results via SSE.
+
+    Checks all non-rejected fonts server-side and streams results as
+    Server-Sent Events, avoiding 57K+ individual HTTP round trips.
+
+    SSE Events:
+        progress: {"checked": N, "failed": N, "total": N, "name": "...", "status": "ok"|"fail", "issues": [...]}
+        done: {"done": true, "checked": N, "failed": N, "failed_fonts": [...]}
+
+    Returns:
+        Response: SSE event stream.
+    """
+    from stroke_flask import format_sse_event, get_db_context
+
+    def generate():
+        with get_db_context() as db:
+            fonts = db.execute('''
+                SELECT f.id, f.name, f.file_path
+                FROM fonts f
+                WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                ORDER BY f.name
+            ''').fetchall()
+
+        total = len(fonts)
+        checked = 0
+        failed = 0
+        failed_fonts = []
+
+        yield format_sse_event({'type': 'start', 'total': total})
+
+        for font in fonts:
+            fid, name, file_path = font['id'], font['name'], font['file_path']
+            checked += 1
+
+            try:
+                fp = resolve_font_path(file_path)
+                pf = ImageFont.truetype(fp, 60)
+                result = _check_font_quality(pf, fp)
+
+                issues = []
+                if result['shape_count'] == 0:
+                    issues.append('render_failed')
+                else:
+                    if result['shape_count'] < MIN_SHAPE_COUNT or result['shape_count'] > MAX_SHAPE_COUNT:
+                        issues.append(f"shapes={result['shape_count']}")
+                    if result['max_width'] > MAX_WIDTH_RATIO:
+                        issues.append(f"width={round(result['max_width'] * 100, 1)}%")
+                    if result['l_has_hole']:
+                        issues.append('l_has_hole')
+                    if result['exclaim_shapes'] != EXPECTED_EXCLAMATION_SHAPES:
+                        issues.append(f"exclaim_shapes={result['exclaim_shapes']}")
+                    if result['case_mismatches']:
+                        issues.append(f"case_issues={','.join(result['case_mismatches'])}")
+
+                if issues:
+                    failed += 1
+                    failed_fonts.append({
+                        'font_id': fid, 'name': name, 'issues': issues,
+                        'shapes': result['shape_count'],
+                        'max_width_pct': round(result['max_width'] * 100, 1),
+                        'l_has_hole': result['l_has_hole'],
+                        'exclaim_shapes': result['exclaim_shapes'],
+                        'case_mismatches': result.get('case_mismatches', []),
+                    })
+
+                yield format_sse_event({
+                    'type': 'progress',
+                    'checked': checked, 'failed': failed, 'total': total,
+                    'name': name,
+                    'status': 'fail' if issues else 'ok',
+                    'issues': issues,
+                })
+
+            except Exception as e:
+                failed += 1
+                failed_fonts.append({
+                    'font_id': fid, 'name': name,
+                    'issues': [f'error: {e}'],
+                })
+                yield format_sse_event({
+                    'type': 'progress',
+                    'checked': checked, 'failed': failed, 'total': total,
+                    'name': name, 'status': 'error',
+                    'issues': [str(e)],
+                })
+
+        yield format_sse_event({
+            'type': 'done', 'done': True,
+            'checked': checked, 'failed': failed,
+            'failed_fonts': failed_fonts,
+        })
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 @app.route('/api/reject-batch', methods=['POST'])
 def api_reject_batch() -> Response:
     """Reject multiple fonts by ID.
