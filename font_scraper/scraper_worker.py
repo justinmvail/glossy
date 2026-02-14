@@ -28,6 +28,7 @@ Example:
 """
 
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -124,6 +125,7 @@ class DaFontAdapter:
         from dafont_scraper import DaFontScraper
         self._scraper = DaFontScraper(str(output_dir), rate_limit=0.5)
         self._progress_callback = None
+        self._file_cache: set[str] | None = None  # Lazy-loaded, updated incrementally
 
     def set_progress_callback(self, callback: Callable[[str], None]) -> None:
         """Set a callback for progress updates during scraping."""
@@ -178,104 +180,77 @@ class DaFontAdapter:
             category=font_data.get('category', '')
         )
         try:
-            # Record files before download to find new ones
             before = self._get_font_files()
             success = self._scraper.download_font(font)
 
-            after = self._get_font_files()
-            new_files = after - before
+            # Scan only for NEW files (cheap os.listdir diff against cache)
+            new_files = self._get_new_files(before)
 
             if new_files:
-                # New file was extracted - return it
                 new_file = sorted(new_files)[0]
+                # Update cache with new files
+                self._file_cache.update(new_files)
                 return True, f"fonts/{self.source_name}/{new_file}"
 
             if success:
-                # Download succeeded but no new files - file may already exist
-                # Try to find a matching file
                 file_path = self._find_file_by_name(font_data['name'])
                 if file_path:
                     return True, file_path
-                # File exists somewhere but we can't match it - still success
                 return True, None
 
-            # Download returned False - but file might already exist on disk
-            # Check if we can find a matching file anyway
             file_path = self._find_file_by_name(font_data['name'])
             if file_path:
                 return True, file_path
-
-            # Check if ANY file was added recently (within same second) that we might have missed
-            # This handles race conditions with parallel downloads
-            latest_files = self._get_recent_files(seconds=2)
-            for f in latest_files:
-                if f not in before:
-                    return True, f"fonts/{self.source_name}/{f}"
 
             return False, None
         except Exception as e:
             logger.error("Download failed for %s: %s", font_data['name'], e)
             return False, None
 
-    def _get_recent_files(self, seconds: int = 2) -> list[str]:
-        """Get font files modified within the last N seconds."""
-        import time
-        output_dir = self._scraper.output_dir
-        now = time.time()
-        recent = []
-        for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-            for match in output_dir.glob(f"*{ext}"):
-                if now - match.stat().st_mtime < seconds:
-                    recent.append(match.name)
-        return recent
-
     def _get_font_files(self) -> set[str]:
-        """Get set of font file names in output directory."""
+        """Get cached set of font file names. Loads from disk once."""
+        if self._file_cache is None:
+            output_dir = self._scraper.output_dir
+            self._file_cache = set()
+            for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
+                for match in output_dir.glob(f"*{ext}"):
+                    self._file_cache.add(match.name)
+            logger.info("Font file cache loaded: %d files", len(self._file_cache))
+        return self._file_cache
+
+    def _get_new_files(self, before: set[str]) -> set[str]:
+        """Fast scan for new files by diffing os.listdir against cache."""
         output_dir = self._scraper.output_dir
-        files = set()
-        for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-            for match in output_dir.glob(f"*{ext}"):
-                files.add(match.name)
-        return files
+        current = set()
+        for name in os.listdir(output_dir):
+            if name.lower().endswith(('.ttf', '.otf')):
+                current.add(name)
+        return current - before
 
     def _find_file_by_name(self, font_name: str) -> str | None:
-        """Search for font file matching the font name.
-
-        Uses multiple matching strategies:
-        1. Exact normalized match
-        2. Partial match (font name in filename or vice versa)
-        3. First word match (for multi-word font names)
-        """
-        output_dir = self._scraper.output_dir
-
-        # Normalize for comparison
+        """Search cached file list for a matching font name."""
         def normalize(s: str) -> str:
             return s.lower().replace(' ', '').replace('-', '').replace('_', '')
 
         search_norm = normalize(font_name)
-        # Also try just the first word for multi-word names like "Super Popstar"
         first_word = font_name.split()[0].lower() if ' ' in font_name else None
+        cached = self._get_font_files()
 
         candidates = []
-        for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-            for match in output_dir.glob(f"*{ext}"):
-                file_base = match.stem
-                file_norm = normalize(file_base)
+        for filename in cached:
+            stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            file_norm = normalize(stem)
 
-                # Exact normalized match
-                if search_norm == file_norm:
-                    return f"fonts/{self.source_name}/{match.name}"
+            if search_norm == file_norm:
+                return f"fonts/{self.source_name}/{filename}"
 
-                # Partial match
-                if search_norm in file_norm or file_norm in search_norm:
-                    candidates.append((match.name, len(file_norm)))
-                    continue
+            if search_norm in file_norm or file_norm in search_norm:
+                candidates.append((filename, len(file_norm)))
+                continue
 
-                # First word match (for "Super Popstar" matching "SuperSalad.ttf")
-                if first_word and first_word in file_base.lower():
-                    candidates.append((match.name, len(file_norm) + 100))  # Lower priority
+            if first_word and first_word in stem.lower():
+                candidates.append((filename, len(file_norm) + 100))
 
-        # Return best candidate (shortest filename = most specific match)
         if candidates:
             candidates.sort(key=lambda x: x[1])
             return f"fonts/{self.source_name}/{candidates[0][0]}"
@@ -289,6 +264,7 @@ class FontSpaceAdapter:
     def __init__(self, output_dir: Path):
         from fontspace_scraper import FontSpaceScraper
         self._scraper = FontSpaceScraper(str(output_dir), rate_limit=0.5)
+        self._file_cache: set[str] | None = None
 
     @property
     def source_name(self) -> str:
@@ -324,17 +300,14 @@ class FontSpaceAdapter:
             category=font_data.get('category', '')
         )
         try:
-            # Record files before download to find new ones
             before = self._get_font_files()
             success = self._scraper.download_font(font)
             if success:
-                after = self._get_font_files()
-                new_files = after - before
+                new_files = self._get_new_files(before)
                 if new_files:
-                    # Return the first new file
                     new_file = sorted(new_files)[0]
+                    self._file_cache.update(new_files)
                     return True, f"fonts/{self.source_name}/{new_file}"
-                # Fall back to searching by name
                 file_path = self._find_file_by_name(font_data['name'])
                 return True, file_path
             return False, None
@@ -343,24 +316,33 @@ class FontSpaceAdapter:
             return False, None
 
     def _get_font_files(self) -> set[str]:
-        """Get set of font file names in output directory."""
+        """Get cached set of font file names. Loads from disk once."""
+        if self._file_cache is None:
+            output_dir = self._scraper.output_dir
+            self._file_cache = set()
+            for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
+                for match in output_dir.glob(f"*{ext}"):
+                    self._file_cache.add(match.name)
+            logger.info("Font file cache loaded: %d files", len(self._file_cache))
+        return self._file_cache
+
+    def _get_new_files(self, before: set[str]) -> set[str]:
+        """Fast scan for new files by diffing os.listdir against cache."""
         output_dir = self._scraper.output_dir
-        files = set()
-        for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-            for match in output_dir.glob(f"*{ext}"):
-                files.add(match.name)
-        return files
+        current = set()
+        for name in os.listdir(output_dir):
+            if name.lower().endswith(('.ttf', '.otf')):
+                current.add(name)
+        return current - before
 
     def _find_file_by_name(self, font_name: str) -> str | None:
-        """Search for font file matching the font name."""
-        output_dir = self._scraper.output_dir
+        """Search cached file list for a matching font name."""
         search_terms = font_name.lower().replace(' ', '').replace('-', '').replace('_', '')
-
-        for ext in ['.ttf', '.otf', '.TTF', '.OTF']:
-            for match in output_dir.glob(f"*{ext}"):
-                file_base = match.stem.lower().replace(' ', '').replace('-', '').replace('_', '')
-                if search_terms in file_base or file_base in search_terms:
-                    return f"fonts/{self.source_name}/{match.name}"
+        for filename in self._get_font_files():
+            stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            file_base = stem.lower().replace(' ', '').replace('-', '').replace('_', '')
+            if search_terms in file_base or file_base in search_terms:
+                return f"fonts/{self.source_name}/{filename}"
         return None
 
 
