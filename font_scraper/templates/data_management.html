@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Data Management - Stroke Editor</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+  h1 { margin-bottom: 5px; }
+  .subtitle { color: #888; margin-bottom: 20px; }
+  a { color: #7eb8f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .btn {
+    padding: 8px 16px; border: 1px solid #444; background: #222; color: #eee;
+    border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px;
+  }
+  .btn:hover { background: #333; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.danger { border-color: #a55; color: #f88; }
+  .btn.danger:hover { background: #422; }
+  .btn.success { border-color: #5a5; color: #8f8; }
+  .btn.success:hover { background: #242; }
+  .btn.primary { border-color: #58f; color: #8cf; }
+  .btn.primary:hover { background: #234; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+
+  .section {
+    background: #222; border: 1px solid #333; border-radius: 8px;
+    padding: 20px; margin-bottom: 20px; max-width: 900px;
+  }
+  .section h2 { margin-top: 0; color: #7eb8f7; font-size: 18px; }
+  .section p { color: #aaa; margin: 10px 0; }
+
+  .log-container {
+    background: #111; border: 1px solid #333; border-radius: 4px;
+    padding: 15px; margin-top: 15px; max-height: 400px; overflow-y: auto;
+    font-family: monospace; font-size: 13px; line-height: 1.5;
+  }
+  .log-entry { margin: 2px 0; }
+  .log-entry.info { color: #8cf; }
+  .log-entry.success { color: #8f8; }
+  .log-entry.warning { color: #fc8; }
+  .log-entry.error { color: #f88; }
+  .log-entry.scraping { color: #c8f; }
+
+  .progress-bar {
+    background: #333; border-radius: 4px; height: 8px; margin: 10px 0;
+    overflow: hidden; position: relative;
+  }
+  .progress-fill {
+    background: linear-gradient(90deg, #4a7 0%, #7eb8f7 100%);
+    height: 100%; width: 0%; transition: width 0.3s;
+  }
+
+  .stats {
+    display: flex; gap: 30px; margin-top: 15px;
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 28px; font-weight: 700; color: #7eb8f7;
+  }
+  .stat-label {
+    font-size: 12px; color: #888; margin-top: 5px;
+  }
+
+  /* Scraper cards grid */
+  .scraper-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 15px;
+    margin: 15px 0;
+    max-width: 400px;
+  }
+  .scraper-card {
+    background: #1a1a2e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 15px;
+    min-height: 180px;
+  }
+  .scraper-card.pending { border-color: #666; }
+  .scraper-card.running { border-color: #7eb8f7; border-width: 2px; }
+  .scraper-card.completed { border-color: #5a5; }
+  .scraper-card.failed { border-color: #a55; }
+  .scraper-card.cancelled { border-color: #a55; }
+
+  .scraper-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .scraper-name {
+    font-weight: 600;
+    font-size: 16px;
+  }
+  .scraper-status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #333;
+  }
+  .scraper-status.pending { background: #333; color: #aaa; }
+  .scraper-status.running { background: #234; color: #8cf; }
+  .scraper-status.discovering { background: #324; color: #c8f; }
+  .scraper-status.downloading { background: #234; color: #8cf; }
+  .scraper-status.paused { background: #432; color: #fc8; }
+  .scraper-status.completed { background: #242; color: #8f8; }
+  .scraper-status.failed { background: #422; color: #f88; }
+  .scraper-status.cancelled { background: #422; color: #f88; }
+
+  .scraper-category {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .scraper-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 15px 0;
+  }
+  .scraper-stat {
+    text-align: center;
+  }
+  .scraper-stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #7eb8f7;
+  }
+  .scraper-stat-label {
+    font-size: 10px;
+    color: #888;
+  }
+  .scraper-stat-value.success { color: #8f8; }
+  .scraper-stat-value.error { color: #f88; }
+
+  .scraper-actions {
+    margin-top: 15px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .no-jobs {
+    color: #666;
+    text-align: center;
+    padding: 30px;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<h1>Data Management</h1>
+<p class="subtitle"><a href="/">&larr; Back to Font Browser</a></p>
+
+<!-- Database Stats -->
+<div class="section">
+  <h2>Database Statistics</h2>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="totalFonts">{{ total_fonts }}</div>
+      <div class="stat-label">Total Fonts</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="activeFonts">{{ active_fonts }}</div>
+      <div class="stat-label">Active</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="rejectedFonts">{{ rejected_fonts }}</div>
+      <div class="stat-label">Rejected</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="withStrokes">{{ with_strokes }}</div>
+      <div class="stat-label">With Strokes</div>
+    </div>
+  </div>
+</div>
+
+<!-- Scraper Status Section -->
+<div class="section">
+  <h2>Scraper Status</h2>
+  <p>Background scrapers run independently and persist across page navigation. Fonts are available immediately as they're downloaded.</p>
+
+  <div style="margin: 15px 0;">
+    <button class="btn primary" id="startAllBtn" onclick="startAllScrapers()">Start DaFont Scraper</button>
+    <button class="btn warning" id="pauseBtn" onclick="pauseScraper()" disabled style="background:#532;border-color:#a85;color:#fc8;">Pause</button>
+    <button class="btn danger" id="stopAllBtn" onclick="stopAllScrapers()" disabled>Stop All</button>
+    <button class="btn success" id="registerBtn" onclick="registerExistingFonts()">Register Existing Fonts</button>
+    <button class="btn danger" id="resetDbBtn" onclick="resetDatabase()">Reset Database</button>
+    <span id="scraperGlobalStatus" style="margin-left: 15px; color: #888;"></span>
+  </div>
+
+  <div class="scraper-grid" id="scraperGrid">
+    <!-- Cards populated by JavaScript -->
+    <div class="no-jobs" id="noJobsMessage">No active scraper jobs. Click "Start DaFont Scraper" to begin.</div>
+  </div>
+
+  <div id="scraperLog" class="log-container" style="display: none;"></div>
+</div>
+
+<!-- Font Quality -->
+<div class="section">
+  <h2>Font Quality Verification</h2>
+  <p>Check fonts for quality issues: shape count, width, holes, case mismatches.</p>
+  <div style="margin-top: 15px;">
+    <button class="btn primary" id="verifyBtn" onclick="verifyFonts()">Verify All Fonts</button>
+    <button class="btn danger" id="rejectBtn" onclick="rejectBadFonts()" disabled>Reject Failed Fonts</button>
+    <span id="verifyStatus" style="margin-left: 15px; color: #888;"></span>
+  </div>
+  <div id="verifyLog" class="log-container" style="display: none;"></div>
+</div>
+
+<!-- Duplicate Detection -->
+<div class="section">
+  <h2>Duplicate Detection</h2>
+  <p>Find visually similar fonts using perceptual hashing. Keeps the first font in each group, rejects others.</p>
+  <div style="margin-top: 15px;">
+    <button class="btn primary" id="dedupBtn" onclick="findDuplicates()">Find Duplicates</button>
+    <button class="btn danger" id="rejectDupBtn" onclick="rejectDuplicates()" disabled>Reject Duplicates</button>
+    <span id="dedupStatus" style="margin-left: 15px; color: #888;"></span>
+  </div>
+  <div id="dedupResults" style="display: none; margin-top: 15px;">
+    <div class="stats" style="margin-bottom: 15px;">
+      <div class="stat">
+        <div class="stat-value" id="dupGroups">0</div>
+        <div class="stat-label">Duplicate Groups</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="dupCount">0</div>
+        <div class="stat-label">Fonts to Remove</div>
+      </div>
+    </div>
+  </div>
+  <div id="dedupLog" class="log-container" style="display: none;"></div>
+</div>
+
+<!-- Remove Font Variations -->
+<div class="section">
+  <h2>Remove Font Variations</h2>
+  <p>Remove Bold, Italic, Light, Medium, and other font variations. Keeps only Regular variants.</p>
+  <div style="margin-top: 15px;">
+    <button class="btn primary" id="findVariationsBtn" onclick="findVariations()">Find Variations</button>
+    <button class="btn danger" id="rejectVariationsBtn" onclick="rejectVariations()" disabled>Remove Variations</button>
+    <span id="variationsStatus" style="margin-left: 15px; color: #888;"></span>
+  </div>
+  <div id="variationsResults" style="display: none; margin-top: 15px;">
+    <div class="stats" style="margin-bottom: 15px;">
+      <div class="stat">
+        <div class="stat-value" id="variationsCount">0</div>
+        <div class="stat-label">Variations to Remove</div>
+      </div>
+    </div>
+  </div>
+  <div id="variationsLog" class="log-container" style="display: none;"></div>
+</div>
+
+<!-- Rejected Fonts -->
+<div class="section">
+  <h2>Rejected Fonts</h2>
+  <p>Manage fonts that have been rejected for quality issues.</p>
+  <div style="margin-top: 15px;">
+    <a href="/?rejected=1" class="btn">View Rejected Fonts</a>
+    <button class="btn success" onclick="restoreAllFonts()">Restore All Rejected</button>
+  </div>
+</div>
+
+<!-- Export / Import -->
+<div class="section">
+  <h2>Export / Import</h2>
+  <p>Export your curated font collection or restore from a backup.</p>
+
+  <h3 style="color: #888; font-size: 14px; margin-top: 20px;">Export</h3>
+  <div style="margin-top: 10px;">
+    <button class="btn primary" id="exportBtn" onclick="exportFonts()">Export Accepted Fonts</button>
+    <span id="exportStatus" style="margin-left: 15px; color: #888;">(<span id="acceptedCount">...</span> fonts)</span>
+  </div>
+
+  <h3 style="color: #888; font-size: 14px; margin-top: 20px;">Import</h3>
+  <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+    <input type="file" id="importFile" accept=".zip" style="display: none;" onchange="updateImportButton()">
+    <button class="btn" onclick="document.getElementById('importFile').click()">Choose File</button>
+    <span id="importFileName" style="color: #888;">No file chosen</span>
+    <button class="btn success" id="importBtn" onclick="importFonts()" disabled>Import</button>
+  </div>
+  <div id="importLog" class="log-container" style="display: none; margin-top: 15px;"></div>
+</div>
+
+<script>
+// =============================================================================
+// Scraper Status Polling
+// =============================================================================
+
+let pollInterval = null;
+let currentJobs = {};
+let lastLogId = 0;
+
+function startPolling() {
+  if (pollInterval) return;
+  pollInterval = setInterval(refreshScraperStatus, 2000);
+  refreshScraperStatus();
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+async function refreshScraperStatus() {
+  try {
+    // Fetch job status
+    const resp = await fetch('/api/scraper-status');
+    const data = await resp.json();
+    updateScraperDisplay(data.jobs || []);
+
+    // Fetch logs
+    await refreshLogs();
+  } catch (e) {
+    console.error('Failed to refresh scraper status:', e);
+  }
+}
+
+async function refreshLogs() {
+  try {
+    const resp = await fetch('/api/scraper-logs?limit=50');
+    const data = await resp.json();
+    const logs = data.logs || [];
+
+    // Only add new logs
+    const container = document.getElementById('scraperLog');
+    for (const log of logs) {
+      if (log.id > lastLogId) {
+        lastLogId = log.id;
+        addLogEntry(container, log);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to refresh logs:', e);
+  }
+}
+
+function addLogEntry(container, log) {
+  container.style.display = 'block';
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + (log.level || 'info');
+  // SQLite CURRENT_TIMESTAMP is UTC, append 'Z' so JS parses as UTC then converts to local
+  const time = log.created_at ? new Date(log.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString() : '';
+  entry.textContent = time + ' - ' + log.message;
+  container.appendChild(entry);
+  container.scrollTop = container.scrollHeight;
+}
+
+function updateScraperDisplay(jobs) {
+  const grid = document.getElementById('scraperGrid');
+  const noJobsMsg = document.getElementById('noJobsMessage');
+  const stopAllBtn = document.getElementById('stopAllBtn');
+
+  // Group jobs by source, keeping most recent for each
+  const jobsBySource = {};
+  for (const job of jobs) {
+    if (!jobsBySource[job.source] || job.id > jobsBySource[job.source].id) {
+      jobsBySource[job.source] = job;
+    }
+  }
+
+  // Check if any are running (includes new queue-based statuses)
+  const activeStatuses = ['running', 'pending', 'discovering', 'downloading'];
+  const hasRunning = Object.values(jobsBySource).some(j => activeStatuses.includes(j.status));
+  stopAllBtn.disabled = !hasRunning;
+  document.getElementById('pauseBtn').disabled = !hasRunning;
+
+  // If no jobs at all, show placeholder
+  if (Object.keys(jobsBySource).length === 0) {
+    noJobsMsg.style.display = 'block';
+    // Remove any existing cards
+    const cards = grid.querySelectorAll('.scraper-card');
+    cards.forEach(c => c.remove());
+    return;
+  }
+
+  noJobsMsg.style.display = 'none';
+
+  // Create/update cards for each source
+  // Note: fontspace and google are disabled - fontspace blocked by Cloudflare, google already complete
+  const sources = ['dafont'];
+  for (const source of sources) {
+    const job = jobsBySource[source];
+    let card = document.getElementById(`card-${source}`);
+
+    if (!job) {
+      // No job for this source - show idle card or remove
+      if (card) {
+        card.className = 'scraper-card';
+        card.innerHTML = createIdleCardContent(source);
+      }
+      continue;
+    }
+
+    if (!card) {
+      card = document.createElement('div');
+      card.id = `card-${source}`;
+      card.className = 'scraper-card';
+      grid.appendChild(card);
+    }
+
+    card.className = `scraper-card ${job.status}`;
+    card.innerHTML = createCardContent(job);
+    currentJobs[source] = job;
+  }
+
+  // Update database stats if we have new data
+  updateDbStats();
+}
+
+function createIdleCardContent(source) {
+  const names = { dafont: 'DaFont', fontspace: 'FontSpace', google: 'Google Fonts' };
+  return `
+    <div class="scraper-header">
+      <span class="scraper-name">${names[source]}</span>
+      <span class="scraper-status">idle</span>
+    </div>
+    <div class="scraper-category">Ready to start</div>
+    <div class="scraper-stats">
+      <div class="scraper-stat">
+        <div class="scraper-stat-value">-</div>
+        <div class="scraper-stat-label">Found</div>
+      </div>
+      <div class="scraper-stat">
+        <div class="scraper-stat-value success">-</div>
+        <div class="scraper-stat-label">Downloaded</div>
+      </div>
+      <div class="scraper-stat">
+        <div class="scraper-stat-value error">-</div>
+        <div class="scraper-stat-label">Failed</div>
+      </div>
+    </div>
+    <div class="scraper-actions">
+      <button class="btn small primary" onclick="startScraper('${source}')">Start</button>
+    </div>
+  `;
+}
+
+function createCardContent(job) {
+  const names = { dafont: 'DaFont', fontspace: 'FontSpace', google: 'Google Fonts' };
+  const source = job.source;
+
+  // Calculate progress
+  let progressPct = 0;
+  if (job.categories_total > 0) {
+    progressPct = Math.round((job.categories_done / job.categories_total) * 100);
+  }
+
+  // Status badge
+  const statusClass = job.status;
+  const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+
+  // Category display
+  let categoryText = job.current_category || 'Initializing...';
+  if (job.status === 'completed') {
+    categoryText = 'Completed';
+  } else if (job.status === 'failed') {
+    categoryText = job.error_message || 'Failed';
+  } else if (job.status === 'cancelled') {
+    categoryText = 'Cancelled';
+  } else if (job.categories_total > 0) {
+    categoryText = `${job.current_category || 'Processing'} (${job.categories_done}/${job.categories_total})`;
+  }
+
+  // Actions
+  let actions = '';
+  const isActive = ['running', 'pending', 'discovering', 'downloading'].includes(job.status);
+  const isPaused = job.status === 'paused';
+  if (isActive) {
+    actions = `
+      <button class="btn small" style="background:#532;border-color:#a85;color:#fc8;" onclick="pauseScraper()">Pause</button>
+      <button class="btn small danger" onclick="stopScraper(${job.id})">Stop</button>
+    `;
+  } else if (isPaused) {
+    actions = `
+      <button class="btn small primary" onclick="resumeScraper(${job.id})">Resume</button>
+      <button class="btn small danger" onclick="stopScraper(${job.id})">Cancel</button>
+    `;
+  } else {
+    actions = `<button class="btn small primary" onclick="startScraper('${source}')">Restart</button>`;
+  }
+
+  return `
+    <div class="scraper-header">
+      <span class="scraper-name">${names[source]}</span>
+      <span class="scraper-status ${statusClass}">${statusText}</span>
+    </div>
+    <div class="scraper-category">${categoryText}</div>
+    ${isActive ? `<div class="progress-bar"><div class="progress-fill" style="width: ${progressPct}%"></div></div>` : ''}
+    <div class="scraper-stats">
+      <div class="scraper-stat">
+        <div class="scraper-stat-value">${job.fonts_found || 0}</div>
+        <div class="scraper-stat-label">Found</div>
+      </div>
+      <div class="scraper-stat">
+        <div class="scraper-stat-value success">${job.fonts_downloaded || 0}</div>
+        <div class="scraper-stat-label">Downloaded</div>
+      </div>
+      <div class="scraper-stat">
+        <div class="scraper-stat-value error">${job.fonts_failed || 0}</div>
+        <div class="scraper-stat-label">Failed</div>
+      </div>
+    </div>
+    <div class="scraper-actions">
+      ${actions}
+    </div>
+  `;
+}
+
+async function updateDbStats() {
+  try {
+    const resp = await fetch('/api/fonts-list');
+    const fonts = await resp.json();
+    document.getElementById('totalFonts').textContent = fonts.length;
+    document.getElementById('activeFonts').textContent = fonts.length;
+  } catch (e) {
+    // Ignore errors
+  }
+}
+
+// =============================================================================
+// Scraper Control Functions
+// =============================================================================
+
+async function startAllScrapers() {
+  const btn = document.getElementById('startAllBtn');
+  const status = document.getElementById('scraperGlobalStatus');
+
+  btn.disabled = true;
+  status.textContent = 'Starting scrapers...';
+  addLog('scraperLog', 'Starting DaFont scraper...', 'info');
+
+  try {
+    // Only start DaFont - fontspace blocked by Cloudflare, google already complete
+    const resp = await fetch('/api/start-scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources: ['dafont'] })
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      status.textContent = 'DaFont scraper started!';
+      addLog('scraperLog', `Started DaFont job: ${data.jobs.dafont?.job_id}`, 'success');
+      startPolling();
+    } else {
+      status.textContent = 'Error starting scraper';
+      addLog('scraperLog', `Error: ${data.error}`, 'error');
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+async function startScraper(source) {
+  const status = document.getElementById('scraperGlobalStatus');
+  status.textContent = `Starting ${source}...`;
+
+  try {
+    const resp = await fetch('/api/start-scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources: [source] })
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      addLog('scraperLog', `Started ${source} (job ${data.jobs[source]?.job_id})`, 'success');
+      startPolling();
+    }
+  } catch (e) {
+    addLog('scraperLog', `Error starting ${source}: ${e}`, 'error');
+  }
+
+  status.textContent = '';
+}
+
+async function stopScraper(jobId) {
+  const status = document.getElementById('scraperGlobalStatus');
+  status.textContent = 'Stopping...';
+
+  try {
+    const resp = await fetch(`/api/stop-scraper/${jobId}`, { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok) {
+      addLog('scraperLog', `Stopped job ${jobId}`, 'warning');
+    }
+  } catch (e) {
+    addLog('scraperLog', `Error stopping job: ${e}`, 'error');
+  }
+
+  status.textContent = '';
+  refreshScraperStatus();
+}
+
+async function stopAllScrapers() {
+  const btn = document.getElementById('stopAllBtn');
+  const status = document.getElementById('scraperGlobalStatus');
+
+  btn.disabled = true;
+  status.textContent = 'Stopping all scrapers...';
+
+  try {
+    const resp = await fetch('/api/stop-all-scrapers', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok) {
+      status.textContent = `Stopped ${data.stopped} scrapers`;
+      addLog('scraperLog', `Stopped ${data.stopped} scrapers`, 'warning');
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+  refreshScraperStatus();
+}
+
+async function pauseScraper() {
+  const status = document.getElementById('scraperGlobalStatus');
+  status.textContent = 'Pausing...';
+
+  try {
+    const resp = await fetch('/api/pause-scraper', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok && data.status === 'paused') {
+      status.textContent = 'Paused';
+      addLog('scraperLog', 'Scraper paused - can be resumed later', 'warning');
+    } else {
+      status.textContent = 'Not running';
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  refreshScraperStatus();
+}
+
+async function resumeScraper(jobId) {
+  const status = document.getElementById('scraperGlobalStatus');
+  status.textContent = 'Resuming...';
+
+  try {
+    const resp = await fetch(`/api/resume-scraper/${jobId}`, { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok && data.status === 'resumed') {
+      status.textContent = 'Resumed';
+      addLog('scraperLog', 'Scraper resumed', 'success');
+    } else {
+      status.textContent = data.error || 'Could not resume';
+      addLog('scraperLog', data.error || 'Could not resume', 'error');
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  refreshScraperStatus();
+}
+
+async function registerExistingFonts() {
+  const btn = document.getElementById('registerBtn');
+  const status = document.getElementById('scraperGlobalStatus');
+
+  btn.disabled = true;
+  status.textContent = 'Registering existing font files...';
+  addLog('scraperLog', 'Scanning for unregistered font files...', 'info');
+
+  try {
+    const resp = await fetch('/api/register-existing-fonts', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok) {
+      status.textContent = `Registered ${data.registered} fonts`;
+      addLog('scraperLog', `Registered ${data.registered} new fonts`, 'success');
+      addLog('scraperLog', `Already registered: ${data.already_registered}`, 'info');
+      if (data.errors > 0) {
+        addLog('scraperLog', `Errors: ${data.errors}`, 'warning');
+      }
+      // Refresh stats
+      location.reload();
+    } else {
+      status.textContent = 'Registration failed';
+      addLog('scraperLog', `Error: ${data.error}`, 'error');
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+async function resetDatabase() {
+  const confirmed = confirm(
+    'WARNING: This will DELETE ALL DATA!\n\n' +
+    'This operation will:\n' +
+    '1. Stop all running scrapers\n' +
+    '2. Delete all fonts from the database\n' +
+    '3. Delete all downloaded font files\n\n' +
+    'Continue?'
+  );
+
+  if (!confirmed) return;
+
+  const btn = document.getElementById('resetDbBtn');
+  const status = document.getElementById('scraperGlobalStatus');
+
+  btn.disabled = true;
+  status.textContent = 'Resetting database...';
+  addLog('scraperLog', 'Resetting database...', 'warning');
+
+  try {
+    const resp = await fetch('/api/reset-database', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.ok) {
+      status.textContent = 'Database reset complete';
+      // Clear the log display and reset log tracking
+      clearLog('scraperLog');
+      lastLogId = 0;
+      addLog('scraperLog', 'Database reset complete', 'success');
+      // Update stats
+      document.getElementById('totalFonts').textContent = '0';
+      document.getElementById('activeFonts').textContent = '0';
+      document.getElementById('rejectedFonts').textContent = '0';
+      document.getElementById('withStrokes').textContent = '0';
+      // Clear scraper cards
+      refreshScraperStatus();
+    } else {
+      status.textContent = 'Reset failed';
+      addLog('scraperLog', `Error: ${data.error}`, 'error');
+    }
+  } catch (e) {
+    status.textContent = 'Error';
+    addLog('scraperLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+// =============================================================================
+// Logging Helper
+// =============================================================================
+
+function addLog(containerId, message, type = 'info') {
+  const container = document.getElementById(containerId);
+  container.style.display = 'block';
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + type;
+  entry.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+  container.appendChild(entry);
+  container.scrollTop = container.scrollHeight;
+}
+
+function clearLog(containerId) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+}
+
+// =============================================================================
+// Font Quality Verification
+// =============================================================================
+
+let verificationResults = [];
+
+async function verifyFonts() {
+  const btn = document.getElementById('verifyBtn');
+  const rejectBtn = document.getElementById('rejectBtn');
+  const status = document.getElementById('verifyStatus');
+
+  btn.disabled = true;
+  rejectBtn.disabled = true;
+  verificationResults = [];
+  clearLog('verifyLog');
+  addLog('verifyLog', 'Starting font verification...', 'info');
+
+  try {
+    const response = await fetch('/api/fonts-list');
+    const fonts = await response.json();
+
+    let checked = 0;
+    let failed = 0;
+
+    for (const font of fonts) {
+      status.textContent = `Checking ${checked + 1}/${fonts.length}...`;
+
+      try {
+        const checkResp = await fetch(`/api/check-connected/${font.id}`);
+        const result = await checkResp.json();
+
+        checked++;
+
+        let issues = [];
+        if (result.shapes !== null && (result.shapes < 10 || result.shapes > 15)) {
+          issues.push(`shapes=${result.shapes}`);
+        }
+        if (result.max_width_pct !== null && result.max_width_pct > 22.5) {
+          issues.push(`width=${result.max_width_pct.toFixed(1)}%`);
+        }
+        if (result.l_has_hole === true) {
+          issues.push('l_has_hole');
+        }
+        if (result.exclaim_ok === false) {
+          issues.push(`exclaim_shapes=${result.exclaim_shapes}`);
+        }
+        if (result.case_mismatches && result.case_mismatches.length > 0) {
+          issues.push(`case_issues=${result.case_mismatches.join(',')}`);
+        }
+        if (result.error) {
+          issues.push(`error: ${result.error}`);
+        }
+
+        if (issues.length > 0) {
+          failed++;
+          addLog('verifyLog', `FAIL: ${font.name} - ${issues.join(', ')}`, 'error');
+          verificationResults.push({
+            font_id: font.id,
+            name: font.name,
+            ...result,
+            issues: issues
+          });
+        } else {
+          addLog('verifyLog', `OK: ${font.name}`, 'success');
+        }
+      } catch (e) {
+        addLog('verifyLog', `ERROR checking ${font.name}: ${e}`, 'error');
+      }
+    }
+
+    status.textContent = `Done! ${checked} checked, ${failed} failed`;
+    addLog('verifyLog', `Verification complete: ${failed} fonts have issues`, failed > 0 ? 'warning' : 'success');
+
+    if (failed > 0) {
+      rejectBtn.disabled = false;
+      rejectBtn.textContent = `Reject ${failed} Failed Fonts`;
+    }
+
+  } catch (e) {
+    addLog('verifyLog', `Error: ${e}`, 'error');
+    status.textContent = 'Error during verification';
+  }
+
+  btn.disabled = false;
+}
+
+async function rejectBadFonts() {
+  if (verificationResults.length === 0) {
+    alert('No fonts to reject. Run verification first.');
+    return;
+  }
+
+  const btn = document.getElementById('rejectBtn');
+  btn.disabled = true;
+
+  addLog('verifyLog', `Rejecting ${verificationResults.length} fonts...`, 'info');
+
+  const rejections = verificationResults.map(r => ({
+    font_id: r.font_id,
+    shapes: r.shapes,
+    max_width_pct: r.max_width_pct,
+    l_has_hole: r.l_has_hole,
+    exclaim_ok: r.exclaim_ok,
+    exclaim_shapes: r.exclaim_shapes,
+    case_mismatches: r.case_mismatches || [],
+    error: r.error
+  }));
+
+  try {
+    const resp = await fetch('/api/reject-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rejections: rejections})
+    });
+    const result = await resp.json();
+
+    if (result.ok) {
+      addLog('verifyLog', `Successfully rejected ${result.rejected} fonts`, 'success');
+      verificationResults = [];
+      location.reload();
+    } else {
+      addLog('verifyLog', `Error: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog('verifyLog', `Error rejecting fonts: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+async function restoreAllFonts() {
+  if (!confirm('Restore all rejected fonts?')) return;
+
+  try {
+    const resp = await fetch('/api/unreject-all', {method: 'POST'});
+    const result = await resp.json();
+    alert(`Restored ${result.restored} fonts`);
+    location.reload();
+  } catch (e) {
+    alert('Error: ' + e);
+  }
+}
+
+// =============================================================================
+// Font Variations
+// =============================================================================
+
+let variationFonts = [];
+
+async function findVariations() {
+  const btn = document.getElementById('findVariationsBtn');
+  const rejectBtn = document.getElementById('rejectVariationsBtn');
+  const status = document.getElementById('variationsStatus');
+  const results = document.getElementById('variationsResults');
+  const logContainer = document.getElementById('variationsLog');
+
+  btn.disabled = true;
+  rejectBtn.disabled = true;
+  variationFonts = [];
+  clearLog('variationsLog');
+  logContainer.style.display = 'block';
+
+  status.textContent = 'Finding font variations...';
+
+  try {
+    const resp = await fetch('/api/find-variations');
+    const data = await resp.json();
+
+    if (data.ok) {
+      variationFonts = data.variations;
+      document.getElementById('variationsCount').textContent = variationFonts.length;
+      results.style.display = 'block';
+
+      if (variationFonts.length > 0) {
+        rejectBtn.disabled = false;
+        addLog('variationsLog', `Found ${variationFonts.length} font variations to remove`, 'info');
+        for (const font of variationFonts.slice(0, 50)) {
+          addLog('variationsLog', `  ${font.name}`, 'info');
+        }
+        if (variationFonts.length > 50) {
+          addLog('variationsLog', `  ... and ${variationFonts.length - 50} more`, 'info');
+        }
+        status.textContent = `Found ${variationFonts.length} variations`;
+      } else {
+        addLog('variationsLog', 'No font variations found', 'success');
+        status.textContent = 'No variations found';
+      }
+    } else {
+      addLog('variationsLog', `Error: ${data.error}`, 'error');
+      status.textContent = 'Error';
+    }
+  } catch (e) {
+    addLog('variationsLog', `Error: ${e}`, 'error');
+    status.textContent = 'Error';
+  }
+
+  btn.disabled = false;
+}
+
+async function rejectVariations() {
+  if (variationFonts.length === 0) return;
+
+  const btn = document.getElementById('rejectVariationsBtn');
+  btn.disabled = true;
+
+  try {
+    const rejections = variationFonts.map(f => ({
+      font_id: f.id,
+      reason: 'font_variation'
+    }));
+
+    const resp = await fetch('/api/reject-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rejections: rejections})
+    });
+    const result = await resp.json();
+
+    if (result.ok) {
+      addLog('variationsLog', `Removed ${result.rejected} font variations`, 'success');
+      variationFonts = [];
+      document.getElementById('variationsCount').textContent = '0';
+      location.reload();
+    } else {
+      addLog('variationsLog', `Error: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog('variationsLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+// =============================================================================
+// Duplicate Detection
+// =============================================================================
+
+let duplicateGroups = [];
+
+function findDuplicates() {
+  const btn = document.getElementById('dedupBtn');
+  const rejectBtn = document.getElementById('rejectDupBtn');
+  const status = document.getElementById('dedupStatus');
+  const results = document.getElementById('dedupResults');
+
+  btn.disabled = true;
+  rejectBtn.disabled = true;
+  duplicateGroups = [];
+  clearLog('dedupLog');
+
+  status.textContent = 'Finding duplicates...';
+
+  fetch('/api/find-duplicates', {method: 'POST'})
+    .then(response => {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      function read() {
+        reader.read().then(({done, value}) => {
+          if (done) {
+            btn.disabled = false;
+            return;
+          }
+
+          const text = decoder.decode(value);
+          const lines = text.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                handleDedupEvent(data, status, results, rejectBtn);
+              } catch (e) {}
+            }
+          }
+
+          read();
+        });
+      }
+
+      read();
+    })
+    .catch(err => {
+      addLog('dedupLog', 'Error: ' + err, 'error');
+      status.textContent = 'Error';
+      btn.disabled = false;
+    });
+}
+
+function handleDedupEvent(data, statusEl, resultsEl, rejectBtn) {
+  statusEl.textContent = data.message;
+
+  let logType = 'info';
+  if (data.status === 'complete') logType = 'success';
+  else if (data.status === 'error') logType = 'error';
+
+  addLog('dedupLog', data.message, logType);
+
+  if (data.status === 'complete' && data.groups) {
+    duplicateGroups = data.groups;
+    resultsEl.style.display = 'block';
+    document.getElementById('dupGroups').textContent = data.total_groups;
+    document.getElementById('dupCount').textContent = data.total_duplicates;
+
+    data.groups.forEach((group, i) => {
+      addLog('dedupLog', `Group ${i + 1}: ${group.map(f => f.name).join(', ')}`, 'warning');
+    });
+
+    if (data.total_duplicates > 0) {
+      rejectBtn.disabled = false;
+      rejectBtn.textContent = `Reject ${data.total_duplicates} Duplicates`;
+    }
+  }
+}
+
+async function rejectDuplicates() {
+  if (duplicateGroups.length === 0) {
+    alert('No duplicates found. Run "Find Duplicates" first.');
+    return;
+  }
+
+  const rejections = [];
+  for (const group of duplicateGroups) {
+    for (let i = 1; i < group.length; i++) {
+      rejections.push({
+        font_id: group[i].id,
+        error: `Duplicate of ${group[0].name}`
+      });
+    }
+  }
+
+  if (!confirm(`Reject ${rejections.length} duplicate fonts?`)) return;
+
+  const btn = document.getElementById('rejectDupBtn');
+  btn.disabled = true;
+
+  addLog('dedupLog', `Rejecting ${rejections.length} duplicates...`, 'info');
+
+  try {
+    const resp = await fetch('/api/reject-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rejections: rejections})
+    });
+    const result = await resp.json();
+
+    if (result.ok) {
+      addLog('dedupLog', `Successfully rejected ${result.rejected} duplicates`, 'success');
+      duplicateGroups = [];
+      document.getElementById('dupGroups').textContent = '0';
+      document.getElementById('dupCount').textContent = '0';
+      const current = parseInt(document.getElementById('activeFonts').textContent);
+      document.getElementById('activeFonts').textContent = current - result.rejected;
+      document.getElementById('rejectedFonts').textContent =
+        parseInt(document.getElementById('rejectedFonts').textContent) + result.rejected;
+    } else {
+      addLog('dedupLog', `Error: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog('dedupLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+}
+
+// =============================================================================
+// Export / Import Functions
+// =============================================================================
+
+async function loadAcceptedFontCount() {
+  try {
+    const resp = await fetch('/api/accepted-font-count');
+    const data = await resp.json();
+    document.getElementById('acceptedCount').textContent = data.count;
+  } catch (e) {
+    document.getElementById('acceptedCount').textContent = '?';
+  }
+}
+
+function exportFonts() {
+  const btn = document.getElementById('exportBtn');
+  const status = document.getElementById('exportStatus');
+
+  btn.disabled = true;
+  btn.textContent = 'Exporting...';
+
+  // Trigger download by navigating to the endpoint
+  window.location.href = '/api/export-fonts';
+
+  // Re-enable button after a delay (download starts asynchronously)
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = 'Export Accepted Fonts';
+  }, 2000);
+}
+
+function updateImportButton() {
+  const fileInput = document.getElementById('importFile');
+  const fileName = document.getElementById('importFileName');
+  const importBtn = document.getElementById('importBtn');
+
+  if (fileInput.files.length > 0) {
+    fileName.textContent = fileInput.files[0].name;
+    importBtn.disabled = false;
+  } else {
+    fileName.textContent = 'No file chosen';
+    importBtn.disabled = true;
+  }
+}
+
+async function importFonts() {
+  const fileInput = document.getElementById('importFile');
+  const importBtn = document.getElementById('importBtn');
+  const logContainer = document.getElementById('importLog');
+
+  if (!fileInput.files.length) {
+    alert('Please select a ZIP file first.');
+    return;
+  }
+
+  const file = fileInput.files[0];
+
+  importBtn.disabled = true;
+  importBtn.textContent = 'Importing...';
+  logContainer.style.display = 'block';
+  logContainer.innerHTML = '';
+
+  addLog('importLog', `Uploading ${file.name}...`, 'info');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const resp = await fetch('/api/import-fonts', {
+      method: 'POST',
+      body: formData
+    });
+
+    const result = await resp.json();
+
+    if (result.ok) {
+      addLog('importLog', `Import complete!`, 'success');
+      addLog('importLog', `  Imported: ${result.imported} fonts`, 'success');
+      if (result.skipped > 0) {
+        addLog('importLog', `  Skipped: ${result.skipped} fonts (already exist)`, 'warning');
+      }
+      if (result.errors > 0) {
+        addLog('importLog', `  Errors: ${result.errors} fonts`, 'error');
+      }
+
+      // Refresh page stats after a delay
+      setTimeout(() => {
+        location.reload();
+      }, 2000);
+    } else {
+      addLog('importLog', `Error: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog('importLog', `Error: ${e}`, 'error');
+  }
+
+  importBtn.disabled = false;
+  importBtn.textContent = 'Import';
+}
+
+// =============================================================================
+// Initialize
+// =============================================================================
+
+// Start polling on page load
+startPolling();
+
+// Load accepted font count for export section
+loadAcceptedFontCount();
+
+// Update initial stats
+document.getElementById('totalFonts').textContent = '{{ total_fonts }}';
+document.getElementById('activeFonts').textContent = '{{ active_fonts }}';
+document.getElementById('rejectedFonts').textContent = '{{ rejected_fonts }}';
+document.getElementById('withStrokes').textContent = '{{ with_strokes }}';
+</script>
+</body>
+</html>

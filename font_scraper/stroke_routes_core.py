@@ -60,6 +60,12 @@ import base64
 import io
 import json
 import logging
+import os
+import shutil
+import tempfile
+import zipfile
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -169,31 +175,17 @@ def _check_font_quality(pil_font: FreeTypeFont, font_path: str) -> dict:
 
 @app.route('/')
 def font_list() -> str:
-    """Display the font list page showing all available fonts.
+    """Display the font list page with alphabet navigation.
 
-    Renders a list of fonts from the database with character count statistics.
-    Can optionally show only rejected fonts or filter out rejected/duplicate fonts.
+    Renders the font browser page. Fonts are loaded via JavaScript/AJAX
+    when user clicks on a letter in the alphabet bar.
 
     Query Parameters:
         rejected (str, optional): Set to '1' to show only rejected fonts.
-            When not set or set to any other value, shows non-rejected fonts
-            excluding duplicates.
 
     Returns:
         str: Rendered HTML template 'font_list.html' with context:
-            - fonts: List of font records with id, name, source, file_path,
-              char_count (number of characters with stroke data), and rejected flag.
             - show_rejected: Boolean indicating if viewing rejected fonts.
-
-    Template Context:
-        fonts (list[sqlite3.Row]): Font records with the following fields:
-            - id (int): Font database ID
-            - name (str): Font name
-            - source (str): Font source/origin
-            - file_path (str): Path to font file
-            - char_count (int): Number of characters with stroke data
-            - rejected (int): 1 if viewing rejected fonts, 0 otherwise
-        show_rejected (bool): True if ?rejected=1 was passed
 
     Example:
         View all non-rejected fonts::
@@ -205,8 +197,7 @@ def font_list() -> str:
             GET /?rejected=1
     """
     show_rejected = request.args.get('rejected') == '1'
-    fonts = font_repository.list_fonts(show_rejected=show_rejected)
-    return render_template('font_list.html', fonts=fonts, show_rejected=show_rejected)
+    return render_template('font_list.html', show_rejected=show_rejected)
 
 
 @app.route('/font/<int:fid>')
@@ -645,9 +636,47 @@ def api_reject_batch() -> Response:
     """
     data = request.get_json() or {}
 
+    from stroke_flask import get_db_context
+
     # Support both old format (font_ids) and new format (rejections with details)
     rejections = data.get('rejections', [])
     if rejections:
+        # Check if a specific reason is provided (e.g., 'font_variation', 'duplicate')
+        reason_code = rejections[0].get('reason') if rejections else None
+
+        if reason_code and reason_code != 'manual':
+            # Use the specific reason code - need to look up reason_id
+            with get_db_context() as db:
+                # Ensure the reason exists
+                db.execute(
+                    "INSERT OR IGNORE INTO removal_reasons (code, description) VALUES (?, ?)",
+                    (reason_code, f"Rejected: {reason_code}")
+                )
+                row = db.execute(
+                    "SELECT id FROM removal_reasons WHERE code = ?",
+                    (reason_code,)
+                ).fetchone()
+                if not row:
+                    return error_response(f"Unknown reason: {reason_code}")
+                reason_id = row[0]
+
+                # Insert rejections with this reason
+                count = 0
+                for r in rejections:
+                    fid = r.get('font_id')
+                    if not fid:
+                        continue
+                    details = json.dumps({k: v for k, v in r.items() if k not in ('font_id', 'reason')})
+                    try:
+                        db.execute(
+                            "INSERT OR IGNORE INTO font_removals (font_id, reason_id, details) VALUES (?, ?, ?)",
+                            (fid, reason_id, details)
+                        )
+                        count += 1
+                    except Exception:
+                        pass
+            return success_response(rejected=count)
+
         to_reject = []
         for r in rejections:
             fid = r.get('font_id')
@@ -1182,6 +1211,298 @@ def api_unreject_all() -> Response:
     return success_response(restored=restored)
 
 
+@app.route('/data-management')
+def data_management_page() -> str:
+    """Data management page for font quality verification and scraping.
+
+    Provides a UI for:
+    - Viewing database statistics
+    - Running font quality verification
+    - Managing rejected fonts
+    - Reset and re-scrape all fonts with real-time progress
+
+    Returns:
+        str: Rendered HTML template for the data management page.
+    """
+    from stroke_flask import get_db_context
+
+    with get_db_context() as db:
+        total_fonts = db.execute('SELECT COUNT(*) FROM fonts').fetchone()[0]
+
+        # Count rejected fonts (reason_id=8 is quality rejection)
+        rejected_fonts = db.execute('''
+            SELECT COUNT(DISTINCT font_id) FROM font_removals WHERE reason_id = 8
+        ''').fetchone()[0]
+
+        active_fonts = total_fonts - rejected_fonts
+
+        # Count fonts with stroke data
+        with_strokes = db.execute('''
+            SELECT COUNT(DISTINCT font_id) FROM characters
+            WHERE strokes_raw IS NOT NULL OR strokes_processed IS NOT NULL
+        ''').fetchone()[0]
+
+    return render_template('data_management.html',
+                           total_fonts=total_fonts,
+                           active_fonts=active_fonts,
+                           rejected_fonts=rejected_fonts,
+                           with_strokes=with_strokes)
+
+
+@app.route('/api/fonts-list')
+def api_fonts_list() -> Response:
+    """Get list of all active (non-rejected) fonts.
+
+    Returns a JSON array of font objects for use in verification.
+
+    Returns:
+        flask.Response: JSON array of font objects with id, name, source.
+    """
+    from stroke_flask import get_db_context
+
+    with get_db_context() as db:
+        fonts = db.execute('''
+            SELECT f.id, f.name, f.source
+            FROM fonts f
+            WHERE f.id NOT IN (
+                SELECT font_id FROM font_removals
+            )
+            ORDER BY f.name
+        ''').fetchall()
+
+    return jsonify([{'id': f[0], 'name': f[1], 'source': f[2]} for f in fonts])
+
+
+@app.route('/api/fonts-by-letter')
+def api_fonts_by_letter() -> Response:
+    """Get fonts filtered by first letter.
+
+    Query Parameters:
+        letter: Single letter A-Z, or '#' for numbers/symbols
+        rejected: '1' to show rejected fonts instead
+
+    Returns:
+        flask.Response: JSON with fonts array and counts.
+    """
+    from stroke_flask import get_db_context
+
+    letter = request.args.get('letter', 'A').upper()
+    show_rejected = request.args.get('rejected') == '1'
+
+    with get_db_context() as db:
+        if show_rejected:
+            # Show rejected fonts
+            if letter == '#':
+                # Numbers and symbols
+                fonts = db.execute('''
+                    SELECT f.id, f.name, f.source,
+                           (SELECT COUNT(*) FROM characters c WHERE c.font_id = f.id) as char_count
+                    FROM fonts f
+                    JOIN font_removals fr ON f.id = fr.font_id
+                    WHERE f.name NOT GLOB '[A-Za-z]*'
+                    ORDER BY f.name
+                ''').fetchall()
+            else:
+                fonts = db.execute('''
+                    SELECT f.id, f.name, f.source,
+                           (SELECT COUNT(*) FROM characters c WHERE c.font_id = f.id) as char_count
+                    FROM fonts f
+                    JOIN font_removals fr ON f.id = fr.font_id
+                    WHERE UPPER(SUBSTR(f.name, 1, 1)) = ?
+                    ORDER BY f.name
+                ''', (letter,)).fetchall()
+        else:
+            # Show active fonts
+            if letter == '#':
+                fonts = db.execute('''
+                    SELECT f.id, f.name, f.source,
+                           (SELECT COUNT(*) FROM characters c WHERE c.font_id = f.id) as char_count
+                    FROM fonts f
+                    WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                    AND f.name NOT GLOB '[A-Za-z]*'
+                    ORDER BY f.name
+                ''').fetchall()
+            else:
+                fonts = db.execute('''
+                    SELECT f.id, f.name, f.source,
+                           (SELECT COUNT(*) FROM characters c WHERE c.font_id = f.id) as char_count
+                    FROM fonts f
+                    WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                    AND UPPER(SUBSTR(f.name, 1, 1)) = ?
+                    ORDER BY f.name
+                ''', (letter,)).fetchall()
+
+        # Get counts per letter for the alphabet bar
+        if show_rejected:
+            counts = db.execute('''
+                SELECT UPPER(SUBSTR(f.name, 1, 1)) as letter, COUNT(*) as cnt
+                FROM fonts f
+                JOIN font_removals fr ON f.id = fr.font_id
+                WHERE f.name GLOB '[A-Za-z]*'
+                GROUP BY UPPER(SUBSTR(f.name, 1, 1))
+            ''').fetchall()
+            other_count = db.execute('''
+                SELECT COUNT(*) FROM fonts f
+                JOIN font_removals fr ON f.id = fr.font_id
+                WHERE f.name NOT GLOB '[A-Za-z]*'
+            ''').fetchone()[0]
+        else:
+            counts = db.execute('''
+                SELECT UPPER(SUBSTR(f.name, 1, 1)) as letter, COUNT(*) as cnt
+                FROM fonts f
+                WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                AND f.name GLOB '[A-Za-z]*'
+                GROUP BY UPPER(SUBSTR(f.name, 1, 1))
+            ''').fetchall()
+            other_count = db.execute('''
+                SELECT COUNT(*) FROM fonts f
+                WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                AND f.name NOT GLOB '[A-Za-z]*'
+            ''').fetchone()[0]
+
+    letter_counts = {row[0]: row[1] for row in counts}
+    letter_counts['#'] = other_count
+
+    return jsonify({
+        'fonts': [{'id': f[0], 'name': f[1], 'source': f[2], 'char_count': f[3]} for f in fonts],
+        'letter_counts': letter_counts,
+        'current_letter': letter
+    })
+
+
+@app.route('/api/find-variations')
+def api_find_variations() -> Response:
+    """Find font variations (Bold, Italic, Light, etc.) to remove.
+
+    Identifies fonts with variation keywords in their names that should
+    be removed to keep only regular variants.
+
+    Returns:
+        JSON with list of font variations to remove.
+    """
+    from stroke_flask import get_db_context
+
+    print("=== find-variations endpoint called ===")  # Debug
+
+    # Keywords that indicate a font variation (not a regular font)
+    # Simple substring matching - case insensitive
+    variation_keywords = [
+        'bold', 'italic', 'light', 'medium', 'thin', 'black', 'heavy',
+        'semibold', 'extrabold', 'extralight', 'ultralight', 'ultrabold',
+        'demibold', 'condensed', 'expanded', 'narrow', 'wide', 'oblique',
+        'slant', 'regular',  # Regular also indicates a variant exists
+    ]
+
+    try:
+        with get_db_context() as db:
+            fonts = db.execute('''
+                SELECT f.id, f.name, f.source
+                FROM fonts f
+                WHERE f.id NOT IN (
+                    SELECT font_id FROM font_removals
+                )
+                ORDER BY f.name
+            ''').fetchall()
+
+        logger.info("Found %d fonts to check for variations", len(fonts))
+
+        variations = []
+        for fid, name, source in fonts:
+            name_lower = name.lower()
+            # Check if any variation keyword appears in the font name
+            for kw in variation_keywords:
+                if kw in name_lower:
+                    logger.info("Font '%s' matches keyword '%s'", name, kw)
+                    variations.append({
+                        'id': fid,
+                        'name': name,
+                        'source': source
+                    })
+                    break
+
+        logger.info("Found %d variations", len(variations))
+        return jsonify({'ok': True, 'variations': variations})
+
+    except Exception as e:
+        logger.error("Failed to find variations: %s", e)
+        return jsonify({'ok': False, 'error': str(e)})
+
+
+@app.route('/api/find-duplicates', methods=['POST'])
+def api_find_duplicates() -> Response:
+    """Find duplicate fonts using perceptual hashing.
+
+    Computes perceptual hashes for all active fonts and identifies
+    groups of visually similar fonts. Streams progress via SSE.
+
+    Returns:
+        flask.Response: SSE stream with progress and final duplicate groups.
+    """
+    from stroke_flask import get_db_context
+
+    def generate():
+        try:
+            from font_utils import FontDeduplicator
+
+            # Get all active fonts
+            with get_db_context() as db:
+                fonts = db.execute('''
+                    SELECT f.id, f.name, f.file_path
+                    FROM fonts f
+                    WHERE f.id NOT IN (
+                        SELECT font_id FROM font_removals
+                    )
+                    ORDER BY f.name
+                ''').fetchall()
+
+            total = len(fonts)
+            yield f'data: {json.dumps({"status": "starting", "message": f"Computing hashes for {total} fonts...", "total": total})}\n\n'
+
+            dedup = FontDeduplicator(threshold=8)
+            font_data = []
+            base_dir = Path(__file__).parent
+
+            for i, (fid, name, file_path) in enumerate(fonts, 1):
+                full_path = base_dir / file_path
+                if not full_path.exists():
+                    continue
+
+                phash = dedup.compute_phash(str(full_path))
+                if phash:
+                    font_data.append({
+                        'id': fid,
+                        'name': name,
+                        'path': file_path,
+                        'phash': phash
+                    })
+
+                if i % 5 == 0 or i == total:
+                    yield f'data: {json.dumps({"status": "hashing", "message": f"Hashed {i}/{total}: {name}", "current": i, "total": total})}\n\n'
+
+            yield f'data: {json.dumps({"status": "analyzing", "message": "Finding duplicate groups..."})}\n\n'
+
+            # Find duplicates
+            duplicate_groups = dedup.find_duplicates(font_data)
+
+            # Format results
+            groups = []
+            for group in duplicate_groups:
+                groups.append([{
+                    'id': f['id'],
+                    'name': f['name'],
+                    'path': f['path']
+                } for f in group])
+
+            total_duplicates = sum(len(g) - 1 for g in groups)
+            yield f'data: {json.dumps({"status": "complete", "message": f"Found {len(groups)} duplicate groups ({total_duplicates} duplicates)", "groups": groups, "total_groups": len(groups), "total_duplicates": total_duplicates})}\n\n'
+
+        except Exception as e:
+            logger.error("Deduplication failed: %s", e)
+            yield f'data: {json.dumps({"status": "error", "message": f"Error: {str(e)}"})}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
 @app.route('/api/reset-and-scrape', methods=['POST'])
 def api_reset_and_scrape() -> Response:
     """Reset database and re-scrape all fonts.
@@ -1209,6 +1530,7 @@ def api_reset_and_scrape() -> Response:
             data: {"status": "complete", "message": "Done! Scraped 2500 fonts."}
     """
     import os
+    import shutil
     import subprocess
     import sqlite3
     from pathlib import Path
@@ -1236,36 +1558,98 @@ def api_reset_and_scrape() -> Response:
                 yield f'data: {json.dumps({"status": "error", "message": f"Database setup failed: {result.stderr}"})}\n\n'
                 return
 
-            # Step 2: Run scrapers
-            # TODO: Remove --max-fonts 10 after testing
-            # DaFont: scrapes all categories defined in CATEGORIES dict
-            # FontSpace: searches for 'font' which matches virtually all fonts
-            # Google Fonts: downloads all fonts from curated handwriting list
-            scrapers = [
-                ('DaFont', ['python3', 'dafont_scraper.py', '--output', 'fonts/dafont', '--max-fonts', '10']),
-                ('FontSpace', ['python3', 'fontspace_scraper.py', '--output', 'fonts/fontspace', '--query', 'font', '--max-fonts', '10']),
-                ('Google Fonts', ['python3', 'google_fonts_scraper.py', '--output', 'fonts/google', '--max-fonts', '10']),
+            # Step 1b: Delete existing font directories to start fresh
+            yield f'data: {json.dumps({"status": "starting", "message": "Clearing font directories..."})}\n\n'
+            font_dirs_to_clear = ['fonts/dafont', 'fonts/fontspace', 'fonts/google']
+            for font_dir in font_dirs_to_clear:
+                font_path = Path(__file__).parent / font_dir
+                if font_path.exists():
+                    shutil.rmtree(font_path)
+                    logger.info("Deleted font directory: %s", font_path)
+
+            # Signal that everything is cleared - UI should update now
+            yield f'data: {json.dumps({"status": "cleared", "message": "Database and fonts cleared. Starting scrapers..."})}\n\n'
+
+            # Step 2: Run scrapers using observer pattern for real-time updates
+            # TODO: Remove max_fonts=10 after testing
+            from queue import Queue
+            from font_source import ScraperConfig, ScraperEvent, ScraperEventType
+            from dafont_scraper import DaFontScraper
+            from fontspace_scraper import FontSpaceScraper
+            from google_fonts_scraper import GoogleFontsScraper
+
+            # Event queue for collecting scraper events
+            event_queue = Queue()
+
+            class SSEObserver:
+                """Observer that collects events for SSE streaming."""
+                def on_event(self, event: ScraperEvent) -> None:
+                    event_queue.put(event)
+
+            observer = SSEObserver()
+
+            # Configure scrapers
+            base_dir = Path(__file__).parent
+            scraper_configs = [
+                ('dafont', 'DaFont', DaFontScraper(str(base_dir / 'fonts/dafont')),
+                 ScraperConfig()),  # Scrapes all categories until exhausted
+                ('fontspace', 'FontSpace', FontSpaceScraper(str(base_dir / 'fonts/fontspace')),
+                 ScraperConfig()),  # Scrapes all categories until exhausted
+                ('google', 'Google Fonts', GoogleFontsScraper(str(base_dir / 'fonts/google')),
+                 ScraperConfig()),  # Fetches all Handwriting fonts from metadata
             ]
 
-            total_fonts = 0
-            for name, cmd in scrapers:
-                yield f'data: {json.dumps({"status": "scraping", "message": f"Running {name} scraper..."})}\n\n'
+            scraper_counts = {}
+            for i, (key, name, scraper, config) in enumerate(scraper_configs):
+                progress = (i / len(scraper_configs)) * 0.8
+                yield f'data: {json.dumps({"status": "scraping", "scraper": key, "message": f"Starting {name} scraper...", "progress": progress})}\n\n'
 
-                result = subprocess.run(
-                    cmd,
-                    cwd=str(Path(__file__).parent),
-                    capture_output=True,
-                    text=True,
-                    timeout=7200  # 2 hour timeout per scraper
-                )
+                # Add observer and run scraper
+                scraper.add_observer(observer)
 
-                if result.returncode == 0:
-                    yield f'data: {json.dumps({"status": "scraping", "message": f"{name} complete."})}\n\n'
-                else:
-                    yield f'data: {json.dumps({"status": "warning", "message": f"{name} had issues: {result.stderr[:200]}"})}\n\n'
+                try:
+                    # Run scraper (this populates the queue via observer)
+                    import threading
+
+                    def run_scraper():
+                        scraper.scrape_and_download(config)
+
+                    thread = threading.Thread(target=run_scraper)
+                    thread.start()
+
+                    # Yield events as they come in
+                    while thread.is_alive() or not event_queue.empty():
+                        try:
+                            event = event_queue.get(timeout=0.1)
+                            event_data = {
+                                "status": "scraping",
+                                "scraper": key,
+                                "message": f"{name}: {event.message}",
+                                "event_type": event.event_type.value
+                            }
+                            if event.data:
+                                event_data.update(event.data)
+                            yield f'data: {json.dumps(event_data)}\n\n'
+                        except:
+                            pass  # Queue timeout, continue checking thread
+
+                    thread.join()
+
+                    # Get final count
+                    count = len(scraper.downloaded)
+                    scraper_counts[key] = count
+                    yield f'data: {json.dumps({"status": "complete", "scraper": key, "count": count, "message": f"{name} complete: {count} fonts downloaded"})}\n\n'
+
+                except Exception as e:
+                    logger.error("Scraper %s failed: %s", name, e)
+                    scraper_counts[key] = 0
+                    yield f'data: {json.dumps({"status": "error", "scraper": key, "message": f"{name} failed: {e}"})}\n\n'
+
+                finally:
+                    scraper.remove_observer(observer)
 
             # Step 3: Scan font directories and register fonts in database
-            yield f'data: {json.dumps({"status": "registering", "message": "Registering fonts in database..."})}\n\n'
+            yield f'data: {json.dumps({"status": "registering", "message": "Registering fonts in database...", "progress": 0.85})}\n\n'
 
             font_dirs = [
                 ('fonts/dafont', 'dafont'),
@@ -1275,14 +1659,24 @@ def api_reset_and_scrape() -> Response:
 
             db = sqlite3.connect(str(db_path))
             total_registered = 0
+            source_counts = {}
 
             for font_dir, source in font_dirs:
                 font_path = Path(__file__).parent / font_dir
+                source_count = 0
                 if not font_path.exists():
+                    source_counts[source] = 0
                     continue
 
-                for font_file in font_path.glob('*.[ot]tf'):
-                    # Extract font name from filename (remove extension)
+                # Collect all font files (ttf, otf, woff2 - various cases)
+                font_files = (
+                    list(font_path.glob('*.[ot]tf')) +
+                    list(font_path.glob('*.[OT]TF')) +
+                    list(font_path.glob('*.woff2')) +
+                    list(font_path.glob('*.woff'))
+                )
+
+                for font_file in font_files:
                     name = font_file.stem
                     rel_path = f"{font_dir}/{font_file.name}"
 
@@ -1291,23 +1685,13 @@ def api_reset_and_scrape() -> Response:
                             INSERT OR IGNORE INTO fonts (name, file_path, source)
                             VALUES (?, ?, ?)
                         """, (name, rel_path, source))
+                        source_count += 1
                         total_registered += 1
                     except Exception as e:
                         logger.warning("Failed to register font %s: %s", rel_path, e)
 
-                # Also check for .TTF (uppercase)
-                for font_file in font_path.glob('*.[OT]TF'):
-                    name = font_file.stem
-                    rel_path = f"{font_dir}/{font_file.name}"
-
-                    try:
-                        db.execute("""
-                            INSERT OR IGNORE INTO fonts (name, file_path, source)
-                            VALUES (?, ?, ?)
-                        """, (name, rel_path, source))
-                        total_registered += 1
-                    except Exception as e:
-                        logger.warning("Failed to register font %s: %s", rel_path, e)
+                source_counts[source] = source_count
+                yield f'data: {json.dumps({"status": "registering", "scraper": source, "count": source_count, "message": f"Registered {source_count} fonts from {source}"})}\n\n'
 
             db.commit()
 
@@ -1315,7 +1699,11 @@ def api_reset_and_scrape() -> Response:
             total_fonts = db.execute('SELECT COUNT(*) FROM fonts').fetchone()[0]
             db.close()
 
-            yield f'data: {json.dumps({"status": "complete", "message": f"Done! Registered {total_fonts} fonts."})}\n\n'
+            # Final summary
+            summary = f"Done! {total_fonts} fonts total"
+            for source, count in source_counts.items():
+                summary += f" | {source}: {count}"
+            yield f'data: {json.dumps({"status": "complete", "message": summary, "progress": 1.0})}\n\n'
 
         except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"status": "error", "message": "Scraper timed out after 2 hours"})}\n\n'
@@ -1323,3 +1711,640 @@ def api_reset_and_scrape() -> Response:
             yield f'data: {json.dumps({"status": "error", "message": f"Error: {str(e)}"})}\n\n'
 
     return Response(generate(), mimetype='text/event-stream')
+
+
+# =============================================================================
+# New Background Scraper API Endpoints
+# =============================================================================
+
+@app.route('/api/start-scrape', methods=['POST'])
+def api_start_scrape() -> Response:
+    """Start background scrapers for all sources.
+
+    Creates scraper jobs and starts background workers for each source.
+    Returns immediately with job IDs while scrapers run in background.
+
+    Uses the new queue-based architecture with:
+    - Discovery thread: Scrapes font listings continuously
+    - Download workers: Pool of workers using work-stealing pattern
+    - Full recovery: Can resume from any failure point
+
+    Request Body (optional):
+        JSON object with options:
+            - sources: List of sources to start (default: all)
+            - num_workers: Number of download workers (default: 4)
+
+    Returns:
+        flask.Response: JSON with job information::
+
+            {
+                "ok": true,
+                "jobs": {
+                    "dafont": {"job_id": 1, "status": "pending"},
+                    "fontspace": {"job_id": 2, "status": "pending"},
+                    "google": {"job_id": 3, "status": "pending"}
+                }
+            }
+    """
+    from scraper_queue import start_scraper
+
+    data = request.get_json(force=False, silent=True) or {}
+    sources = data.get('sources', ['dafont', 'fontspace', 'google'])
+    num_workers = data.get('num_workers', 4)
+
+    jobs = {}
+    for source in sources:
+        if source not in ['dafont', 'fontspace', 'google']:
+            continue
+        try:
+            job_id = start_scraper(source, num_workers=num_workers)
+            jobs[source] = {'job_id': job_id, 'status': 'discovering'}
+        except Exception as e:
+            logger.error("Failed to start %s scraper: %s", source, e)
+            jobs[source] = {'error': str(e)}
+
+    return success_response(jobs=jobs)
+
+
+@app.route('/api/scraper-status')
+def api_scraper_status() -> Response:
+    """Get status of all scraper jobs.
+
+    Returns status information for all active and recent jobs.
+    The frontend polls this endpoint to display progress.
+
+    Returns:
+        flask.Response: JSON with job statuses::
+
+            {
+                "jobs": [
+                    {
+                        "id": 1,
+                        "source": "dafont",
+                        "status": "discovering",
+                        "current_category": "Script - Handwritten",
+                        "categories_total": 44,
+                        "categories_done": 12,
+                        "fonts_found": 2341,
+                        "fonts_downloaded": 1892,
+                        "fonts_pending": 449,
+                        "fonts_failed": 23,
+                        "started_at": "2024-01-15T10:30:00",
+                        "completed_at": null,
+                        "error_message": null
+                    },
+                    ...
+                ]
+            }
+    """
+    from scraper_queue import QueueRepository
+
+    repo = QueueRepository()
+    jobs = repo.get_recent_jobs(limit=20)
+    return jsonify(jobs=jobs)
+
+
+@app.route('/api/scraper-logs')
+def api_scraper_logs() -> Response:
+    """Get recent scraper log entries.
+
+    Query params:
+        job_id: Optional job ID to filter logs
+        limit: Max number of logs to return (default 100)
+
+    Returns:
+        flask.Response: JSON with log entries.
+    """
+    from scraper_queue import QueueRepository
+
+    job_id = request.args.get('job_id', type=int)
+    limit = request.args.get('limit', 100, type=int)
+
+    repo = QueueRepository()
+    logs = repo.get_logs(job_id=job_id, limit=limit)
+
+    # Reverse to show oldest first (for display)
+    logs = list(reversed(logs))
+
+    return jsonify(logs=logs)
+
+
+@app.route('/api/scraper-status/<int:job_id>')
+def api_scraper_job_status(job_id: int) -> Response:
+    """Get detailed status for a specific scraper job.
+
+    Args:
+        job_id: The job ID.
+
+    Returns:
+        flask.Response: JSON with detailed job status including
+            font counts by status.
+    """
+    from scraper_queue import QueueRepository
+
+    repo = QueueRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        return error_response("Job not found", 404)
+
+    # Get font status breakdown
+    font_counts = repo.get_font_counts(job_id)
+
+    result = dict(job)
+    result['font_counts'] = font_counts
+
+    return jsonify(result)
+
+
+@app.route('/api/stop-scraper/<int:job_id>', methods=['POST'])
+def api_stop_scraper(job_id: int) -> Response:
+    """Stop a running scraper job.
+
+    Args:
+        job_id: The job ID to stop.
+
+    Returns:
+        flask.Response: JSON with result::
+
+            {"ok": true, "status": "cancelled"}
+            or
+            {"ok": true, "status": "not_running"}
+    """
+    from scraper_queue import stop_scraper
+
+    if stop_scraper(job_id):
+        return success_response(status='cancelled')
+    return success_response(status='not_running')
+
+
+@app.route('/api/stop-all-scrapers', methods=['POST'])
+def api_stop_all_scrapers() -> Response:
+    """Stop all running scraper jobs.
+
+    Returns:
+        flask.Response: JSON with count of stopped jobs.
+    """
+    from scraper_queue import QueueRepository, stop_scraper
+
+    repo = QueueRepository()
+    jobs = repo.get_active_jobs()
+    stopped = 0
+    for job in jobs:
+        if stop_scraper(job['id']):
+            stopped += 1
+
+    return success_response(stopped=stopped)
+
+
+@app.route('/api/pause-scraper', methods=['POST'])
+def api_pause_scraper() -> Response:
+    """Pause the running scraper (can be resumed later).
+
+    Returns:
+        flask.Response: JSON with result::
+
+            {"ok": true, "status": "paused"}
+            or
+            {"ok": true, "status": "not_running"}
+    """
+    from scraper_queue import pause_scraper
+
+    if pause_scraper():
+        return success_response(status='paused')
+    return success_response(status='not_running')
+
+
+@app.route('/api/resume-scraper/<int:job_id>', methods=['POST'])
+def api_resume_scraper(job_id: int) -> Response:
+    """Resume a paused or interrupted scraper job.
+
+    Args:
+        job_id: The job ID to resume.
+
+    Request Body (optional):
+        JSON object with options:
+            - num_workers: Number of download workers (default: 4)
+
+    Returns:
+        flask.Response: JSON with result::
+
+            {"ok": true, "status": "resumed"}
+            or
+            {"ok": false, "error": "Job not found or cannot be resumed"}
+    """
+    from scraper_queue import resume_scraper
+
+    data = request.get_json(force=False, silent=True) or {}
+    num_workers = data.get('num_workers', 4)
+
+    if resume_scraper(job_id, num_workers=num_workers):
+        return success_response(status='resumed')
+    return error_response("Job not found or cannot be resumed", 400)
+
+
+@app.route('/api/reset-database', methods=['POST'])
+def api_reset_database() -> Response:
+    """Reset the database (delete all font data).
+
+    This is a destructive operation that:
+    1. Stops all running scrapers
+    2. Deletes all data from fonts, scraper_jobs, scraper_fonts tables
+    3. Deletes downloaded font files
+
+    Returns:
+        flask.Response: JSON with result.
+    """
+    from stroke_flask import get_db_context
+    from scraper_queue import QueueRepository, stop_scraper
+
+    try:
+        # Stop all running scrapers first
+        repo = QueueRepository()
+        jobs = repo.get_active_jobs()
+        for job in jobs:
+            stop_scraper(job['id'])
+
+        # Clear database tables
+        with get_db_context() as db:
+            db.execute("DELETE FROM scraper_logs")
+            db.execute("DELETE FROM scraper_fonts")
+            db.execute("DELETE FROM scraper_jobs")
+            db.execute("DELETE FROM characters")
+            db.execute("DELETE FROM font_checks")
+            db.execute("DELETE FROM font_removals")
+            db.execute("DELETE FROM fonts")
+
+        # Delete font directories
+        font_dirs = ['fonts/dafont', 'fonts/fontspace', 'fonts/google']
+        for font_dir in font_dirs:
+            font_path = Path(__file__).parent / font_dir
+            if font_path.exists():
+                shutil.rmtree(font_path)
+                logger.info("Deleted font directory: %s", font_path)
+
+        return success_response(message="Database reset complete")
+
+    except Exception as e:
+        logger.error("Database reset failed: %s", e)
+        return error_response(f"Reset failed: {str(e)}", 500)
+
+
+# =============================================================================
+# Export / Import Fonts API Endpoints
+# =============================================================================
+
+@app.route('/api/export-fonts')
+def api_export_fonts() -> Response:
+    """Export all accepted fonts as a ZIP file.
+
+    Creates a ZIP archive containing:
+    - manifest.json: Metadata for all exported fonts
+    - fonts/<source>/<filename>: Font files organized by source
+
+    An "accepted" font is one with NO entry in the font_removals table.
+
+    Returns:
+        flask.Response: ZIP file as attachment download.
+
+    Example:
+        GET /api/export-fonts
+
+        Returns: fonts_export_20260213_193000.zip
+    """
+    from stroke_flask import get_db_context
+
+    base_dir = Path(__file__).parent
+
+    try:
+        # Query accepted fonts (not in font_removals)
+        with get_db_context() as db:
+            fonts = db.execute('''
+                SELECT f.id, f.name, f.source, f.category, f.url, f.file_path
+                FROM fonts f
+                WHERE f.id NOT IN (
+                    SELECT font_id FROM font_removals
+                )
+                ORDER BY f.source, f.name
+            ''').fetchall()
+
+        if not fonts:
+            return error_response("No fonts to export", 400)
+
+        # Build manifest
+        manifest = {
+            'exported_at': datetime.now().isoformat(),
+            'font_count': len(fonts),
+            'fonts': []
+        }
+
+        # Create ZIP in memory
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for font in fonts:
+                font_path = base_dir / font['file_path']
+
+                if not font_path.exists():
+                    logger.warning("Font file not found, skipping: %s", font_path)
+                    continue
+
+                # Determine archive path (fonts/<source>/<filename>)
+                source = font['source'] or 'unknown'
+                archive_path = f"fonts/{source}/{font_path.name}"
+
+                # Add font file to ZIP
+                zf.write(font_path, archive_path)
+
+                # Add to manifest
+                manifest['fonts'].append({
+                    'name': font['name'],
+                    'source': source,
+                    'category': font['category'],
+                    'file_path': archive_path,
+                    'url': font['url']
+                })
+
+        # Update manifest font count (may differ if some files were missing)
+        manifest['font_count'] = len(manifest['fonts'])
+
+        if manifest['font_count'] == 0:
+            return error_response("No font files found to export", 400)
+
+        # Add manifest to ZIP
+        buf.seek(0)
+        # Re-open to add manifest
+        with zipfile.ZipFile(buf, 'a', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('manifest.json', json.dumps(manifest, indent=2))
+
+        buf.seek(0)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'fonts_export_{timestamp}.zip'
+
+        logger.info("Exported %d fonts to %s", manifest['font_count'], filename)
+
+        return send_file(
+            buf,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logger.error("Export failed: %s", e)
+        return error_response(f"Export failed: {str(e)}", 500)
+
+
+@app.route('/api/import-fonts', methods=['POST'])
+def api_import_fonts() -> Response:
+    """Import fonts from an uploaded ZIP file.
+
+    Extracts font files from the ZIP and registers them in the database.
+    Expects a ZIP with the structure created by /api/export-fonts:
+    - manifest.json (optional but recommended)
+    - fonts/<source>/<filename>
+
+    Request:
+        POST with multipart/form-data containing 'file' field with ZIP.
+
+    Returns:
+        flask.Response: JSON with import statistics::
+
+            {
+                "ok": true,
+                "imported": 150,
+                "skipped": 5,
+                "errors": 2
+            }
+
+    Example:
+        POST /api/import-fonts
+        Content-Type: multipart/form-data
+        file: fonts_export_20260213_193000.zip
+    """
+    from stroke_flask import get_db_context
+
+    if 'file' not in request.files:
+        return error_response("No file uploaded", 400)
+
+    uploaded_file = request.files['file']
+    if uploaded_file.filename == '':
+        return error_response("No file selected", 400)
+
+    if not uploaded_file.filename.endswith('.zip'):
+        return error_response("File must be a ZIP archive", 400)
+
+    base_dir = Path(__file__).parent
+    imported = 0
+    skipped = 0
+    errors = 0
+
+    try:
+        # Save uploaded file to temp location
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp:
+            uploaded_file.save(tmp.name)
+            tmp_path = tmp.name
+
+        try:
+            with zipfile.ZipFile(tmp_path, 'r') as zf:
+                # Read manifest if present
+                manifest = None
+                if 'manifest.json' in zf.namelist():
+                    manifest_data = zf.read('manifest.json')
+                    manifest = json.loads(manifest_data)
+                    logger.info("Found manifest with %d fonts", manifest.get('font_count', 0))
+
+                # Get list of font files in ZIP
+                font_files = [
+                    name for name in zf.namelist()
+                    if name.startswith('fonts/') and
+                    name.lower().endswith(('.ttf', '.otf', '.woff', '.woff2'))
+                ]
+
+                if not font_files:
+                    return error_response("No font files found in ZIP", 400)
+
+                # Build manifest lookup for metadata
+                manifest_lookup = {}
+                if manifest and manifest.get('fonts'):
+                    for font_meta in manifest['fonts']:
+                        manifest_lookup[font_meta['file_path']] = font_meta
+
+                # Extract and register fonts
+                with get_db_context() as db:
+                    for archive_path in font_files:
+                        try:
+                            # Determine destination path
+                            # archive_path is like: fonts/dafont/FontName.ttf
+                            dest_path = base_dir / archive_path
+
+                            # Create directory if needed
+                            dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+                            # Check if file already exists
+                            if dest_path.exists():
+                                logger.debug("Font file already exists: %s", dest_path)
+                                # Still try to register in DB if not present
+                            else:
+                                # Extract file
+                                with zf.open(archive_path) as src:
+                                    with open(dest_path, 'wb') as dst:
+                                        dst.write(src.read())
+
+                            # Get metadata from manifest or derive from path
+                            if archive_path in manifest_lookup:
+                                meta = manifest_lookup[archive_path]
+                                name = meta['name']
+                                source = meta['source']
+                                category = meta.get('category')
+                                url = meta.get('url')
+                            else:
+                                # Derive from path
+                                parts = archive_path.split('/')
+                                source = parts[1] if len(parts) > 2 else 'unknown'
+                                name = dest_path.stem
+                                category = None
+                                url = None
+
+                            # Check if font already in database (by file_path)
+                            existing = db.execute(
+                                "SELECT id FROM fonts WHERE file_path = ?",
+                                (archive_path,)
+                            ).fetchone()
+
+                            if existing:
+                                skipped += 1
+                                continue
+
+                            # Insert into database
+                            db.execute("""
+                                INSERT INTO fonts (name, file_path, source, category, url)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (name, archive_path, source, category, url))
+                            imported += 1
+
+                        except Exception as e:
+                            logger.warning("Failed to import %s: %s", archive_path, e)
+                            errors += 1
+
+        finally:
+            # Clean up temp file
+            os.unlink(tmp_path)
+
+        logger.info("Import complete: %d imported, %d skipped, %d errors",
+                    imported, skipped, errors)
+
+        return success_response(imported=imported, skipped=skipped, errors=errors)
+
+    except zipfile.BadZipFile:
+        return error_response("Invalid ZIP file", 400)
+    except Exception as e:
+        logger.error("Import failed: %s", e)
+        return error_response(f"Import failed: {str(e)}", 500)
+
+
+@app.route('/api/accepted-font-count')
+def api_accepted_font_count() -> Response:
+    """Get count of accepted fonts (not rejected).
+
+    Returns:
+        flask.Response: JSON with count::
+
+            {"count": 203}
+    """
+    from stroke_flask import get_db_context
+
+    with get_db_context() as db:
+        count = db.execute('''
+            SELECT COUNT(*) FROM fonts f
+            WHERE f.id NOT IN (
+                SELECT font_id FROM font_removals
+            )
+        ''').fetchone()[0]
+
+    return jsonify(count=count)
+
+
+@app.route('/api/register-existing-fonts', methods=['POST'])
+def api_register_existing_fonts() -> Response:
+    """Register font files on disk that aren't in the database.
+
+    Scans font directories and registers any font files that exist on disk
+    but aren't in the fonts table. Useful after database resets or when
+    fonts were downloaded but not registered.
+
+    Returns:
+        flask.Response: JSON with registration statistics::
+
+            {
+                "ok": true,
+                "registered": 150,
+                "already_registered": 1200,
+                "errors": 5
+            }
+    """
+    from stroke_flask import get_db_context
+
+    base_dir = Path(__file__).parent
+    registered = 0
+    already_registered = 0
+    errors = 0
+
+    font_dirs = [
+        ('fonts/dafont', 'dafont'),
+        ('fonts/fontspace', 'fontspace'),
+        ('fonts/google', 'google'),
+    ]
+
+    try:
+        with get_db_context() as db:
+            for font_dir, source in font_dirs:
+                font_path = base_dir / font_dir
+                if not font_path.exists():
+                    continue
+
+                # Get all font files
+                font_files = (
+                    list(font_path.glob('*.[ot]tf')) +
+                    list(font_path.glob('*.[OT]TF')) +
+                    list(font_path.glob('*.woff2')) +
+                    list(font_path.glob('*.woff'))
+                )
+
+                for font_file in font_files:
+                    rel_path = f"{font_dir}/{font_file.name}"
+
+                    # Check if already registered
+                    existing = db.execute(
+                        "SELECT id FROM fonts WHERE file_path = ?",
+                        (rel_path,)
+                    ).fetchone()
+
+                    if existing:
+                        already_registered += 1
+                        continue
+
+                    # Register the font
+                    try:
+                        name = font_file.stem
+                        db.execute("""
+                            INSERT INTO fonts (name, file_path, source)
+                            VALUES (?, ?, ?)
+                        """, (name, rel_path, source))
+                        registered += 1
+                    except Exception as e:
+                        logger.warning("Failed to register %s: %s", rel_path, e)
+                        errors += 1
+
+        logger.info("Registered %d existing fonts, %d already registered, %d errors",
+                    registered, already_registered, errors)
+
+        return success_response(
+            registered=registered,
+            already_registered=already_registered,
+            errors=errors
+        )
+
+    except Exception as e:
+        logger.error("Font registration failed: %s", e)
+        return error_response(f"Registration failed: {str(e)}", 500)

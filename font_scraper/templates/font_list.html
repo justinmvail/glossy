@@ -2,12 +2,12 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Stroke Editor - Font Browser</title>
+<title>FTS: Fonts To Strokes</title>
 <style>
   body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
   h1 { margin-bottom: 5px; }
   .subtitle { color: #888; margin-bottom: 20px; }
-  .controls { display: flex; gap: 15px; align-items: center; margin-bottom: 15px; }
+  .controls { display: flex; gap: 15px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
   table { border-collapse: collapse; width: 100%; max-width: 1400px; }
   .font-sample { height: 36px; max-width: 300px; vertical-align: middle; }
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; }
@@ -22,7 +22,7 @@
   .count { color: #888; }
   .source { font-size: 0.85em; color: #666; }
   input[type=text] { padding: 6px 10px; border: 1px solid #444; background: #222; color: #eee;
-    border-radius: 4px; width: 300px; }
+    border-radius: 4px; width: 200px; }
   .btn {
     padding: 4px 10px; border: 1px solid #444; background: #222; color: #eee;
     border-radius: 4px; cursor: pointer; font-size: 12px;
@@ -36,79 +36,204 @@
   .btn.toggle { padding: 6px 12px; }
   .btn.toggle.active { background: #335; border-color: #7eb8f7; }
   tr.rejected td:first-child a { color: #f88; text-decoration: line-through; }
+
+  /* Alphabet selector */
+  .alphabet-bar {
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+  }
+  .letter-btn {
+    padding: 6px 10px;
+    border: 1px solid #444;
+    background: #222;
+    color: #888;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    min-width: 32px;
+    text-align: center;
+  }
+  .letter-btn:hover { background: #333; color: #eee; }
+  .letter-btn.active { background: #335; border-color: #7eb8f7; color: #7eb8f7; }
+  .letter-btn.disabled { opacity: 0.3; cursor: default; }
+  .letter-btn .letter-count {
+    font-size: 10px;
+    color: #666;
+    display: block;
+    margin-top: 2px;
+  }
+  .letter-btn.active .letter-count { color: #7eb8f7; }
+
+  .loading {
+    text-align: center;
+    padding: 40px;
+    color: #888;
+  }
 </style>
 </head>
 <body>
-<h1>Stroke Editor</h1>
-<p class="subtitle">{{ fonts|length }} fonts{% if show_rejected %} (rejected){% endif %}</p>
+<h1>FTS: Fonts To Strokes</h1>
+<p class="subtitle">
+  <span id="totalCount">Loading...</span> total fonts{% if show_rejected %} (rejected){% endif %}
+  <br>
+  <span id="fontCount">Select a letter to browse fonts</span>
+</p>
+
+<div class="alphabet-bar" id="alphabetBar">
+  <!-- Populated by JavaScript -->
+</div>
+
 <div class="controls">
-  <input type="text" id="search" placeholder="Filter fonts..." oninput="filterFonts()">
+  <input type="text" id="search" placeholder="Filter..." oninput="filterFonts()">
   {% if show_rejected %}
     <a href="/" class="btn toggle active">Showing Rejected</a>
-    <button class="btn unreject" onclick="restoreAll()">Restore All</button>
   {% else %}
     <a href="/?rejected=1" class="btn toggle">Show Rejected</a>
-    <button class="btn" id="checkBtn" onclick="verifyFonts()">Verify Fonts</button>
-    <button class="btn test" id="testBtn" onclick="testFirst10()" style="border-color:#58f;color:#8cf;">Test First 10</button>
-    <button class="btn reject" id="rejectBtn" onclick="rejectConnected()">Reject</button>
   {% endif %}
-  <button class="btn" id="resetBtn" onclick="resetAndScrape()" style="border-color:#f55;color:#f88;margin-left:20px;">Reset & Scrape</button>
+  <a href="/data-management" class="btn" style="border-color:#a7f;color:#c9f;">Data Management</a>
   <span id="statusMsg" style="color:#888;font-size:13px;"></span>
 </div>
-<table>
+
+<div id="loadingMsg" class="loading" style="display:none;">Loading fonts...</div>
+
+<table id="fontTableContainer" style="display:none;">
   <thead><tr>
     <th class="sortable" data-col="0" data-type="text" onclick="sortTable(this)">Font</th>
     <th>Sample</th>
-    <th class="sortable" data-col="2" data-type="num" onclick="sortTable(this)">Shapes</th>
-    <th class="sortable" data-col="3" data-type="num" onclick="sortTable(this)">Max Width</th>
-    <th class="sortable" data-col="4" data-type="text" onclick="sortTable(this)">"l" Test</th>
-    <th class="sortable" data-col="5" data-type="text" onclick="sortTable(this)">"!" Test</th>
-    <th class="sortable" data-col="6" data-type="num" onclick="sortTable(this)">Case Issues</th>
-    <th class="sortable" data-col="7" data-type="text" onclick="sortTable(this)">Source</th>
-    <th class="sortable" data-col="8" data-type="num" onclick="sortTable(this)">Characters</th>
+    <th class="sortable" data-col="2" data-type="text" onclick="sortTable(this)">Source</th>
+    <th class="sortable" data-col="3" data-type="num" onclick="sortTable(this)">Characters</th>
     <th></th>
   </tr></thead>
   <tbody id="fontTable">
-  {% for f in fonts %}
-    <tr data-name="{{ f.name|lower }}" data-id="{{ f.id }}" {% if f.rejected %}class="rejected" data-details="{{ f.rejection_details|default('', true)|e }}"{% endif %}>
-      <td><a href="/font/{{ f.id }}">{{ f.name }}</a></td>
-      <td><img class="font-sample" src="/api/font-sample/{{ f.id }}" loading="lazy" alt=""></td>
-      <td class="shapes" data-id="{{ f.id }}">-</td>
-      <td class="width" data-id="{{ f.id }}">-</td>
-      <td class="ltest" data-id="{{ f.id }}">-</td>
-      <td class="extest" data-id="{{ f.id }}">-</td>
-      <td class="casetest" data-id="{{ f.id }}">-</td>
-      <td class="source">{{ f.source or '' }}</td>
-      <td class="count">{{ f.char_count }}</td>
-      <td>
-        {% if show_rejected %}
-          <button class="btn unreject" onclick="unrejectFont({{ f.id }}, this)">Restore</button>
-        {% else %}
-          <button class="btn reject" onclick="rejectFont({{ f.id }}, this)">Reject</button>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
   </tbody>
 </table>
+
 <script>
+const showRejected = {{ 'true' if show_rejected else 'false' }};
+let currentLetter = null;
+let letterCounts = {};
+let allFonts = [];
+
+// Build alphabet bar
+function buildAlphabetBar() {
+  const bar = document.getElementById('alphabetBar');
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+
+  letters.forEach(letter => {
+    const btn = document.createElement('button');
+    btn.className = 'letter-btn';
+    btn.dataset.letter = letter;
+    btn.innerHTML = `${letter}<span class="letter-count">-</span>`;
+    btn.onclick = () => selectLetter(letter);
+    bar.appendChild(btn);
+  });
+}
+
+// Update letter counts in the bar
+function updateLetterCounts(counts) {
+  letterCounts = counts;
+  let total = 0;
+  document.querySelectorAll('.letter-btn').forEach(btn => {
+    const letter = btn.dataset.letter;
+    const count = counts[letter] || 0;
+    total += count;
+    btn.querySelector('.letter-count').textContent = count;
+    if (count === 0) {
+      btn.classList.add('disabled');
+    } else {
+      btn.classList.remove('disabled');
+    }
+  });
+  document.getElementById('totalCount').textContent = total.toLocaleString();
+}
+
+// Select a letter and load fonts
+async function selectLetter(letter) {
+  if (currentLetter === letter) return;
+
+  // Update active state
+  document.querySelectorAll('.letter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.letter === letter);
+  });
+
+  currentLetter = letter;
+
+  // Show loading
+  document.getElementById('loadingMsg').style.display = 'block';
+  document.getElementById('fontTableContainer').style.display = 'none';
+  document.getElementById('fontCount').textContent = 'Loading...';
+
+  try {
+    const params = new URLSearchParams({letter});
+    if (showRejected) params.append('rejected', '1');
+
+    const resp = await fetch(`/api/fonts-by-letter?${params}`);
+    const data = await resp.json();
+
+    allFonts = data.fonts;
+    updateLetterCounts(data.letter_counts);
+    renderFonts(allFonts);
+
+    document.getElementById('fontCount').textContent =
+      `${allFonts.length} fonts starting with "${letter}"`;
+
+  } catch (e) {
+    console.error('Error loading fonts:', e);
+    document.getElementById('fontCount').textContent = 'Error loading fonts';
+  }
+
+  document.getElementById('loadingMsg').style.display = 'none';
+  document.getElementById('fontTableContainer').style.display = 'table';
+}
+
+// Render fonts to table
+function renderFonts(fonts) {
+  const tbody = document.getElementById('fontTable');
+  tbody.innerHTML = '';
+
+  fonts.forEach(f => {
+    const tr = document.createElement('tr');
+    tr.dataset.name = f.name.toLowerCase();
+    tr.dataset.id = f.id;
+
+    tr.innerHTML = `
+      <td><a href="/font/${f.id}">${escapeHtml(f.name)}</a></td>
+      <td><img class="font-sample" src="/api/font-sample/${f.id}" loading="lazy" alt=""></td>
+      <td class="source">${f.source || ''}</td>
+      <td class="count">${f.char_count}</td>
+      <td>
+        ${showRejected
+          ? `<button class="btn unreject" onclick="unrejectFont(${f.id}, this)">Restore</button>`
+          : `<button class="btn reject" onclick="rejectFont(${f.id}, this)">Reject</button>`
+        }
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function sortTable(th) {
   const col = parseInt(th.dataset.col);
   const type = th.dataset.type;
   const tbody = document.getElementById('fontTable');
   const rows = Array.from(tbody.querySelectorAll('tr'));
 
-  // Determine sort direction
   const isAsc = th.classList.contains('sort-asc');
   const dir = isAsc ? -1 : 1;
 
-  // Clear other sort indicators
   document.querySelectorAll('th.sortable').forEach(h => {
     h.classList.remove('sort-asc', 'sort-desc');
   });
   th.classList.add(isAsc ? 'sort-desc' : 'sort-asc');
 
-  // Sort rows
   rows.sort((a, b) => {
     const aCell = a.cells[col];
     const bCell = b.cells[col];
@@ -124,7 +249,6 @@ function sortTable(th) {
     }
   });
 
-  // Re-append rows in sorted order
   rows.forEach(row => tbody.appendChild(row));
 }
 
@@ -158,432 +282,15 @@ function unrejectFont(fontId, btn) {
     });
 }
 
-function restoreAll() {
-  const count = document.querySelectorAll('#fontTable tr').length;
-  if (!confirm(`Restore all ${count} rejected fonts?`)) return;
-  const status = document.getElementById('statusMsg');
-  status.textContent = 'Restoring...';
-  fetch('/api/unreject-all', {method: 'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        status.textContent = `Restored ${d.restored} fonts.`;
-        setTimeout(() => location.href = '/', 1500);
-      } else {
-        status.textContent = 'Error: ' + (d.error || 'unknown');
-      }
-    })
-    .catch(err => {
-      status.textContent = 'Error: ' + err;
-    });
-}
+// Initialize
+buildAlphabetBar();
 
-function rejectConnected() {
-  // Find fonts with failed quality checks (red cells in table)
-  const rows = document.querySelectorAll('#fontTable tr');
-  const rejections = [];
-
-  rows.forEach(row => {
-    const fontId = row.dataset.id;
-    if (!fontId) return;
-
-    // Check if any quality cell is red (failed)
-    const shapesCell = row.querySelector('td.shapes');
-    const widthCell = row.querySelector('td.width');
-    const ltestCell = row.querySelector('td.ltest');
-    const extestCell = row.querySelector('td.extest');
-    const casetestCell = row.querySelector('td.casetest');
-
-    // Red color is rgb(255, 136, 136) which is #f88
-    const isRed = (cell) => cell && cell.style.color === 'rgb(255, 136, 136)';
-
-    if (isRed(shapesCell) || isRed(widthCell) || isRed(ltestCell) ||
-        isRed(extestCell) || isRed(casetestCell)) {
-      // Collect quality check data from cells
-      const rejection = {font_id: parseInt(fontId)};
-
-      if (shapesCell) {
-        const txt = shapesCell.textContent;
-        if (txt === 'ERR') {
-          rejection.error = shapesCell.title || 'Could not verify';
-        } else if (txt !== '-' && txt !== '?') {
-          rejection.shapes = parseInt(txt) || null;
-        }
-      }
-      if (widthCell && widthCell.textContent !== '-') {
-        rejection.max_width_pct = parseFloat(widthCell.textContent) || null;
-      }
-      if (ltestCell) {
-        rejection.l_has_hole = ltestCell.textContent === 'FAIL';
-      }
-      if (extestCell) {
-        rejection.exclaim_ok = extestCell.textContent === 'PASS';
-        if (extestCell.textContent.includes('FAIL')) {
-          const match = extestCell.textContent.match(/\((\d+)\)/);
-          if (match) rejection.exclaim_shapes = parseInt(match[1]);
-        }
-      }
-      if (casetestCell && casetestCell.title) {
-        const match = casetestCell.title.match(/Lowercase = Uppercase: (.+)/);
-        if (match) {
-          rejection.case_mismatches = match[1].split(', ');
-        }
-      }
-
-      rejections.push(rejection);
-    }
+// Load initial letter counts without loading fonts
+fetch(`/api/fonts-by-letter?letter=A${showRejected ? '&rejected=1' : ''}`)
+  .then(r => r.json())
+  .then(data => {
+    updateLetterCounts(data.letter_counts);
   });
-
-  if (rejections.length === 0) {
-    const status = document.getElementById('statusMsg');
-    status.textContent = 'No failed fonts to reject. Run "Verify Fonts" first.';
-    return;
-  }
-
-  if (!confirm(`Reject ${rejections.length} fonts that failed quality checks?`)) return;
-
-  const status = document.getElementById('statusMsg');
-  status.textContent = `Rejecting ${rejections.length} fonts...`;
-
-  fetch('/api/reject-batch', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rejections: rejections})
-  })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        status.textContent = `Rejected ${d.rejected} fonts.`;
-        if (d.rejected > 0) {
-          setTimeout(() => location.reload(), 1500);
-        }
-      } else {
-        status.textContent = 'Error: ' + (d.error || 'unknown');
-      }
-    })
-    .catch(err => {
-      status.textContent = 'Error: ' + err;
-    });
-}
-
-async function verifyFonts() {
-  const status = document.getElementById('statusMsg');
-  const rejectBtn = document.getElementById('rejectBtn');
-  const checkBtn = document.getElementById('checkBtn');
-  const shapeCells = document.querySelectorAll('td.shapes[data-id]');
-  console.log('verifyFonts: found', shapeCells.length, 'fonts');
-  status.textContent = `Verifying ${shapeCells.length} fonts...`;
-
-  if (rejectBtn) rejectBtn.disabled = true;
-  if (checkBtn) checkBtn.disabled = true;
-
-  if (shapeCells.length === 0) {
-    status.textContent = 'No fonts found to verify';
-    if (rejectBtn) rejectBtn.disabled = false;
-    if (checkBtn) checkBtn.disabled = false;
-    return;
-  }
-
-  let checked = 0;
-  for (const shapeCell of shapeCells) {
-    const fontId = shapeCell.dataset.id;
-    const widthCell = document.querySelector(`td.width[data-id="${fontId}"]`);
-    const ltestCell = document.querySelector(`td.ltest[data-id="${fontId}"]`);
-    const extestCell = document.querySelector(`td.extest[data-id="${fontId}"]`);
-    const casetestCell = document.querySelector(`td.casetest[data-id="${fontId}"]`);
-    try {
-      const r = await fetch(`/api/check-connected/${fontId}`);
-      const d = await r.json();
-      if (!r.ok || d.error) {
-        const errMsg = d.error || `HTTP ${r.status}`;
-        console.error('API error for font', fontId, errMsg);
-        // Mark as FAIL (red) so these fonts get included in batch reject
-        shapeCell.textContent = 'ERR';
-        shapeCell.title = errMsg;
-        shapeCell.style.color = 'rgb(255, 136, 136)';
-        if (widthCell) {
-          widthCell.textContent = '-';
-          widthCell.title = errMsg;
-          widthCell.style.color = '#888';
-        }
-        if (ltestCell) {
-          ltestCell.textContent = '-';
-          ltestCell.title = errMsg;
-          ltestCell.style.color = '#888';
-        }
-        if (extestCell) {
-          extestCell.textContent = '-';
-          extestCell.title = errMsg;
-          extestCell.style.color = '#888';
-        }
-        if (casetestCell) {
-          casetestCell.textContent = '-';
-          casetestCell.title = errMsg;
-          casetestCell.style.color = '#888';
-        }
-        continue;
-      }
-      console.log('Font', fontId, 'shapes:', d.shapes, 'width:', d.max_width_pct, 'case_mismatches:', d.case_mismatches);
-      if (d.shapes !== undefined) {
-        // Shapes column
-        shapeCell.textContent = d.shapes;
-        const badShapes = d.shapes < 10 || d.shapes > 15;
-        shapeCell.style.color = badShapes ? '#f88' : '#8f8';
-
-        // Width column
-        if (widthCell) {
-          widthCell.textContent = d.max_width_pct + '%';
-          const badWidth = d.max_width_pct > 22.5;
-          widthCell.style.color = badWidth ? '#f88' : '#8f8';
-        }
-
-        // "l" test column
-        if (ltestCell) {
-          ltestCell.textContent = d.l_has_hole ? 'FAIL' : 'PASS';
-          ltestCell.style.color = d.l_has_hole ? '#f88' : '#8f8';
-        }
-
-        // "!" test column
-        if (extestCell) {
-          extestCell.textContent = d.exclaim_ok ? 'PASS' : `FAIL (${d.exclaim_shapes})`;
-          extestCell.style.color = d.exclaim_ok ? '#8f8' : '#f88';
-        }
-
-        // Case mismatch column - any case issues = red/fail
-        if (casetestCell) {
-          const count = d.case_mismatch_count || 0;
-          const letters = d.case_mismatches || [];
-          if (count === 0) {
-            casetestCell.textContent = 'OK';
-            casetestCell.style.color = '#8f8';
-            casetestCell.title = '';
-          } else {
-            casetestCell.textContent = count;
-            casetestCell.style.color = 'rgb(255, 136, 136)';
-            casetestCell.title = `Lowercase = Uppercase: ${letters.join(', ')}`;
-          }
-        }
-      } else {
-        shapeCell.textContent = '?';
-        if (widthCell) widthCell.textContent = '?';
-        if (casetestCell) casetestCell.textContent = '?';
-      }
-    } catch (e) {
-      console.error('Error verifying font', fontId, e);
-      shapeCell.textContent = '-';
-      shapeCell.title = 'Error: ' + e;
-      if (widthCell) {
-        widthCell.textContent = '-';
-        widthCell.title = 'Error: ' + e;
-      }
-      if (ltestCell) {
-        ltestCell.textContent = '-';
-        ltestCell.title = 'Error: ' + e;
-      }
-      if (extestCell) {
-        extestCell.textContent = '-';
-        extestCell.title = 'Error: ' + e;
-      }
-      if (casetestCell) {
-        casetestCell.textContent = '-';
-        casetestCell.title = 'Error: ' + e;
-      }
-    }
-    checked++;
-    if (checked % 10 === 0) {
-      status.textContent = `Verified ${checked}/${shapeCells.length}...`;
-    }
-  }
-  status.textContent = `Verified ${checked} fonts.`;
-  if (rejectBtn) rejectBtn.disabled = false;
-  if (checkBtn) checkBtn.disabled = false;
-}
-
-async function testFirst10() {
-  const status = document.getElementById('statusMsg');
-  const testBtn = document.getElementById('testBtn');
-  const rows = Array.from(document.querySelectorAll('#fontTable tr')).filter(r => r.style.display !== 'none');
-  const first10 = rows.slice(0, 10);
-
-  if (first10.length === 0) {
-    status.textContent = 'No fonts to test';
-    return;
-  }
-
-  testBtn.disabled = true;
-  status.textContent = `Testing ${first10.length} fonts...`;
-
-  let tested = 0;
-  let totalScore = 0;
-  for (const row of first10) {
-    const fontId = row.dataset.id;
-    const fontName = row.querySelector('a')?.textContent || fontId;
-    status.textContent = `Testing ${tested + 1}/${first10.length}: ${fontName}...`;
-
-    try {
-      const r = await fetch(`/api/test-run/${fontId}`, {method: 'POST'});
-      const d = await r.json();
-      if (d.ok && d.avg_score !== undefined) {
-        totalScore += d.avg_score;
-      }
-    } catch (e) {
-      console.error('Error testing font', fontId, e);
-    }
-    tested++;
-  }
-
-  const avgScore = tested > 0 ? (totalScore / tested).toFixed(3) : 'N/A';
-  status.textContent = `Tested ${tested} fonts. Avg score: ${avgScore}`;
-  testBtn.disabled = false;
-}
-
-function resetAndScrape() {
-  const warnings = [
-    '⚠️ WARNING: This will DELETE ALL DATA! ⚠️',
-    '',
-    'This operation will:',
-    '1. Delete the entire fonts.db database',
-    '2. Delete all stroke data and rejections',
-    '3. Re-scrape fonts from DaFont, FontSpace, and Google Fonts',
-    '',
-    'This may take several hours and cannot be undone.',
-    '',
-    'Type "DELETE" to confirm:'
-  ];
-
-  const confirmation = prompt(warnings.join('\n'));
-  if (confirmation !== 'DELETE') {
-    alert('Operation cancelled.');
-    return;
-  }
-
-  const status = document.getElementById('statusMsg');
-  const resetBtn = document.getElementById('resetBtn');
-  resetBtn.disabled = true;
-  status.textContent = 'Starting reset and scrape...';
-  status.style.color = '#f88';
-
-  const eventSource = new EventSource('/api/reset-and-scrape');
-
-  // POST to start the operation
-  fetch('/api/reset-and-scrape', {method: 'POST'})
-    .then(response => {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      function read() {
-        reader.read().then(({done, value}) => {
-          if (done) {
-            resetBtn.disabled = false;
-            return;
-          }
-
-          const text = decoder.decode(value);
-          const lines = text.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                status.textContent = data.message;
-                if (data.status === 'complete') {
-                  status.style.color = '#8f8';
-                  setTimeout(() => location.reload(), 2000);
-                } else if (data.status === 'error') {
-                  status.style.color = '#f88';
-                  resetBtn.disabled = false;
-                } else if (data.status === 'warning') {
-                  status.style.color = '#ff8';
-                }
-              } catch (e) {}
-            }
-          }
-
-          read();
-        });
-      }
-
-      read();
-    })
-    .catch(err => {
-      status.textContent = 'Error: ' + err;
-      status.style.color = '#f88';
-      resetBtn.disabled = false;
-    });
-}
-
-// Populate rejection details for rejected fonts on page load
-document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('#fontTable tr.rejected').forEach(row => {
-    const details = row.dataset.details;
-    if (!details) return;
-
-    try {
-      const d = JSON.parse(details);
-      const shapesCell = row.querySelector('td.shapes');
-      const widthCell = row.querySelector('td.width');
-      const ltestCell = row.querySelector('td.ltest');
-      const extestCell = row.querySelector('td.extest');
-      const casetestCell = row.querySelector('td.casetest');
-
-      // Error case
-      if (d.error) {
-        if (shapesCell) {
-          shapesCell.textContent = 'ERR';
-          shapesCell.title = d.error;
-          shapesCell.style.color = '#f88';
-        }
-        return;
-      }
-
-      // Shapes
-      if (shapesCell && d.shapes != null) {
-        shapesCell.textContent = d.shapes;
-        const badShapes = d.shapes < 10 || d.shapes > 15;
-        shapesCell.style.color = badShapes ? '#f88' : '#8f8';
-      }
-
-      // Width
-      if (widthCell && d.max_width_pct != null) {
-        widthCell.textContent = d.max_width_pct + '%';
-        const badWidth = d.max_width_pct > 22.5;
-        widthCell.style.color = badWidth ? '#f88' : '#8f8';
-      }
-
-      // L test
-      if (ltestCell && d.l_has_hole != null) {
-        ltestCell.textContent = d.l_has_hole ? 'FAIL' : 'PASS';
-        ltestCell.style.color = d.l_has_hole ? '#f88' : '#8f8';
-      }
-
-      // Exclaim test
-      if (extestCell && d.exclaim_ok != null) {
-        if (d.exclaim_ok) {
-          extestCell.textContent = 'PASS';
-          extestCell.style.color = '#8f8';
-        } else {
-          extestCell.textContent = d.exclaim_shapes != null ? `FAIL (${d.exclaim_shapes})` : 'FAIL';
-          extestCell.style.color = '#f88';
-        }
-      }
-
-      // Case mismatches
-      if (casetestCell && d.case_mismatches) {
-        const count = d.case_mismatches.length;
-        if (count === 0) {
-          casetestCell.textContent = 'OK';
-          casetestCell.style.color = '#8f8';
-        } else {
-          casetestCell.textContent = count;
-          casetestCell.style.color = '#f88';
-          casetestCell.title = `Lowercase = Uppercase: ${d.case_mismatches.join(', ')}`;
-        }
-      }
-    } catch (e) {
-      console.error('Error parsing rejection details:', e);
-    }
-  });
-});
-
 </script>
 </body>
 </html>

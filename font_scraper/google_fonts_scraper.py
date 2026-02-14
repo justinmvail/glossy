@@ -89,51 +89,17 @@ class GoogleFontsScraper(FontSource):
     PAGE_TIMEOUT = 30
     DOWNLOAD_TIMEOUT = 60
 
-    # Known handwriting/script fonts on Google Fonts
-    # This list can be expanded
-    HANDWRITING_FONTS = [
-        # Handwriting
-        "Caveat", "Dancing Script", "Pacifico", "Satisfy", "Great Vibes",
-        "Kalam", "Indie Flower", "Shadows Into Light", "Amatic SC",
-        "Permanent Marker", "Architects Daughter", "Patrick Hand",
-        "Handlee", "Gochi Hand", "Rock Salt", "Reenie Beanie",
-        "Just Another Hand", "Covered By Your Grace", "Coming Soon",
-        "Schoolbell", "Short Stack", "Rancho", "Sue Ellen Francisco",
-        "Loved by the King", "La Belle Aurore", "Give You Glory",
-        "Cedarville Cursive", "Dawning of a New Day", "Over the Rainbow",
-        "Waiting for the Sunrise", "Zeyada", "Mrs Saint Delafield",
-        "Homemade Apple", "Crafty Girls", "Annie Use Your Telescope",
-        "The Girl Next Door", "Calligraffitti", "Just Me Again Down Here",
-        "Swanky and Moo Moo", "Sunshiney", "Walter Turncoat",
-        "Fontdiner Swanky", "Kranky", "Cherry Cream Soda",
-        "Gloria Hallelujah", "Nothing You Could Do", "Sedgwick Ave",
-        "Mali", "Sriracha", "Itim", "Charm", "Charmonman",
-        # Script/Calligraphy
-        "Alex Brush", "Allura", "Bilbo", "Condiment", "Cookie",
-        "Courgette", "Damion", "Euphoria Script", "Felipa",
-        "Grand Hotel", "Herr Von Muellerhoff", "Italianno",
-        "Kaushan Script", "Lavishly Yours", "Leckerli One",
-        "Lobster", "Lobster Two", "Lovers Quarrel", "Marck Script",
-        "Meddon", "Meie Script", "Merienda", "Miama", "Monsieur La Doulaise",
-        "Montez", "Mr Dafoe", "Mr De Haviland", "Ms Madi", "Niconne",
-        "Norican", "Oleo Script", "Parisienne", "Petit Formal Script",
-        "Pinyon Script", "Princess Sofia", "Qwigley", "Quintessential",
-        "Ruge Boogie", "Ruthie", "Sacramento", "Sail", "Seaweed Script",
-        "Shadows Into Light Two", "Sofia", "Stalemate", "Tangerine",
-        "Yellowtail",
-        # More handwriting styles
-        "Bad Script", "Bilbo Swash Caps", "Clicker Script", "Dr Sugiyama",
-        "Eagle Lake", "Engagement", "Fleur De Leah", "Fondamento",
-        "Henny Penny", "Hurricane", "League Script", "Licorice",
-        "Liu Jian Mao Cao", "Long Cang", "Ma Shan Zheng", "Mea Culpa",
-        "Miss Fajardose", "Molle", "My Soul", "Nanum Brush Script",
-        "Nanum Pen Script", "Oooh Baby", "Petemoss", "Playball",
-        "Praise", "Pushster", "Redressed", "Road Rage", "Rochester",
-        "Rock 3D", "Rouge Script", "Ruge Boogie", "Sassy Frass",
-        "Send Flowers", "Snippet", "Square Peg", "Style Script",
-        "Syne Tactile", "Tapestry", "Updock", "Vujahday Script",
-        "Waterfall", "WindSong", "Whisper", "Zhi Mang Xing",
+    # Google Fonts metadata endpoint (public, no API key needed)
+    METADATA_URL = "https://fonts.google.com/metadata/fonts"
+
+    # Categories to scrape (Google Fonts classification)
+    # Available: Handwriting, Display, Sans Serif, Serif, Monospace
+    CATEGORIES = [
+        'Handwriting',
     ]
+
+    # Cached metadata from Google Fonts
+    _metadata_cache = None
 
     def __init__(self, output_dir: str, rate_limit: float = 0.5):
         """Initialize the Google Fonts scraper.
@@ -151,6 +117,71 @@ class GoogleFontsScraper(FontSource):
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; rv:60.0) Gecko/20100101 Firefox/60.0',
         })
+
+    def fetch_metadata(self) -> list[dict]:
+        """Fetch font metadata from Google Fonts.
+
+        Returns:
+            List of font metadata dictionaries, or empty list on failure.
+        """
+        if GoogleFontsScraper._metadata_cache is not None:
+            return GoogleFontsScraper._metadata_cache
+
+        try:
+            resp = self.get_with_retry(self.METADATA_URL, timeout=self.PAGE_TIMEOUT)
+            resp.raise_for_status()
+
+            # Response starts with ")]}'" which needs to be stripped
+            text = resp.text
+            if text.startswith(")]}'"):
+                text = text[4:].strip()
+
+            data = json.loads(text)
+            GoogleFontsScraper._metadata_cache = data.get('familyMetadataList', [])
+            logger.info("Fetched metadata for %d fonts from Google Fonts",
+                       len(GoogleFontsScraper._metadata_cache))
+            return GoogleFontsScraper._metadata_cache
+
+        except Exception as e:
+            logger.warning("Failed to fetch Google Fonts metadata: %s", e)
+            return []
+
+    def scrape_category(self, category: str) -> list[FontMetadata]:
+        """Scrape fonts from a specific Google Fonts category.
+
+        Args:
+            category: Category name (e.g., 'Handwriting', 'Display', 'Serif').
+
+        Returns:
+            List of FontMetadata objects for fonts in that category.
+        """
+        from font_source import ScraperEventType
+
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Fetching {category} fonts",
+                   category=category)
+
+        metadata = self.fetch_metadata()
+        fonts = []
+
+        for font_data in metadata:
+            font_category = font_data.get('category', '')
+            if font_category.lower() == category.lower():
+                family = font_data.get('family', '')
+                if family:
+                    fonts.append(FontMetadata(
+                        name=family,
+                        family=family,
+                        source=self.SOURCE_NAME,
+                        category=category,
+                        url=f"https://fonts.google.com/specimen/{family.replace(' ', '+')}",
+                    ))
+
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"{category}: found {len(fonts)} fonts",
+                   category=category, count=len(fonts))
+
+        return fonts
 
     def get_font_url(self, family: str, variant: str = 'regular') -> str:
         """Get the download URL for a font from the Google Fonts CSS API.
@@ -195,29 +226,55 @@ class GoogleFontsScraper(FontSource):
     def scrape_fonts(self, config: ScraperConfig) -> list[FontMetadata]:
         """Discover fonts from Google Fonts.
 
-        For Google Fonts, this creates FontMetadata objects from either
-        the provided fonts list or the curated HANDWRITING_FONTS list.
+        Scrapes fonts from the Google Fonts website by category.
 
         Args:
-            config: ScraperConfig with options. Uses config.fonts if provided,
-                otherwise defaults to HANDWRITING_FONTS.
+            config: ScraperConfig with options. Uses config.categories if provided,
+                otherwise scrapes default CATEGORIES.
 
         Returns:
             List of FontMetadata objects for discovered fonts.
         """
-        # Use provided fonts list or default to curated list
-        font_names = config.fonts if config.fonts else self.HANDWRITING_FONTS
+        from font_source import ScraperEventType
 
-        fonts = []
-        for family in font_names:
-            fonts.append(FontMetadata(
-                name=family,
-                family=family,
-                source=self.SOURCE_NAME,
-                category='handwriting',
-                url=f"https://fonts.google.com/specimen/{family.replace(' ', '+')}",
-            ))
-        return fonts
+        # Determine which categories to scrape
+        if config.fonts:
+            # Explicit font list provided
+            font_names = config.fonts
+            self._emit(ScraperEventType.SCRAPE_PAGE,
+                       f"Using {len(font_names)} provided fonts")
+            fonts = []
+            for family in font_names:
+                fonts.append(FontMetadata(
+                    name=family,
+                    family=family,
+                    source=self.SOURCE_NAME,
+                    category='handwriting',
+                    url=f"https://fonts.google.com/specimen/{family.replace(' ', '+')}",
+                ))
+            return fonts
+
+        # Scrape from website by category
+        categories = config.categories if config.categories else self.CATEGORIES
+
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Scraping {len(categories)} categories from Google Fonts")
+
+        all_fonts = []
+        seen_families = set()
+
+        for category in categories:
+            fonts = self.scrape_category(category)
+            for font in fonts:
+                if font.family not in seen_families:
+                    seen_families.add(font.family)
+                    all_fonts.append(font)
+
+        self._emit(ScraperEventType.SCRAPE_COMPLETE,
+                   f"Found {len(all_fonts)} unique fonts across {len(categories)} categories",
+                   count=len(all_fonts))
+
+        return all_fonts
 
     def download_font(self, font: FontMetadata | str) -> bool:
         """Download a font family from Google Fonts.

@@ -80,9 +80,25 @@ class FontSpaceScraper(FontSource):
     PAGE_TIMEOUT = 30
     DOWNLOAD_TIMEOUT = 60
 
+    # FontSpace categories (slug names for URL)
+    CATEGORIES = [
+        'handwriting',
+        'script',
+        'calligraphy',
+        'brush',
+        'signature',
+        'graffiti',
+        'kids',
+        'cute',
+        'marker',
+        'pen',
+    ]
+
     # Regex patterns for HTML parsing (compiled once for efficiency)
-    FONT_PAGE_PATTERN = re.compile(r'/font/[^/]+$')
-    DOWNLOAD_PATH_PATTERN = re.compile(r'/download/')
+    # FontSpace changed URL structure: now /fontname-font-fXXXXX instead of /font/fontname
+    FONT_PAGE_PATTERN = re.compile(r'/[a-z0-9-]+-font-f\d+$', re.IGNORECASE)
+    # Download links now use /get/family/XXXX pattern
+    DOWNLOAD_PATH_PATTERN = re.compile(r'/get/family/')
     ZIP_FILE_PATTERN = re.compile(r'\.zip')
 
     def __init__(self, output_dir: str, rate_limit: float = 1.0):
@@ -112,12 +128,22 @@ class FontSpaceScraper(FontSource):
         """
         logger.info("Searching FontSpace for: %s", query)
 
+        from font_source import ScraperEventType
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Searching for: {query}",
+                   query=query)
+
         url_template = f"{self.BASE_URL}/search?q={query}&p={{page}}"
 
         fonts = []
         for page_fonts in self.paginate(url_template, max_pages, self._parse_search_results, self.PAGE_TIMEOUT):
             fonts.extend(page_fonts)
             logger.debug("Total fonts so far: %d", len(fonts))
+
+        if fonts:
+            self._emit(ScraperEventType.SCRAPE_COMPLETE,
+                       f"Search '{query}': found {len(fonts)} fonts",
+                       query=query, count=len(fonts))
 
         return fonts
 
@@ -138,12 +164,22 @@ class FontSpaceScraper(FontSource):
         """
         logger.info("Scraping FontSpace category: %s", category)
 
+        from font_source import ScraperEventType
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Browsing category: {category}",
+                   category=category)
+
         url_template = f"{self.BASE_URL}/category/{category}?p={{page}}"
 
         fonts = []
         for page_fonts in self.paginate(url_template, max_pages, self._parse_search_results, self.PAGE_TIMEOUT):
             fonts.extend(page_fonts)
             logger.debug("Total fonts so far: %d", len(fonts))
+
+        if fonts:
+            self._emit(ScraperEventType.SCRAPE_COMPLETE,
+                       f"Category {category}: found {len(fonts)} fonts",
+                       category=category, count=len(fonts))
 
         return fonts
 
@@ -307,21 +343,57 @@ class FontSpaceScraper(FontSource):
         """Discover fonts from FontSpace.
 
         Scrapes fonts via search or category browsing based on config.
+        By default, scrapes all categories in CATEGORIES.
 
         Args:
-            config: ScraperConfig with options. Uses config.query for search,
-                config.use_category to browse by category instead.
+            config: ScraperConfig with options.
+                - If config.categories is set, scrapes those categories.
+                - If config.use_category is True with config.query, scrapes that single category.
+                - If config.query is set without use_category, performs search.
+                - Otherwise, scrapes all default CATEGORIES.
 
         Returns:
             List of FontMetadata objects for discovered fonts.
         """
-        query = config.query or "handwritten"
+        from font_source import ScraperEventType
+
         max_pages = config.max_pages
 
-        if config.use_category:
-            return self.scrape_category(query, max_pages)
+        # Determine which categories to scrape
+        if config.categories:
+            # Explicit category list provided
+            categories = config.categories
+        elif config.use_category and config.query:
+            # Single category specified
+            categories = [config.query]
+        elif config.query and not config.use_category:
+            # Search mode
+            return self.scrape_search(config.query, max_pages)
         else:
-            return self.scrape_search(query, max_pages)
+            # Default: scrape all categories
+            categories = self.CATEGORIES
+
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Scraping {len(categories)} categories",
+                   categories=categories)
+
+        # Scrape all categories
+        all_fonts = []
+        seen_urls = set()
+
+        for category in categories:
+            fonts = self.scrape_category(category, max_pages)
+            # Deduplicate across categories
+            for font in fonts:
+                if font.url not in seen_urls:
+                    seen_urls.add(font.url)
+                    all_fonts.append(font)
+
+        self._emit(ScraperEventType.SCRAPE_COMPLETE,
+                   f"Found {len(all_fonts)} unique fonts across {len(categories)} categories",
+                   count=len(all_fonts))
+
+        return all_fonts
 
     def scrape_and_download(
         self,

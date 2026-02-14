@@ -46,13 +46,59 @@ import time
 import zipfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, Protocol
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+class ScraperEventType(Enum):
+    """Types of events emitted during scraping."""
+    SCRAPE_START = "scrape_start"
+    SCRAPE_PAGE = "scrape_page"
+    SCRAPE_COMPLETE = "scrape_complete"
+    DOWNLOAD_START = "download_start"
+    DOWNLOAD_PROGRESS = "download_progress"
+    DOWNLOAD_SUCCESS = "download_success"
+    DOWNLOAD_FAIL = "download_fail"
+    DOWNLOAD_COMPLETE = "download_complete"
+    EXTRACT_FILE = "extract_file"
+    ERROR = "error"
+
+
+@dataclass
+class ScraperEvent:
+    """Event data emitted during scraping.
+
+    Attributes:
+        event_type: Type of event.
+        source: Name of the scraper source.
+        message: Human-readable message.
+        data: Additional event-specific data.
+    """
+    event_type: ScraperEventType
+    source: str
+    message: str
+    data: dict = field(default_factory=dict)
+
+
+class ScraperObserver(Protocol):
+    """Protocol for scraper event observers.
+
+    Implement this protocol to receive events from scrapers.
+    """
+
+    def on_event(self, event: ScraperEvent) -> None:
+        """Called when a scraper event occurs.
+
+        Args:
+            event: The scraper event with type, source, message, and data.
+        """
+        ...
 
 
 def create_scrape_metadata(
@@ -174,7 +220,7 @@ class ScraperConfig:
         fonts: Specific font names to download.
         use_category: Use category browsing instead of search.
     """
-    max_pages: int = 10
+    max_pages: int = 10000  # Effectively unlimited; pagination stops on duplicate detection
     max_fonts: int | None = None
     query: str = ""
     categories: list[str] = field(default_factory=list)
@@ -238,6 +284,44 @@ class FontSource(ABC):
         self.fonts_found: list[FontMetadata] = []
         self.downloaded: set[str] = set()
         self.failed: list[str] = []
+        self._observers: list[ScraperObserver] = []
+
+    def add_observer(self, observer: ScraperObserver) -> None:
+        """Add an observer to receive scraper events.
+
+        Args:
+            observer: Object implementing ScraperObserver protocol.
+        """
+        self._observers.append(observer)
+
+    def remove_observer(self, observer: ScraperObserver) -> None:
+        """Remove an observer.
+
+        Args:
+            observer: The observer to remove.
+        """
+        if observer in self._observers:
+            self._observers.remove(observer)
+
+    def _emit(self, event_type: ScraperEventType, message: str, **data) -> None:
+        """Emit an event to all observers.
+
+        Args:
+            event_type: Type of event.
+            message: Human-readable message.
+            **data: Additional event data.
+        """
+        event = ScraperEvent(
+            event_type=event_type,
+            source=self.SOURCE_NAME,
+            message=message,
+            data=data
+        )
+        for observer in self._observers:
+            try:
+                observer.on_event(event)
+            except Exception as e:
+                logger.warning("Observer error: %s", e)
 
     def wait_rate_limit(self) -> None:
         """Wait for the configured rate limit duration."""
@@ -407,8 +491,15 @@ class FontSource(ABC):
 
         # Discover fonts
         logger.info("Scraping fonts from %s...", self.SOURCE_NAME)
+        self._emit(ScraperEventType.SCRAPE_START,
+                   f"Starting {self.SOURCE_NAME} scraper...")
+
         self.fonts_found = self.scrape_fonts(config)
         logger.info("Found %d fonts", len(self.fonts_found))
+
+        self._emit(ScraperEventType.SCRAPE_COMPLETE,
+                   f"Found {len(self.fonts_found)} fonts",
+                   count=len(self.fonts_found))
 
         # Apply max_fonts limit
         fonts_to_download = self.fonts_found
@@ -417,21 +508,38 @@ class FontSource(ABC):
             logger.info("Limiting to %d fonts", config.max_fonts)
 
         # Download each font
-        logger.info("Downloading %d fonts...", len(fonts_to_download))
+        total = len(fonts_to_download)
+        logger.info("Downloading %d fonts...", total)
+        self._emit(ScraperEventType.DOWNLOAD_START,
+                   f"Downloading {total} fonts...",
+                   total=total)
+
         for i, font in enumerate(fonts_to_download, 1):
-            self.log_progress(i, len(fonts_to_download), font.name)
+            self.log_progress(i, total, font.name)
+            self._emit(ScraperEventType.DOWNLOAD_PROGRESS,
+                       f"[{i}/{total}] Downloading {font.name}",
+                       current=i, total=total, font_name=font.name)
 
             try:
                 if self.download_font(font):
                     self.downloaded.add(font.name)
+                    self._emit(ScraperEventType.DOWNLOAD_SUCCESS,
+                               f"Downloaded {font.name}",
+                               font_name=font.name, downloaded=len(self.downloaded))
                 else:
                     # Track failure if download_font returns False but doesn't track
                     if font.name not in self.failed:
                         self.failed.append(font.name)
+                    self._emit(ScraperEventType.DOWNLOAD_FAIL,
+                               f"Failed to download {font.name}",
+                               font_name=font.name)
             except Exception as e:
                 logger.error("Error downloading %s: %s", font.name, e)
                 if font.name not in self.failed:
                     self.failed.append(font.name)
+                self._emit(ScraperEventType.ERROR,
+                           f"Error downloading {font.name}: {e}",
+                           font_name=font.name, error=str(e))
 
             self.wait_rate_limit()
 
@@ -442,6 +550,10 @@ class FontSource(ABC):
 
         logger.info("Complete: %d downloaded, %d failed",
                     len(self.downloaded), len(self.failed))
+
+        self._emit(ScraperEventType.DOWNLOAD_COMPLETE,
+                   f"Complete: {len(self.downloaded)} downloaded, {len(self.failed)} failed",
+                   downloaded=len(self.downloaded), failed=len(self.failed))
 
         return create_scrape_metadata(
             source=self.SOURCE_NAME,
@@ -507,12 +619,13 @@ class FontSource(ABC):
             output_dir: Directory to extract fonts to. Defaults to self.output_dir.
 
         Returns:
-            The number of font files extracted, or 0 if extraction failed.
+            The number of font files found (extracted + already existing),
+            or 0 if extraction failed.
         """
         if output_dir is None:
             output_dir = self.output_dir
 
-        extracted = 0
+        found = 0
         try:
             with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
                 for name in zf.namelist():
@@ -522,13 +635,22 @@ class FontSource(ABC):
                         safe_name = self.safe_filename(os.path.basename(name))
                         out_path = output_dir / safe_name
 
-                        if not out_path.exists():
+                        if out_path.exists():
+                            # File already exists - count it as found
+                            found += 1
+                        else:
                             with zf.open(name) as src, open(out_path, 'wb') as dst:
                                 dst.write(src.read())
-                            extracted += 1
+                            found += 1
+                            self._emit(ScraperEventType.EXTRACT_FILE,
+                                       f"Extracted {safe_name}",
+                                       filename=safe_name)
         except zipfile.BadZipFile as e:
             logger.error("Invalid ZIP file: %s", e)
-        return extracted
+            self._emit(ScraperEventType.ERROR,
+                       f"Invalid ZIP file: {e}",
+                       error=str(e))
+        return found
 
     def paginate(
         self,
@@ -560,6 +682,8 @@ class FontSource(ABC):
                 all_fonts.extend(page_fonts)
         """
         page = 1
+        seen_urls = set()  # Track seen fonts to detect pagination loops
+
         while page <= max_pages:
             url = url_template.format(page=page)
             logger.debug("Page %d: %s", page, url)
@@ -572,14 +696,42 @@ class FontSource(ABC):
 
                 if not page_fonts:
                     logger.debug("No fonts found on page %d, stopping.", page)
+                    # Only emit if we got to page > 1 (indicates pagination)
+                    if page > 1:
+                        self._emit(ScraperEventType.SCRAPE_PAGE,
+                                   f"Page {page}: no more fonts found",
+                                   page=page, count=0)
                     break
 
-                yield page_fonts
-                logger.debug("Found %d fonts on page %d", len(page_fonts), page)
+                # Check for duplicate page (pagination loop detection)
+                new_fonts = [f for f in page_fonts if f.url not in seen_urls]
+                if not new_fonts:
+                    logger.debug("Page %d has only duplicate fonts, stopping.", page)
+                    self._emit(ScraperEventType.SCRAPE_PAGE,
+                               f"Page {page}: no new fonts (pagination exhausted)",
+                               page=page, count=0)
+                    break
+
+                # Track seen URLs
+                for f in page_fonts:
+                    seen_urls.add(f.url)
+
+                yield new_fonts
+                logger.debug("Found %d new fonts on page %d", len(new_fonts), page)
+
+                # Only emit page events for page > 1 to reduce noise
+                # (page 1 is typically covered by higher-level events)
+                if page > 1:
+                    self._emit(ScraperEventType.SCRAPE_PAGE,
+                               f"Page {page}: found {len(new_fonts)} fonts",
+                               page=page, count=len(new_fonts))
 
                 page += 1
                 time.sleep(self.rate_limit)
 
             except requests.RequestException as e:
                 logger.warning("Error fetching page %d: %s", page, e)
+                self._emit(ScraperEventType.ERROR,
+                           f"Error fetching page {page}: {e}",
+                           page=page, error=str(e))
                 break

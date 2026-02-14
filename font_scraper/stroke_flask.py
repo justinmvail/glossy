@@ -757,18 +757,16 @@ class FontRepository:
                            COALESCE(cs.char_count, 0) as char_count,
                            0 as rejected
                     FROM fonts f
-                    LEFT JOIN font_removals rej ON rej.font_id = f.id AND rej.reason_id = ?
-                    LEFT JOIN font_removals dup ON dup.font_id = f.id AND dup.reason_id = ?
+                    LEFT JOIN font_removals fr ON fr.font_id = f.id
                     LEFT JOIN (
                         SELECT font_id, COUNT(*) as char_count
                         FROM characters WHERE strokes_raw IS NOT NULL
                         GROUP BY font_id
                     ) cs ON cs.font_id = f.id
-                    WHERE rej.id IS NULL AND dup.id IS NULL
+                    WHERE fr.id IS NULL
                     ORDER BY f.name
                 """
-                return db.execute(query, (self.REJECTION_REASON_ID,
-                                          self.DUPLICATE_REASON_ID)).fetchall()
+                return db.execute(query).fetchall()
 
     def get_font_by_id(self, fid: int):
         """Get a font record by ID.
@@ -873,9 +871,8 @@ class FontRepository:
         with self._connection_factory() as db:
             return db.execute(
                 """SELECT f.id, f.file_path FROM fonts f
-                   LEFT JOIN font_removals fr ON fr.font_id = f.id AND fr.reason_id = ?
-                   WHERE fr.id IS NULL""",
-                (self.REJECTION_REASON_ID,)
+                   LEFT JOIN font_removals fr ON fr.font_id = f.id
+                   WHERE fr.id IS NULL"""
             ).fetchall()
 
     def reject_font(self, fid: int, details: str) -> bool:
@@ -1161,3 +1158,313 @@ class TestRunRepository:
 
 # Default test run repository instance
 test_run_repository = TestRunRepository()
+
+
+class ScraperJobRepository:
+    """Repository for scraper job data (scraper_jobs and scraper_fonts tables).
+
+    Encapsulates database operations for tracking background scraper jobs
+    and discovered fonts awaiting download.
+    """
+
+    def __init__(self, connection_factory=None):
+        """Initialize the repository.
+
+        Args:
+            connection_factory: Callable that returns a DB context manager.
+                Defaults to get_db_context.
+        """
+        self._connection_factory = connection_factory or get_db_context
+
+    def create_job(self, source: str) -> int:
+        """Create a new scraper job.
+
+        Args:
+            source: The scraper source ('dafont', 'fontspace', 'google').
+
+        Returns:
+            The ID of the created job.
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                "INSERT INTO scraper_jobs (source, status) VALUES (?, 'pending')",
+                (source,)
+            )
+            return cursor.lastrowid
+
+    def update_job(self, job_id: int, **kwargs) -> None:
+        """Update job fields.
+
+        Args:
+            job_id: The job ID.
+            **kwargs: Fields to update (status, current_category, categories_total,
+                categories_done, fonts_found, fonts_downloaded, fonts_failed,
+                started_at, completed_at, error_message).
+        """
+        if not kwargs:
+            return
+
+        # Build update query dynamically
+        fields = []
+        values = []
+        for key, value in kwargs.items():
+            fields.append(f"{key} = ?")
+            values.append(value)
+
+        values.append(job_id)
+        query = f"UPDATE scraper_jobs SET {', '.join(fields)} WHERE id = ?"
+
+        with self._connection_factory() as db:
+            db.execute(query, values)
+
+    def get_job(self, job_id: int):
+        """Get a job by ID.
+
+        Returns:
+            Job record or None.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                "SELECT * FROM scraper_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+
+    def get_active_jobs(self) -> list:
+        """Get all pending or running jobs.
+
+        Returns:
+            List of job records.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                """SELECT * FROM scraper_jobs
+                   WHERE status IN ('pending', 'running')
+                   ORDER BY created_at DESC"""
+            ).fetchall()
+
+    def get_recent_jobs(self, limit: int = 10) -> list:
+        """Get recent jobs including completed ones.
+
+        Uses actual counts from scraper_fonts table instead of potentially
+        stale job counter values.
+
+        Args:
+            limit: Maximum number of jobs to return.
+
+        Returns:
+            List of job dicts with accurate counts.
+        """
+        with self._connection_factory() as db:
+            jobs = db.execute(
+                """SELECT * FROM scraper_jobs
+                   ORDER BY created_at DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+
+            # Get actual counts from scraper_fonts for each job
+            result = []
+            for job in jobs:
+                job_dict = dict(job)
+                job_id = job_dict['id']
+
+                # Get real counts from scraper_fonts table
+                counts = db.execute(
+                    """SELECT status, COUNT(*) as cnt FROM scraper_fonts
+                       WHERE job_id = ? GROUP BY status""",
+                    (job_id,)
+                ).fetchall()
+
+                count_map = {row['status']: row['cnt'] for row in counts}
+                job_dict['fonts_downloaded'] = count_map.get('completed', 0)
+                job_dict['fonts_failed'] = count_map.get('failed', 0)
+                job_dict['fonts_pending'] = count_map.get('pending', 0)
+
+                result.append(job_dict)
+
+            return result
+
+    def get_jobs_by_source(self, source: str) -> list:
+        """Get jobs for a specific source.
+
+        Args:
+            source: The scraper source.
+
+        Returns:
+            List of job records.
+        """
+        with self._connection_factory() as db:
+            return db.execute(
+                """SELECT * FROM scraper_jobs
+                   WHERE source = ?
+                   ORDER BY created_at DESC""",
+                (source,)
+            ).fetchall()
+
+    def cancel_job(self, job_id: int) -> bool:
+        """Cancel a running job.
+
+        Args:
+            job_id: The job ID.
+
+        Returns:
+            True if job was cancelled, False if not running.
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                """UPDATE scraper_jobs
+                   SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND status IN ('pending', 'running')""",
+                (job_id,)
+            )
+            return cursor.rowcount > 0
+
+    def add_scraper_font(self, job_id: int, name: str, url: str = None,
+                         download_url: str = None, category: str = None) -> int:
+        """Add a discovered font to the staging table.
+
+        Args:
+            job_id: The job ID.
+            name: Font name.
+            url: Font page URL.
+            download_url: Direct download URL.
+            category: Font category.
+
+        Returns:
+            The ID of the created font record.
+        """
+        with self._connection_factory() as db:
+            cursor = db.execute(
+                """INSERT INTO scraper_fonts (job_id, name, url, download_url, category, status)
+                   VALUES (?, ?, ?, ?, ?, 'pending')""",
+                (job_id, name, url, download_url, category)
+            )
+            return cursor.lastrowid
+
+    def add_scraper_fonts_batch(self, job_id: int, fonts: list) -> int:
+        """Add multiple fonts to the staging table.
+
+        Args:
+            job_id: The job ID.
+            fonts: List of dicts with keys: name, url, download_url, category.
+
+        Returns:
+            Number of fonts added.
+        """
+        if not fonts:
+            return 0
+
+        with self._connection_factory() as db:
+            data = [
+                (job_id, f.get('name'), f.get('url'), f.get('download_url'),
+                 f.get('category'), 'pending')
+                for f in fonts
+            ]
+            db.executemany(
+                """INSERT INTO scraper_fonts (job_id, name, url, download_url, category, status)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                data
+            )
+            return len(data)
+
+    def get_pending_fonts(self, job_id: int, category: str = None, limit: int = None) -> list:
+        """Get pending fonts for a job.
+
+        Args:
+            job_id: The job ID.
+            category: Optional category filter.
+            limit: Optional limit on results.
+
+        Returns:
+            List of font records.
+        """
+        with self._connection_factory() as db:
+            if category:
+                query = """SELECT * FROM scraper_fonts
+                           WHERE job_id = ? AND category = ? AND status = 'pending'"""
+                params = [job_id, category]
+            else:
+                query = """SELECT * FROM scraper_fonts
+                           WHERE job_id = ? AND status = 'pending'"""
+                params = [job_id]
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+
+            return db.execute(query, params).fetchall()
+
+    def update_font_status(self, font_id: int, status: str,
+                           file_path: str = None, error_message: str = None) -> None:
+        """Update font status.
+
+        Args:
+            font_id: The font record ID.
+            status: New status ('downloading', 'completed', 'failed', 'skipped').
+            file_path: Path to downloaded file (for completed status).
+            error_message: Error message (for failed status).
+        """
+        with self._connection_factory() as db:
+            if file_path:
+                db.execute(
+                    "UPDATE scraper_fonts SET status = ?, file_path = ? WHERE id = ?",
+                    (status, file_path, font_id)
+                )
+            elif error_message:
+                db.execute(
+                    "UPDATE scraper_fonts SET status = ?, error_message = ? WHERE id = ?",
+                    (status, error_message, font_id)
+                )
+            else:
+                db.execute(
+                    "UPDATE scraper_fonts SET status = ? WHERE id = ?",
+                    (status, font_id)
+                )
+
+    def get_font_counts(self, job_id: int) -> dict:
+        """Get font status counts for a job.
+
+        Args:
+            job_id: The job ID.
+
+        Returns:
+            Dict with counts: pending, downloading, completed, failed, skipped.
+        """
+        with self._connection_factory() as db:
+            rows = db.execute(
+                """SELECT status, COUNT(*) as count FROM scraper_fonts
+                   WHERE job_id = ? GROUP BY status""",
+                (job_id,)
+            ).fetchall()
+            return {row['status']: row['count'] for row in rows}
+
+    def get_categories_for_job(self, job_id: int) -> list:
+        """Get distinct categories for a job.
+
+        Args:
+            job_id: The job ID.
+
+        Returns:
+            List of category names.
+        """
+        with self._connection_factory() as db:
+            rows = db.execute(
+                """SELECT DISTINCT category FROM scraper_fonts
+                   WHERE job_id = ? AND category IS NOT NULL
+                   ORDER BY category""",
+                (job_id,)
+            ).fetchall()
+            return [row['category'] for row in rows]
+
+    def clear_jobs(self) -> int:
+        """Clear all scraper jobs and fonts.
+
+        Returns:
+            Number of jobs deleted.
+        """
+        with self._connection_factory() as db:
+            db.execute("DELETE FROM scraper_fonts")
+            cursor = db.execute("DELETE FROM scraper_jobs")
+            return cursor.rowcount
+
+
+# Default scraper job repository instance
+scraper_job_repository = ScraperJobRepository()

@@ -35,7 +35,7 @@ Attributes:
 
 Command-line Arguments:
     --output, -o: Output directory for downloaded fonts (default: ./dafont_fonts)
-    --categories, -c: Category IDs to scrape (default: 601 603)
+    --categories, -c: Category IDs to scrape (default: all categories)
     --pages, -p: Maximum pages per category to scrape (default: 10)
     --max-fonts, -m: Maximum total fonts to download (default: unlimited)
     --rate-limit, -r: Seconds to wait between requests (default: 1.0)
@@ -184,6 +184,12 @@ class DaFontScraper(FontSource):
         category_name = self.CATEGORIES.get(category, f'Unknown ({category})')
         logger.info("Scraping category: %s (cat=%s)", category_name, category)
 
+        # Emit category start event
+        from font_source import ScraperEventType
+        self._emit(ScraperEventType.SCRAPE_PAGE,
+                   f"Scraping category: {category_name}",
+                   category=category_name, category_id=category)
+
         url_template = f"{self.BASE_URL}/theme.php?cat={category}&page={{page}}"
 
         # Create a parser that includes the category name
@@ -194,6 +200,12 @@ class DaFontScraper(FontSource):
         for page_fonts in self.paginate(url_template, max_pages, parse_with_category, self.PAGE_TIMEOUT):
             fonts.extend(page_fonts)
             logger.debug("Total fonts so far: %d", len(fonts))
+
+        # Emit category complete event with count
+        if fonts:
+            self._emit(ScraperEventType.SCRAPE_PAGE,
+                       f"{category_name}: found {len(fonts)} fonts",
+                       category=category_name, count=len(fonts))
 
         return fonts
 
@@ -502,8 +514,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Scrape handwriting fonts from DaFont')
     parser.add_argument('--output', '-o', type=str, default='./dafont_fonts',
                         help='Output directory for fonts')
-    parser.add_argument('--categories', '-c', nargs='+', default=['601', '603'],
-                        help='Category IDs to scrape (601=Calligraphy, 603=Handwritten)')
+    parser.add_argument('--categories', '-c', nargs='+', default=None,
+                        help='Category IDs to scrape (default: all categories)')
     parser.add_argument('--pages', '-p', type=int, default=10,
                         help='Max pages per category')
     parser.add_argument('--max-fonts', '-m', type=int, default=None,

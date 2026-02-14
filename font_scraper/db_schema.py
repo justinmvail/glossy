@@ -176,7 +176,8 @@ INSERT OR IGNORE INTO removal_reasons (code, description) VALUES
     ('ocr_validation', 'Failed OCR validation after processing'),
     ('low_quality', 'Quality score below threshold'),
     ('manual', 'Manually rejected during review'),
-    ('load_error', 'Could not load font file');
+    ('load_error', 'Could not load font file'),
+    ('font_variation', 'Font variation (Bold, Italic, etc.)');
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_fonts_source ON fonts(source);
@@ -192,6 +193,57 @@ CREATE INDEX IF NOT EXISTS idx_font_removals_font ON font_removals(font_id);
 CREATE INDEX IF NOT EXISTS idx_font_removals_reason ON font_removals(reason_id);
 CREATE INDEX IF NOT EXISTS idx_ocr_runs_character ON ocr_runs(character_id);
 CREATE INDEX IF NOT EXISTS idx_ocr_runs_stage ON ocr_runs(stage);
+
+-- Scraper job tracking table
+-- Tracks background scraper jobs with persistent progress
+CREATE TABLE IF NOT EXISTS scraper_jobs (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,           -- 'dafont', 'fontspace', 'google'
+    status TEXT DEFAULT 'pending',  -- 'pending', 'discovering', 'downloading', 'completed', 'failed', 'cancelled'
+    current_category TEXT,
+    current_page INTEGER DEFAULT 0, -- Current page within category (for recovery)
+    categories_total INTEGER DEFAULT 0,
+    categories_done INTEGER DEFAULT 0,
+    fonts_found INTEGER DEFAULT 0,
+    fonts_downloaded INTEGER DEFAULT 0,
+    fonts_failed INTEGER DEFAULT 0,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Scraper fonts staging table
+-- Discovered fonts awaiting download
+CREATE TABLE IF NOT EXISTS scraper_fonts (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER REFERENCES scraper_jobs(id),
+    name TEXT NOT NULL,
+    url TEXT,
+    download_url TEXT,
+    category TEXT,
+    status TEXT DEFAULT 'pending',  -- 'pending', 'downloading', 'completed', 'failed', 'skipped'
+    file_path TEXT,                 -- Path to downloaded font file
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Scraper logs table for detailed progress tracking
+CREATE TABLE IF NOT EXISTS scraper_logs (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER REFERENCES scraper_jobs(id),
+    level TEXT DEFAULT 'info',      -- 'info', 'success', 'warning', 'error'
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for scraper tables
+CREATE INDEX IF NOT EXISTS idx_scraper_jobs_status ON scraper_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_scraper_jobs_source ON scraper_jobs(source);
+CREATE INDEX IF NOT EXISTS idx_scraper_fonts_job ON scraper_fonts(job_id);
+CREATE INDEX IF NOT EXISTS idx_scraper_fonts_status ON scraper_fonts(status);
+CREATE INDEX IF NOT EXISTS idx_scraper_fonts_category ON scraper_fonts(category);
+CREATE INDEX IF NOT EXISTS idx_scraper_logs_job ON scraper_logs(job_id);
 """
 """str: Complete SQL schema for the font training database.
 
