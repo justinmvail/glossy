@@ -165,6 +165,8 @@ class FontDeduplicator:
             font dicts that are duplicates of each other. Only groups
             with 2+ fonts are returned.
         """
+        import numpy as np
+
         # Group by exact phash first
         hash_groups = defaultdict(list)
         for score in font_scores:
@@ -172,35 +174,56 @@ class FontDeduplicator:
             if phash:
                 hash_groups[phash].append(score)
 
-        # Find similar hashes within threshold
-        duplicates = []
-        processed = set()
+        # Convert hex hashes to bit arrays for vectorized comparison
         hashes = list(hash_groups.keys())
+        valid_hashes = []
+        bit_arrays = []
+        for h in hashes:
+            try:
+                hash_obj = imagehash.hex_to_hash(h)
+                bit_arrays.append(hash_obj.hash.flatten())
+                valid_hashes.append(h)
+            except ValueError as e:
+                logger.debug("Hash conversion failed for %s: %s", h, e)
 
-        for i, h1 in enumerate(hashes):
-            if h1 in processed:
+        if not valid_hashes:
+            return []
+
+        # Build matrix of shape (n, bits) for vectorized hamming distance
+        bit_matrix = np.array(bit_arrays, dtype=np.uint8)
+        n = len(valid_hashes)
+
+        # Direct grouping: each hash groups with all hashes within threshold.
+        # No transitive chaining — a hash only joins a group if it directly
+        # matches the group's anchor (first hash).
+        BATCH = 500
+        processed = set()
+        duplicates = []
+
+        for i in range(n):
+            if i in processed:
                 continue
 
-            group = hash_groups[h1].copy()
+            anchor = bit_matrix[i:i + 1]  # (1, bits)
+            group_indices = [i]
 
-            for h2 in hashes[i + 1:]:
-                if h2 in processed:
-                    continue
+            # Compare anchor against all remaining hashes in batches
+            for j in range(i + 1, n, BATCH):
+                end = min(j + BATCH, n)
+                chunk = bit_matrix[j:end]  # (batch, bits)
+                dists = np.count_nonzero(anchor ^ chunk, axis=1)  # (batch,)
+                matches = np.where(dists <= self.threshold)[0]
+                for m in matches:
+                    idx = j + int(m)
+                    if idx not in processed:
+                        group_indices.append(idx)
 
-                try:
-                    hash1 = imagehash.hex_to_hash(h1)
-                    hash2 = imagehash.hex_to_hash(h2)
-                    distance = hash1 - hash2
-
-                    if distance <= self.threshold:
-                        group.extend(hash_groups[h2])
-                        processed.add(h2)
-                except ValueError as e:
-                    logger.debug("Hash comparison failed: %s", e)
-
+            group = []
+            for idx in group_indices:
+                processed.add(idx)
+                group.extend(hash_groups[valid_hashes[idx]])
             if len(group) > 1:
                 duplicates.append(group)
-            processed.add(h1)
 
         return duplicates
 

@@ -856,41 +856,34 @@ async function rejectBadFonts() {
   }
 
   const btn = document.getElementById('rejectBtn');
+  const status = document.getElementById('verifyStatus');
   btn.disabled = true;
 
-  addLog('verifyLog', `Rejecting ${verificationResults.length} fonts...`, 'info');
-
-  const rejections = verificationResults.map(r => ({
-    font_id: r.font_id,
-    shapes: r.shapes,
-    max_width_pct: r.max_width_pct,
-    l_has_hole: r.l_has_hole,
-    exclaim_ok: r.exclaim_ok,
-    exclaim_shapes: r.exclaim_shapes,
-    case_mismatches: r.case_mismatches || [],
-    error: r.error
-  }));
+  const ids = verificationResults.map(r => r.font_id);
+  addLog('verifyLog', `Rejecting ${ids.length} fonts (IDs only)...`, 'info');
+  status.textContent = `Rejecting ${ids.length} fonts...`;
 
   try {
     const resp = await fetch('/api/reject-batch', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rejections: rejections})
+      body: JSON.stringify({font_ids: ids})
     });
     const result = await resp.json();
 
     if (result.ok) {
       addLog('verifyLog', `Successfully rejected ${result.rejected} fonts`, 'success');
+      status.textContent = `Rejected ${result.rejected} fonts`;
       verificationResults = [];
-      location.reload();
+      setTimeout(() => location.reload(), 1500);
     } else {
       addLog('verifyLog', `Error: ${result.error}`, 'error');
+      btn.disabled = false;
     }
   } catch (e) {
     addLog('verifyLog', `Error rejecting fonts: ${e}`, 'error');
+    btn.disabled = false;
   }
-
-  btn.disabled = false;
 }
 
 async function restoreAllFonts() {
@@ -1019,6 +1012,7 @@ function findDuplicates() {
     .then(response => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       function read() {
         reader.read().then(({done, value}) => {
@@ -1027,15 +1021,19 @@ function findDuplicates() {
             return;
           }
 
-          const text = decoder.decode(value);
-          const lines = text.split('\n');
+          buffer += decoder.decode(value, {stream: true});
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();  // keep incomplete last part
 
-          for (const line of lines) {
+          for (const part of parts) {
+            const line = part.trim();
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
                 handleDedupEvent(data, status, results, rejectBtn);
-              } catch (e) {}
+              } catch (e) {
+                console.error('SSE parse error:', e);
+              }
             }
           }
 

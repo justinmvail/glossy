@@ -699,6 +699,48 @@ def api_skeleton(fid: int) -> Response | tuple[str, int]:
     return jsonify(strokes=st) if st else (jsonify(error="No skeleton found"), 500)
 
 
+@app.route('/api/ridge-trace/<int:fid>', methods=['POST'])
+def api_ridge_trace(fid: int) -> Response | tuple[str, int]:
+    """Generate strokes using distance transform ridge extraction.
+
+    Uses the flux-based medial axis method: computes the distance transform,
+    then finds ridges via divergence of the normalized gradient field.
+    Returns smoother centerlines than morphological skeletonization with
+    stroke width information.
+
+    Args:
+        fid: Font ID from URL path.
+
+    Query Parameters:
+        c (str, required): Character to process.
+
+    Returns:
+        Response: JSON with strokes array.
+    """
+    c, err = get_char_param_or_error()
+    if err:
+        return err
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
+    m = render_glyph_mask(f['file_path'], c)
+    if m is None:
+        return jsonify(error="Could not render glyph"), 500
+
+    from prototype_ridge import ridge_centerline_v3, trace_ridges_to_strokes
+    ridge, dist = ridge_centerline_v3(m, ridge_threshold=1.5, gradient_thresh=0.7)
+    if not ridge.any():
+        return jsonify(error="No ridges found"), 500
+
+    raw_strokes = trace_ridges_to_strokes(ridge, dist, min_length=5)
+    if not raw_strokes:
+        return jsonify(error="No strokes traced"), 500
+
+    # Convert to [[x, y], ...] format (drop width for now)
+    strokes = [[[p[0], p[1]] for p in s] for s in raw_strokes]
+    return jsonify(strokes=strokes)
+
+
 @app.route('/api/minimal-strokes-batch/<int:fid>', methods=['POST'])
 def api_minimal_strokes_batch(fid: int) -> Response | tuple[str, int]:
     """Generate minimal strokes for all characters of a font in batch.

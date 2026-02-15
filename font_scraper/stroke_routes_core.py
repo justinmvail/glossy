@@ -689,6 +689,121 @@ def api_verify_all_stream() -> Response:
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
+@app.route('/api/reject-failed-stream')
+def api_reject_failed_stream() -> Response:
+    """Re-verify all fonts and reject failures server-side via SSE.
+
+    Avoids sending large payloads from browser. Runs verification and
+    inserts rejections directly into the database in batches.
+
+    SSE Events:
+        progress: {"checked": N, "failed": N, "rejected": N, "total": N, "name": "..."}
+        done: {"done": true, "checked": N, "rejected": N}
+    """
+    from stroke_flask import format_sse_event, get_db_context
+
+    def generate():
+        with get_db_context() as db:
+            fonts = db.execute('''
+                SELECT f.id, f.name, f.file_path
+                FROM fonts f
+                WHERE f.id NOT IN (SELECT font_id FROM font_removals)
+                ORDER BY f.name
+            ''').fetchall()
+
+        total = len(fonts)
+        checked = 0
+        failed = 0
+        rejected = 0
+        batch = []
+        BATCH_SIZE = 500
+
+        yield format_sse_event({'type': 'start', 'total': total})
+
+        for font in fonts:
+            fid, name, file_path = font['id'], font['name'], font['file_path']
+            checked += 1
+
+            try:
+                fp = resolve_font_path(file_path)
+                pf = ImageFont.truetype(fp, 60)
+                result = _check_font_quality(pf, fp)
+
+                issues = []
+                if result['shape_count'] == 0:
+                    issues.append('render_failed')
+                else:
+                    if result['shape_count'] < MIN_SHAPE_COUNT or result['shape_count'] > MAX_SHAPE_COUNT:
+                        issues.append(f"shapes={result['shape_count']}")
+                    if result['max_width'] > MAX_WIDTH_RATIO:
+                        issues.append(f"width={round(result['max_width'] * 100, 1)}%")
+                    if result['l_has_hole']:
+                        issues.append('l_has_hole')
+                    if result['exclaim_shapes'] != EXPECTED_EXCLAMATION_SHAPES:
+                        issues.append(f"exclaim_shapes={result['exclaim_shapes']}")
+                    if result['case_mismatches']:
+                        issues.append(f"case_issues={','.join(result['case_mismatches'])}")
+
+                if issues:
+                    failed += 1
+                    details = json.dumps({
+                        'shapes': result['shape_count'],
+                        'max_width_pct': round(result['max_width'] * 100, 1),
+                        'l_has_hole': result['l_has_hole'],
+                        'exclaim_shapes': result['exclaim_shapes'],
+                        'case_mismatches': result.get('case_mismatches', []),
+                    })
+                    batch.append((fid, details))
+
+            except Exception as e:
+                failed += 1
+                batch.append((fid, json.dumps({'error': str(e)})))
+
+            # Flush batch to DB
+            if len(batch) >= BATCH_SIZE:
+                with get_db_context() as db:
+                    for b_fid, b_details in batch:
+                        db.execute(
+                            "INSERT OR IGNORE INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)",
+                            (b_fid, b_details)
+                        )
+                rejected += len(batch)
+                batch = []
+
+                yield format_sse_event({
+                    'type': 'progress',
+                    'checked': checked, 'failed': failed,
+                    'rejected': rejected, 'total': total,
+                    'name': name,
+                })
+
+            elif checked % 100 == 0:
+                yield format_sse_event({
+                    'type': 'progress',
+                    'checked': checked, 'failed': failed,
+                    'rejected': rejected, 'total': total,
+                    'name': name,
+                })
+
+        # Flush remaining
+        if batch:
+            with get_db_context() as db:
+                for b_fid, b_details in batch:
+                    db.execute(
+                        "INSERT OR IGNORE INTO font_removals (font_id, reason_id, details) VALUES (?, 8, ?)",
+                        (b_fid, b_details)
+                    )
+            rejected += len(batch)
+
+        yield format_sse_event({
+            'type': 'done', 'done': True,
+            'checked': checked, 'rejected': rejected,
+        })
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 @app.route('/api/reject-batch', methods=['POST'])
 def api_reject_batch() -> Response:
     """Reject multiple fonts by ID.
@@ -1556,7 +1671,7 @@ def api_find_duplicates() -> Response:
             total = len(fonts)
             yield f'data: {json.dumps({"status": "starting", "message": f"Computing hashes for {total} fonts...", "total": total})}\n\n'
 
-            dedup = FontDeduplicator(threshold=8)
+            dedup = FontDeduplicator(threshold=2)
             font_data = []
             base_dir = Path(__file__).parent
 

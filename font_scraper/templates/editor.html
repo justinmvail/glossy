@@ -187,6 +187,7 @@
       <button id="btnDiffVG" class="process" onclick="runDiffVG()" style="background:#2a4a5a"><kbd>Y</kbd> DiffVG Refine</button>
       <button id="btnThinPreview" class="process" onclick="showThinPreview()" style="background:#4a4a2a"><kbd>T</kbd> Thin Preview</button>
       <button id="btnMinimalStrokes" class="process" onclick="loadMinimalStrokes()" style="background:#4a2a4a"><kbd>U</kbd> Minimal Strokes</button>
+      <button id="btnRidgeTrace" class="process" onclick="runRidgeTrace()" style="background:#2a4a4a"><kbd>J</kbd> Ridge Trace</button>
       <button id="btnClearCache" class="process" onclick="clearShapeCache()" style="background:#5a2a2a">Clear Cache</button>
       <button id="btnAutoJoin" class="process" onclick="runAutoJoin()"><kbd>W</kbd> Auto-Join</button>
       <button id="btnReduce" class="process" onclick="runReduce()"><kbd>Q</kbd> Reduce</button>
@@ -1010,6 +1011,34 @@ function runSkeleton() {
       const pts = d.strokes.reduce((a, s) => a + s.length, 0);
       setStatus(`Skeleton: ${d.strokes.length} strokes, ${pts} points`);
       recordFrame(`Skeleton: ${d.strokes.length} strokes, ${pts} pts`);
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+    stopRecording();
+  });
+}
+
+function runRidgeTrace() {
+  if (state.strokes.length > 0 && !confirm('Replace existing strokes with ridge trace?')) return;
+  pushUndo();
+  startRecording('Ridge Trace');
+  setStatus('Ridge tracing...');
+  fetch(`/api/ridge-trace/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: '{}'
+  }).then(r => r.json()).then(d => {
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      const pts = d.strokes.reduce((a, s) => a + s.length, 0);
+      setStatus(`Ridge: ${d.strokes.length} strokes, ${pts} points`);
+      recordFrame(`Ridge: ${d.strokes.length} strokes, ${pts} pts`);
     } else {
       setStatus('Error: ' + (d.error || 'unknown'));
     }
@@ -2743,6 +2772,7 @@ document.addEventListener('keydown', e => {
     case 'w': runAutoJoin(); break;
     case 'q': runReduce(); break;
     case 'y': runDiffVG(); break;
+    case 'J': runRidgeTrace(); break;
     case 't': if (!e.ctrlKey) showThinPreview(); break;
     case 'u': loadMinimalStrokes(); break;
     case 'p': togglePlay(); break;
