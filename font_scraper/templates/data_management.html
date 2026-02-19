@@ -282,6 +282,10 @@
 
   <h3 style="color: #888; font-size: 14px; margin-top: 20px;">Import</h3>
   <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+    <button class="btn primary" id="importDefaultBtn" onclick="importDefault()" style="display: none;">Load Default Export</button>
+    <span id="defaultExportInfo" style="color: #888; font-size: 13px;"></span>
+  </div>
+  <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
     <input type="file" id="importFile" accept=".zip" style="display: none;" onchange="updateImportButton()">
     <button class="btn" onclick="document.getElementById('importFile').click()">Choose File</button>
     <span id="importFileName" style="color: #888;">No file chosen</span>
@@ -1226,6 +1230,61 @@ async function importFonts() {
   importBtn.textContent = 'Import';
 }
 
+async function checkDefaultExport() {
+  try {
+    const resp = await fetch('/api/default-export-exists');
+    const data = await resp.json();
+    const btn = document.getElementById('importDefaultBtn');
+    const info = document.getElementById('defaultExportInfo');
+
+    if (data.exists) {
+      btn.style.display = 'inline-block';
+      const partsText = data.parts > 1 ? `${data.parts} parts, ` : '';
+      info.textContent = `(${partsText}${data.size_mb} MB)`;
+    } else {
+      info.textContent = 'No default export found in exports/';
+    }
+  } catch (e) {
+    // Ignore
+  }
+}
+
+async function importDefault() {
+  const btn = document.getElementById('importDefaultBtn');
+  const logContainer = document.getElementById('importLog');
+
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  logContainer.style.display = 'block';
+  logContainer.innerHTML = '';
+
+  addLog('importLog', 'Importing from default export...', 'info');
+
+  try {
+    const resp = await fetch('/api/import-default', {method: 'POST'});
+    const result = await resp.json();
+
+    if (result.ok) {
+      addLog('importLog', 'Import complete!', 'success');
+      addLog('importLog', `  Imported: ${result.imported} fonts`, 'success');
+      if (result.skipped > 0) {
+        addLog('importLog', `  Skipped: ${result.skipped} fonts (already exist)`, 'warning');
+      }
+      if (result.errors > 0) {
+        addLog('importLog', `  Errors: ${result.errors} fonts`, 'error');
+      }
+      setTimeout(() => location.reload(), 2000);
+    } else {
+      addLog('importLog', `Error: ${result.error}`, 'error');
+    }
+  } catch (e) {
+    addLog('importLog', `Error: ${e}`, 'error');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Load Default Export';
+}
+
 // =============================================================================
 // Initialize
 // =============================================================================
@@ -1235,6 +1294,9 @@ startPolling();
 
 // Load accepted font count for export section
 loadAcceptedFontCount();
+
+// Check for default export
+checkDefaultExport();
 
 // Update initial stats
 document.getElementById('totalFonts').textContent = '{{ total_fonts }}';

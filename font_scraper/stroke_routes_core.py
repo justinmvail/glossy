@@ -2456,6 +2456,136 @@ def api_import_fonts() -> Response:
         return error_response(f"Import failed: {str(e)}", 500)
 
 
+@app.route('/api/import-default', methods=['POST'])
+def api_import_default() -> Response:
+    """Import fonts from default export ZIPs in exports/.
+
+    Looks for exports/fonts_export_part*.zip (split archives) or
+    exports/fonts_export_default.zip (single archive) and imports all.
+
+    Returns:
+        flask.Response: JSON with import statistics.
+    """
+    from stroke_flask import get_db_context
+
+    base_dir = Path(__file__).parent
+    exports_dir = base_dir / 'exports'
+
+    # Find zip files: prefer split parts, fall back to single default
+    zip_files = sorted(exports_dir.glob('fonts_export_part*.zip'))
+    if not zip_files:
+        default_zip = exports_dir / 'fonts_export_default.zip'
+        if default_zip.exists():
+            zip_files = [default_zip]
+
+    if not zip_files:
+        return error_response("No export ZIPs found in exports/", 404)
+
+    imported = 0
+    skipped = 0
+    errors = 0
+
+    try:
+        for zip_path in zip_files:
+            logger.info("Importing from %s", zip_path.name)
+
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                manifest = None
+                if 'manifest.json' in zf.namelist():
+                    manifest_data = zf.read('manifest.json')
+                    manifest = json.loads(manifest_data)
+
+                font_files = [
+                    name for name in zf.namelist()
+                    if name.startswith('fonts/') and
+                    name.lower().endswith(('.ttf', '.otf', '.woff', '.woff2'))
+                ]
+
+                manifest_lookup = {}
+                if manifest and manifest.get('fonts'):
+                    for font_meta in manifest['fonts']:
+                        manifest_lookup[font_meta['file_path']] = font_meta
+
+                with get_db_context() as db:
+                    for archive_path in font_files:
+                        try:
+                            dest_path = base_dir / archive_path
+                            dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+                            if not dest_path.exists():
+                                with zf.open(archive_path) as src:
+                                    with open(dest_path, 'wb') as dst:
+                                        dst.write(src.read())
+
+                            if archive_path in manifest_lookup:
+                                meta = manifest_lookup[archive_path]
+                                name = meta['name']
+                                source = meta['source']
+                                category = meta.get('category')
+                                url = meta.get('url')
+                            else:
+                                parts = archive_path.split('/')
+                                source = parts[1] if len(parts) > 2 else 'unknown'
+                                name = dest_path.stem
+                                category = None
+                                url = None
+
+                            existing = db.execute(
+                                "SELECT id FROM fonts WHERE file_path = ?",
+                                (archive_path,)
+                            ).fetchone()
+
+                            if existing:
+                                skipped += 1
+                                continue
+
+                            db.execute("""
+                                INSERT INTO fonts (name, file_path, source, category, url)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (name, archive_path, source, category, url))
+                            imported += 1
+
+                        except Exception as e:
+                            logger.warning("Failed to import %s: %s", archive_path, e)
+                            errors += 1
+
+        logger.info("Default import complete: %d imported, %d skipped, %d errors",
+                    imported, skipped, errors)
+
+        return success_response(imported=imported, skipped=skipped, errors=errors)
+
+    except zipfile.BadZipFile:
+        return error_response("Export ZIP file is corrupt", 400)
+    except Exception as e:
+        logger.error("Default import failed: %s", e)
+        return error_response(f"Import failed: {str(e)}", 500)
+
+
+@app.route('/api/default-export-exists')
+def api_default_export_exists() -> Response:
+    """Check if default export ZIPs exist in exports/.
+
+    Returns:
+        flask.Response: JSON with exists flag and file info.
+    """
+    base_dir = Path(__file__).parent
+    exports_dir = base_dir / 'exports'
+
+    parts = sorted(exports_dir.glob('fonts_export_part*.zip'))
+    if parts:
+        total_mb = sum(p.stat().st_size for p in parts) / (1024 * 1024)
+        return success_response(
+            exists=True, parts=len(parts), size_mb=round(total_mb, 1)
+        )
+
+    default_zip = exports_dir / 'fonts_export_default.zip'
+    if default_zip.exists():
+        size_mb = default_zip.stat().st_size / (1024 * 1024)
+        return success_response(exists=True, parts=1, size_mb=round(size_mb, 1))
+
+    return success_response(exists=False)
+
+
 @app.route('/api/accepted-font-count')
 def api_accepted_font_count() -> Response:
     """Get count of accepted fonts (not rejected).
