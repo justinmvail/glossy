@@ -14,40 +14,129 @@ CKPT_DIR="$SCRIPT_DIR/docker/stroke_model/checkpoints"
 TRAIN_LOG="$LOG_DIR/train.log"
 BUILD_LOG="$LOG_DIR/build.log"
 STATUS_FILE="$LOG_DIR/status.json"
+CONTAINER_NAME="stroke-model-train"
 
-print_status() {
-    echo "═══════════════════════════════════════════════════"
-    echo "  STROKE MODEL TRAINING MONITOR"
-    echo "═══════════════════════════════════════════════════"
-    echo ""
+get_training_logs() {
+    # Try docker logs first (works for running container), fall back to log file
+    if docker ps --filter "name=$CONTAINER_NAME" --format '{{.ID}}' 2>/dev/null | grep -q .; then
+        docker logs "$CONTAINER_NAME" 2>&1
+    elif [ -f "$TRAIN_LOG" ]; then
+        cat "$TRAIN_LOG"
+    fi
+}
 
-    # Status file
-    if [ -f "$STATUS_FILE" ]; then
-        stage=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('stage','?'))" 2>/dev/null || echo "?")
-        msg=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('message','?'))" 2>/dev/null || echo "?")
-        updated=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('updated_at','?'))" 2>/dev/null || echo "?")
-        echo "  Stage:   $stage"
-        echo "  Status:  $msg"
-        echo "  Updated: $updated"
-    else
-        echo "  No status file found. Training may not have started."
+parse_progress() {
+    # Extract epoch/step progress from latest log line
+    local last_line
+    last_line=$(get_training_logs | grep "Epoch.*Step" | tail -1)
+
+    if [ -z "$last_line" ]; then
+        echo "  Progress: waiting for first step..."
+        return
     fi
 
+    # Parse: Epoch 0 Step 1900/50336 | Loss: 28.17
+    local epoch step total_steps loss
+    epoch=$(echo "$last_line" | grep -oP 'Epoch \K[0-9]+')
+    step=$(echo "$last_line" | grep -oP 'Step \K[0-9]+')
+    total_steps=$(echo "$last_line" | grep -oP 'Step [0-9]+/\K[0-9]+')
+    loss=$(echo "$last_line" | grep -oP 'Loss: \K[0-9.]+')
+
+    # Get total epochs from status file or default
+    local total_epochs=100
+    if [ -f "$STATUS_FILE" ]; then
+        total_epochs=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('epochs', 100))" 2>/dev/null || echo 100)
+    fi
+
+    # Calculate percentages
+    local epoch_pct=0 total_pct=0
+    if [ -n "$step" ] && [ -n "$total_steps" ] && [ "$total_steps" -gt 0 ]; then
+        epoch_pct=$(python3 -c "print(f'{100*$step/$total_steps:.1f}')")
+        total_pct=$(python3 -c "print(f'{100*($epoch*$total_steps+$step)/($total_epochs*$total_steps):.2f}')")
+    fi
+
+    # Estimate time remaining
+    local start_line eta_str=""
+    start_line=$(get_training_logs | grep "Starting training" | tail -1)
+    if [ -n "$start_line" ]; then
+        local start_ts
+        start_ts=$(echo "$start_line" | grep -oP '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+        local last_ts
+        last_ts=$(echo "$last_line" | grep -oP '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+        if [ -n "$start_ts" ] && [ -n "$last_ts" ]; then
+            eta_str=$(python3 -c "
+from datetime import datetime
+start = datetime.strptime('$start_ts', '%Y-%m-%d %H:%M:%S')
+now = datetime.strptime('$last_ts', '%Y-%m-%d %H:%M:%S')
+elapsed = (now - start).total_seconds()
+pct = ($epoch * $total_steps + $step) / ($total_epochs * $total_steps)
+if pct > 0:
+    total_est = elapsed / pct
+    remain = total_est - elapsed
+    hours = int(remain // 3600)
+    mins = int((remain % 3600) // 60)
+    elapsed_h = int(elapsed // 3600)
+    elapsed_m = int((elapsed % 3600) // 60)
+    print(f'{elapsed_h}h{elapsed_m:02d}m elapsed, ~{hours}h{mins:02d}m remaining')
+else:
+    print('calculating...')
+" 2>/dev/null || echo "")
+        fi
+    fi
+
+    # Display
+    echo "  Epoch:    $epoch / $total_epochs  (step $step / $total_steps)"
+
+    # Progress bar for current epoch
+    local bar_width=30
+    local filled=$(python3 -c "print(int($epoch_pct / 100 * $bar_width))")
+    local empty=$((bar_width - filled))
+    local bar=$(printf '█%.0s' $(seq 1 $filled 2>/dev/null) ; printf '░%.0s' $(seq 1 $empty 2>/dev/null))
+    echo "  Epoch:    [$bar] ${epoch_pct}%"
+
+    # Progress bar for overall
+    filled=$(python3 -c "print(int(float($total_pct) / 100 * $bar_width))")
+    empty=$((bar_width - filled))
+    bar=$(printf '█%.0s' $(seq 1 $filled 2>/dev/null) ; printf '░%.0s' $(seq 1 $empty 2>/dev/null))
+    echo "  Overall:  [$bar] ${total_pct}%"
+
+    echo "  Loss:     $loss"
+    if [ -n "$eta_str" ]; then
+        echo "  Time:     $eta_str"
+    fi
+}
+
+print_status() {
+    echo "═══════════════════════════════════════════════════════"
+    echo "  STROKE MODEL TRAINING MONITOR"
+    echo "═══════════════════════════════════════════════════════"
     echo ""
 
     # Docker container check
-    if docker ps --filter name=stroke-model-train --format '{{.Status}}' 2>/dev/null | grep -q .; then
-        container_status=$(docker ps --filter name=stroke-model-train --format '{{.Status}}')
+    if docker ps --filter "name=$CONTAINER_NAME" --format '{{.Status}}' 2>/dev/null | grep -q .; then
+        container_status=$(docker ps --filter "name=$CONTAINER_NAME" --format '{{.Status}}')
         echo "  Container: RUNNING ($container_status)"
     else
-        echo "  Container: not running"
+        echo "  Container: NOT RUNNING"
+        # Check if it exited
+        local exit_status
+        exit_status=$(docker ps -a --filter "name=$CONTAINER_NAME" --format '{{.Status}}' 2>/dev/null | head -1)
+        if [ -n "$exit_status" ]; then
+            echo "  Last status: $exit_status"
+        fi
     fi
 
     # GPU usage
     if command -v nvidia-smi &>/dev/null; then
-        gpu_util=$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null || echo "?,?,?")
-        echo "  GPU:       $gpu_util (util%, mem used MB, mem total MB)"
+        gpu_util=$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo "?,?,?,?")
+        IFS=',' read -r util mem_used mem_total temp <<< "$gpu_util"
+        echo "  GPU:       ${util}% util | ${mem_used}/${mem_total} MB | ${temp}°C"
     fi
+
+    echo ""
+
+    # Training progress
+    parse_progress
 
     echo ""
 
@@ -66,20 +155,18 @@ print_status() {
 
     echo ""
 
-    # Last training lines
-    if [ -f "$TRAIN_LOG" ]; then
-        lines=$(wc -l < "$TRAIN_LOG")
-        echo "  Train log: $lines lines ($TRAIN_LOG)"
-        echo "  ─── Last 10 lines ───"
-        tail -10 "$TRAIN_LOG" | sed 's/^/  /'
-    elif [ -f "$BUILD_LOG" ]; then
-        echo "  Build log (training not started yet):"
-        echo "  ─── Last 5 lines ───"
-        tail -5 "$BUILD_LOG" | sed 's/^/  /'
+    # Loss breakdown from last log line
+    local last_line
+    last_line=$(get_training_logs | grep "Epoch.*Step" | tail -1)
+    if [ -n "$last_line" ]; then
+        echo "  ─── Loss Breakdown ───"
+        echo "$last_line" | grep -oP '(coverage|outside|overlap|smoothness|existence)=[0-9.]+' | while read -r component; do
+            printf "    %-14s %s\n" "$(echo "$component" | cut -d= -f1):" "$(echo "$component" | cut -d= -f2)"
+        done
     fi
 
     echo ""
-    echo "═══════════════════════════════════════════════════"
+    echo "═══════════════════════════════════════════════════════"
 }
 
 case "${1:-}" in
@@ -91,11 +178,12 @@ case "${1:-}" in
         done
         ;;
     --tail)
-        if [ -f "$TRAIN_LOG" ]; then
+        if docker ps --filter "name=$CONTAINER_NAME" --format '{{.ID}}' 2>/dev/null | grep -q .; then
+            docker logs -f "$CONTAINER_NAME" 2>&1
+        elif [ -f "$TRAIN_LOG" ]; then
             tail -f "$TRAIN_LOG"
         else
-            echo "No train log yet. Watching build log..."
-            tail -f "$BUILD_LOG" 2>/dev/null || echo "No logs found."
+            echo "No training logs found."
         fi
         ;;
     *)

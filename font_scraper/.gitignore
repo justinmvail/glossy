@@ -11,3 +11,8 @@ summary.json
 
 # Test outputs
 test_*/
+
+# ML training artifacts
+docker/stroke_model/checkpoints/
+docker/stroke_model/glyph_cache/
+.coverage

@@ -1,0 +1,6168 @@
+{
+  "exported_at": "2026-02-18T19:53:08.634974",
+  "part": 3,
+  "total_parts": 3,
+  "font_count": 880,
+  "fonts": [
+    {
+      "name": "Teutonic",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Teutonic.ttf",
+      "url": "https://www.dafont.com/teutonic2.font"
+    },
+    {
+      "name": "Texas",
+      "source": "dafont",
+      "category": "Fancy - Groovy",
+      "file_path": "fonts/dafont/Texas.ttf",
+      "url": "https://www.dafont.com/texas-3.font"
+    },
+    {
+      "name": "Textura Belgica",
+      "source": "dafont",
+      "category": "Bitmap - Pixel",
+      "file_path": "fonts/dafont/TexturaBelgica.ttf",
+      "url": "https://www.dafont.com/textura-belgica.font"
+    },
+    {
+      "name": "ThaMbriN",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ThaMbriN.ttf",
+      "url": null
+    },
+    {
+      "name": "Thankies",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Thankies.otf",
+      "url": "https://www.dafont.com/thankies.font"
+    },
+    {
+      "name": "The ART",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The ART.otf",
+      "url": null
+    },
+    {
+      "name": "The August",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/The August.ttf",
+      "url": "https://www.dafont.com/the-august.font"
+    },
+    {
+      "name": "The Bandido",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/The Bandido.otf",
+      "url": "https://www.dafont.com/the-bandido.font"
+    },
+    {
+      "name": "The Bangles",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Bangles.otf",
+      "url": null
+    },
+    {
+      "name": "The Bangles",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/The Bangles.ttf",
+      "url": "https://www.dafont.com/the-bangles.font"
+    },
+    {
+      "name": "The Bartender",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/The Bartender.otf",
+      "url": "https://www.dafont.com/the-bartender.font"
+    },
+    {
+      "name": "The Bravery",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/The Bravery.ttf",
+      "url": "https://www.dafont.com/the-bravery.font"
+    },
+    {
+      "name": "The Brooklyn",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/The Brooklyn.otf",
+      "url": "https://www.dafont.com/the-brooklyn.font"
+    },
+    {
+      "name": "The California",
+      "source": "dafont",
+      "category": "Script - Calligraphy",
+      "file_path": "fonts/dafont/The California.ttf",
+      "url": "https://www.dafont.com/the-california-2.font"
+    },
+    {
+      "name": "The Dark Knight",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/The Dark Knight.otf",
+      "url": "https://www.dafont.com/the-dark-knight.font"
+    },
+    {
+      "name": "The Democratic Vampires",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/The Democratic Vampires.ttf",
+      "url": "https://www.dafont.com/the-democratic-vampires.font"
+    },
+    {
+      "name": "The Destiny",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/The Destiny.ttf",
+      "url": "https://www.dafont.com/the-destiny.font"
+    },
+    {
+      "name": "The French Quarter",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/The French Quarter.otf",
+      "url": "https://www.dafont.com/the-french-quarter.font"
+    },
+    {
+      "name": "The Futurist",
+      "source": "dafont",
+      "category": "Techno - Square",
+      "file_path": "fonts/dafont/The Futurist.otf",
+      "url": "https://www.dafont.com/the-futurist.font"
+    },
+    {
+      "name": "The Garland Script Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Garland Script Demo.otf",
+      "url": null
+    },
+    {
+      "name": "The Genz",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/The Genz.ttf",
+      "url": "https://www.dafont.com/the-genz.font"
+    },
+    {
+      "name": "The Golden Blade",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/The Golden Blade.ttf",
+      "url": "https://www.dafont.com/the-golden-blade.font"
+    },
+    {
+      "name": "The Goldies DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Goldies DEMO.ttf",
+      "url": null
+    },
+    {
+      "name": "The Gun Smoke St",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Gun Smoke St.ttf",
+      "url": null
+    },
+    {
+      "name": "The Hamburg Script - DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Hamburg Script - DEMO.otf",
+      "url": null
+    },
+    {
+      "name": "The Hoca",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/The Hoca.ttf",
+      "url": "https://www.dafont.com/the-hoca.font"
+    },
+    {
+      "name": "The Jungle Beast",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/The Jungle Beast.ttf",
+      "url": "https://www.dafont.com/the-jungle-beast.font"
+    },
+    {
+      "name": "The Kingston 2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Kingston 2.ttf",
+      "url": null
+    },
+    {
+      "name": "The Lithium Shop",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/The Lithium Shop.ttf",
+      "url": "https://www.dafont.com/the-lithium-shop.font"
+    },
+    {
+      "name": "The Machine Gun",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/The Machine Gun.ttf",
+      "url": "https://www.dafont.com/the-machine-gun.font"
+    },
+    {
+      "name": "The Missus Hand Normal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Missus Hand Normal.ttf",
+      "url": null
+    },
+    {
+      "name": "The Morshine",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/The Morshine.otf",
+      "url": "https://www.dafont.com/the-morshine.font"
+    },
+    {
+      "name": "The Muppet Font",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Muppet Font.otf",
+      "url": null
+    },
+    {
+      "name": "The New Rancho",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/The New Rancho.otf",
+      "url": "https://www.dafont.com/the-new-rancho.font"
+    },
+    {
+      "name": "The Night",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/The Night.otf",
+      "url": "https://www.dafont.com/the-night.font"
+    },
+    {
+      "name": "The Quest of Discoveries",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/The Quest of Discoveries.ttf",
+      "url": "https://www.dafont.com/the-quest-of-discoveries.font"
+    },
+    {
+      "name": "The Rift",
+      "source": "dafont",
+      "category": "Techno - LCD",
+      "file_path": "fonts/dafont/The Rift.otf",
+      "url": "https://www.dafont.com/the-rift.font"
+    },
+    {
+      "name": "The Shoulder",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/The Shoulder.otf",
+      "url": "https://www.dafont.com/the-shoulder.font"
+    },
+    {
+      "name": "The Simple Life",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/The Simple Life.otf",
+      "url": "https://www.dafont.com/the-simple-life.font"
+    },
+    {
+      "name": "The Sound",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/The Sound.otf",
+      "url": "https://www.dafont.com/the-sound.font"
+    },
+    {
+      "name": "The Spooky Night",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/The Spooky Night.ttf",
+      "url": "https://www.dafont.com/the-spooky-night.font"
+    },
+    {
+      "name": "The Theatre Brush Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Theatre Brush Demo.ttf",
+      "url": null
+    },
+    {
+      "name": "The Wanters DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The Wanters DEMO.ttf",
+      "url": null
+    },
+    {
+      "name": "The Writer",
+      "source": "dafont",
+      "category": "Script - School",
+      "file_path": "fonts/dafont/The Writer.ttf",
+      "url": "https://www.dafont.com/the-writer.font"
+    },
+    {
+      "name": "The-Dinosaur",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The-Dinosaur.ttf",
+      "url": null
+    },
+    {
+      "name": "The-Youthic",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/The-Youthic.otf",
+      "url": null
+    },
+    {
+      "name": "TheArchiesDEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/TheArchiesDEMO.otf",
+      "url": null
+    },
+    {
+      "name": "The Croach",
+      "source": "dafont",
+      "category": "Fancy - Destroy",
+      "file_path": "fonts/dafont/TheCroach.ttf",
+      "url": "https://www.dafont.com/thecroach.font"
+    },
+    {
+      "name": "The Hotelio",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/TheHotelio.ttf",
+      "url": "https://www.dafont.com/the-hotelio.font"
+    },
+    {
+      "name": "The World Is Yours",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/TheWorldIsYours.ttf",
+      "url": "https://www.dafont.com/the-world-is-yours.font"
+    },
+    {
+      "name": "Thelma-PersonalUsed",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Thelma-PersonalUsed.otf",
+      "url": null
+    },
+    {
+      "name": "Thempo New St",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Thempo New St.ttf",
+      "url": "https://www.dafont.com/thempo-new-st.font"
+    },
+    {
+      "name": "Therhog",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Therhog.ttf",
+      "url": "https://www.dafont.com/therhog.font"
+    },
+    {
+      "name": "Thesis",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Thesis.otf",
+      "url": "https://www.dafont.com/thesis.font"
+    },
+    {
+      "name": "Thirty Seconds",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/ThirtySeconds.ttf",
+      "url": "https://www.dafont.com/thirty-seconds.font"
+    },
+    {
+      "name": "ThornyRock PERSONAL USE ONLY!",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ThornyRock PERSONAL USE ONLY!.otf",
+      "url": null
+    },
+    {
+      "name": "Thorse",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Thorse.otf",
+      "url": "https://www.dafont.com/thorse.font"
+    },
+    {
+      "name": "Throw My Hands Up in the Air",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/ThrowMyHandsUpintheAir.ttf",
+      "url": "https://www.dafont.com/throw-my-hands-up-in-the-air.font"
+    },
+    {
+      "name": "Thurdy Sicks_PersonalUseOnly",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Thurdy Sicks_PersonalUseOnly.ttf",
+      "url": null
+    },
+    {
+      "name": "Tidy Hand",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/TidyHand.ttf",
+      "url": "https://www.dafont.com/tidy-hand.font"
+    },
+    {
+      "name": "Tiempos Modernos",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Tiempos Modernos.ttf",
+      "url": "https://www.dafont.com/tiempos-modernos.font"
+    },
+    {
+      "name": "Tiffany Laurence",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Tiffany Laurence.ttf",
+      "url": "https://www.dafont.com/tiffany-laurence.font"
+    },
+    {
+      "name": "Tight Writer",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/TightWriter.otf",
+      "url": "https://www.dafont.com/tight-writer.font"
+    },
+    {
+      "name": "Tiki Tropic",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Tiki Tropic.ttf",
+      "url": "https://www.dafont.com/tiki-tropic.font"
+    },
+    {
+      "name": "Timeless",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Timeless.ttf",
+      "url": "https://www.dafont.com/timeless.font"
+    },
+    {
+      "name": "Times New Romance",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Times New Romance.otf",
+      "url": null
+    },
+    {
+      "name": "Times New Romance",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Times New Romance.ttf",
+      "url": "https://www.dafont.com/times-new-romance2.font"
+    },
+    {
+      "name": "TimesZoo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/TimesZoo.ttf",
+      "url": null
+    },
+    {
+      "name": "Timtastic !",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Timtastic!.ttf",
+      "url": "https://www.dafont.com/timtastic.font"
+    },
+    {
+      "name": "Tintilla",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Tintilla.ttf",
+      "url": "https://www.dafont.com/tintilla.font"
+    },
+    {
+      "name": "Tjackluder",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Tjackluder.ttf",
+      "url": "https://www.dafont.com/tjackluder.font"
+    },
+    {
+      "name": "Tokyo Street",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/TokyoStreet.ttf",
+      "url": "https://www.dafont.com/tokyo-street.font"
+    },
+    {
+      "name": "Tomar",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Tomar.ttf",
+      "url": "https://www.dafont.com/tomar.font"
+    },
+    {
+      "name": "Tomsk",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Tomsk.ttf",
+      "url": "https://www.dafont.com/tomsk.font"
+    },
+    {
+      "name": "Too Freakin Cute Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Too Freakin Cute Demo.ttf",
+      "url": null
+    },
+    {
+      "name": "Too Good To Be True",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Too Good To Be True.otf",
+      "url": null
+    },
+    {
+      "name": "Too Good To Be True",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Too Good To Be True.ttf",
+      "url": "https://www.dafont.com/too-good-to-be-true.font"
+    },
+    {
+      "name": "Top Modern",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Top Modern.otf",
+      "url": null
+    },
+    {
+      "name": "Top Modern",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Top Modern.ttf",
+      "url": "https://www.dafont.com/top-modern.font"
+    },
+    {
+      "name": "Topuz",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/Topuz.ttf",
+      "url": "https://www.dafont.com/topuz.font"
+    },
+    {
+      "name": "Tork Bd It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Tork Bd It.otf",
+      "url": null
+    },
+    {
+      "name": "Tork Bd",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Tork Bd.otf",
+      "url": null
+    },
+    {
+      "name": "Tork Rg It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Tork Rg It.otf",
+      "url": null
+    },
+    {
+      "name": "Tork Rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Tork Rg.otf",
+      "url": null
+    },
+    {
+      "name": "Tough Art",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/ToughArt.ttf",
+      "url": "https://www.dafont.com/tough-art.font"
+    },
+    {
+      "name": "TovariSans",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/TovariSans.otf",
+      "url": null
+    },
+    {
+      "name": "Tower Print",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Tower Print.ttf",
+      "url": "https://www.dafont.com/tower-print.font"
+    },
+    {
+      "name": "Toxic Pumpkin",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Toxic Pumpkin.ttf",
+      "url": "https://www.dafont.com/toxic-pumpkin.font"
+    },
+    {
+      "name": "Travel Journal",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Travel Journal.ttf",
+      "url": "https://www.dafont.com/travel-journal.font"
+    },
+    {
+      "name": "Traveling Typewriter",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/TravelingTypewriter.ttf",
+      "url": "https://www.dafont.com/traveling-typewriter.font"
+    },
+    {
+      "name": "Travelista",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/Travelista.ttf",
+      "url": "https://www.dafont.com/travelista-2.font"
+    },
+    {
+      "name": "Trebble",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Trebble.ttf",
+      "url": "https://www.dafont.com/trebble.font"
+    },
+    {
+      "name": "Trees Of Happiness",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Trees Of Happiness.ttf",
+      "url": "https://www.dafont.com/trees-of-happiness.font"
+    },
+    {
+      "name": "Tricky Hearts",
+      "source": "dafont",
+      "category": "Basic - Sans Serif",
+      "file_path": "fonts/dafont/Tricky Hearts.ttf",
+      "url": "https://www.dafont.com/tricky-hearts.font"
+    },
+    {
+      "name": "Tricky Night",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Tricky Night.otf",
+      "url": "https://www.dafont.com/tricky-night-2.font"
+    },
+    {
+      "name": "Tricky Night",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Tricky Night.ttf",
+      "url": "https://www.dafont.com/tricky-night.font"
+    },
+    {
+      "name": "Triforce",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Triforce.ttf",
+      "url": "https://www.dafont.com/triforce.font"
+    },
+    {
+      "name": "Trinstam",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/Trinstam.ttf",
+      "url": "https://www.dafont.com/trinstam.font"
+    },
+    {
+      "name": "Triumph wheels rough",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Triumph wheels rough.ttf",
+      "url": null
+    },
+    {
+      "name": "Tropic Fresh",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Tropic Fresh.ttf",
+      "url": "https://www.dafont.com/tropic-fresh.font"
+    },
+    {
+      "name": "Trubble",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Trubble.ttf",
+      "url": "https://www.dafont.com/trubble.font"
+    },
+    {
+      "name": "Trump Town Pro",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Trump Town Pro.otf",
+      "url": "https://www.dafont.com/trump-town-pro.font"
+    },
+    {
+      "name": "Trust Issue",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Trust Issue.ttf",
+      "url": "https://www.dafont.com/trust-issue.font"
+    },
+    {
+      "name": "Tulisan Tanganku",
+      "source": "dafont",
+      "category": "Foreign Look - Various",
+      "file_path": "fonts/dafont/Tulisan_Tanganku.ttf",
+      "url": "https://www.dafont.com/tulisan-tanganku.font"
+    },
+    {
+      "name": "Tums Twirl",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/TumsTwirl.ttf",
+      "url": "https://www.dafont.com/tums-twirl.font"
+    },
+    {
+      "name": "Twist Love",
+      "source": "dafont",
+      "category": "Basic - Sans Serif",
+      "file_path": "fonts/dafont/Twist Love.ttf",
+      "url": "https://www.dafont.com/twist-love.font"
+    },
+    {
+      "name": "Twister Fusion 1.0",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Twister Fusion 1.0.ttf",
+      "url": null
+    },
+    {
+      "name": "Typetys",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Typetys.ttf",
+      "url": "https://www.dafont.com/typetys.font"
+    },
+    {
+      "name": "Typewriter from 286",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Typewriter from 286.ttf",
+      "url": "https://www.dafont.com/typewriter-from-286.font"
+    },
+    {
+      "name": "Typewriter Hand",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/TypewriterHand.ttf",
+      "url": "https://www.dafont.com/typewriterhand.font"
+    },
+    {
+      "name": "Typey",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Typey.otf",
+      "url": null
+    },
+    {
+      "name": "Typical ABC",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Typical ABC.otf",
+      "url": "https://www.dafont.com/typical-abc.font"
+    },
+    {
+      "name": "Typist's Pseudonym",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Typist's Pseudonym.otf",
+      "url": "https://www.dafont.com/typist-s-pseudonym.font"
+    },
+    {
+      "name": "Typistys RORRIM",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Typistys RORRIM.ttf",
+      "url": null
+    },
+    {
+      "name": "Typistys",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Typistys.ttf",
+      "url": "https://www.dafont.com/typistys.font"
+    },
+    {
+      "name": "Typo Grotesk Rounded Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Typo Grotesk Rounded Demo.otf",
+      "url": null
+    },
+    {
+      "name": "Typo Snowy_BW_Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Typo Snowy_BW_Demo.otf",
+      "url": null
+    },
+    {
+      "name": "TypoGraphica_demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/TypoGraphica_demo.otf",
+      "url": null
+    },
+    {
+      "name": "TypoSlab_demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/TypoSlab_demo.otf",
+      "url": null
+    },
+    {
+      "name": "Typography",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Typography.otf",
+      "url": "https://www.dafont.com/typography-2.font"
+    },
+    {
+      "name": "UBahn",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/UBahn.ttf",
+      "url": "https://www.dafont.com/ubahn.font"
+    },
+    {
+      "name": "UNDER STAND",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/UNDER STAND.otf",
+      "url": null
+    },
+    {
+      "name": "UNDO35__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/UNDO35__.TTF",
+      "url": null
+    },
+    {
+      "name": "UNDO36__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/UNDO36__.TTF",
+      "url": null
+    },
+    {
+      "name": "UPCHARGE",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/UPCHARGE.ttf",
+      "url": null
+    },
+    {
+      "name": "URANIA CZECH",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/URANIA CZECH.ttf",
+      "url": null
+    },
+    {
+      "name": "USENET_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/USENET_.ttf",
+      "url": null
+    },
+    {
+      "name": "Uasik Deh",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/UasikDeh.ttf",
+      "url": "https://www.dafont.com/uasik-deh.font"
+    },
+    {
+      "name": "Ugly Hand Writing",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/UglyHandWriting.ttf",
+      "url": "https://www.dafont.com/ugly-hand-writing.font"
+    },
+    {
+      "name": "UglyQua",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/UglyQua.ttf",
+      "url": "https://www.dafont.com/uglyqua.font"
+    },
+    {
+      "name": "Ujiya Handwriting",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Ujiya Handwriting.otf",
+      "url": "https://www.dafont.com/ujiya-handwriting.font"
+    },
+    {
+      "name": "Ukiran",
+      "source": "dafont",
+      "category": "Foreign Look - Various",
+      "file_path": "fonts/dafont/Ukiran.ttf",
+      "url": "https://www.dafont.com/ukiran.font"
+    },
+    {
+      "name": "Uliamesta",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Uliamesta.ttf",
+      "url": "https://www.dafont.com/uliamesta.font"
+    },
+    {
+      "name": "Ultimate Gear",
+      "source": "dafont",
+      "category": "Techno - Square",
+      "file_path": "fonts/dafont/Ultimate Gear.otf",
+      "url": "https://www.dafont.com/ultimate-gear.font"
+    },
+    {
+      "name": "Ultra Style 1312",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/UltraStyle1312.ttf",
+      "url": "https://www.dafont.com/ultrastyle1312.font"
+    },
+    {
+      "name": "Umbrella Man DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Umbrella Man DEMO.otf",
+      "url": null
+    },
+    {
+      "name": "Umeko Plum",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Umeko Plum.otf",
+      "url": "https://www.dafont.com/umeko-plum.font"
+    },
+    {
+      "name": "Uncensored",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/Uncensored.ttf",
+      "url": "https://www.dafont.com/uncensored.font"
+    },
+    {
+      "name": "Uncertain Sans",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Uncertain_Sans.ttf",
+      "url": "https://www.dafont.com/uncertain-sans.font"
+    },
+    {
+      "name": "Under My Umbrella DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Under My Umbrella DEMO.otf",
+      "url": null
+    },
+    {
+      "name": "Underdog",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Underdog.otf",
+      "url": "https://www.dafont.com/underdog.font"
+    },
+    {
+      "name": "Undergod -Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Undergod -Demo.ttf",
+      "url": null
+    },
+    {
+      "name": "Understanding",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Understanding.otf",
+      "url": "https://www.dafont.com/understanding.font"
+    },
+    {
+      "name": "Underwood 319",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Underwood319.ttf",
+      "url": "https://www.dafont.com/underwood319.font"
+    },
+    {
+      "name": "Unica",
+      "source": "dafont",
+      "category": "Techno - Square",
+      "file_path": "fonts/dafont/Unica.ttf",
+      "url": "https://www.dafont.com/unica.font"
+    },
+    {
+      "name": "Unicorn",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Unicorn.otf",
+      "url": "https://www.dafont.com/unicorn-5.font"
+    },
+    {
+      "name": "Unique Unicorn Script",
+      "source": "dafont",
+      "category": "Fancy - Groovy",
+      "file_path": "fonts/dafont/Unique Unicorn Script.ttf",
+      "url": "https://www.dafont.com/unique-unicorn-script.font"
+    },
+    {
+      "name": "Unispace Bd It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Unispace Bd It.otf",
+      "url": null
+    },
+    {
+      "name": "Unispace Rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Unispace Rg.otf",
+      "url": null
+    },
+    {
+      "name": "Unseen",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/Unseen.ttf",
+      "url": "https://www.dafont.com/unseen.font"
+    },
+    {
+      "name": "Unyu Cartoon",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/UnyuCartoon.ttf",
+      "url": "https://www.dafont.com/unyu-cartoon.font"
+    },
+    {
+      "name": "Urania Semi Serif",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Urania Semi Serif.ttf",
+      "url": null
+    },
+    {
+      "name": "Urania_Piccola_1933",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Urania_Piccola_1933.ttf",
+      "url": null
+    },
+    {
+      "name": "Ushsheup",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Ushsheup.ttf",
+      "url": "https://www.dafont.com/ushsheup.font"
+    },
+    {
+      "name": "VARUNA",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VARUNA.otf",
+      "url": null
+    },
+    {
+      "name": "VENDETTA",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VENDETTA.TTF",
+      "url": null
+    },
+    {
+      "name": "VICTORY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VICTORY.otf",
+      "url": null
+    },
+    {
+      "name": "VINCHAND",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VINCHAND.ttf",
+      "url": null
+    },
+    {
+      "name": "VLAANDE1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VLAANDE1.TTF",
+      "url": null
+    },
+    {
+      "name": "VLAANDE2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VLAANDE2.TTF",
+      "url": null
+    },
+    {
+      "name": "VLAANDER",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VLAANDER.TTF",
+      "url": null
+    },
+    {
+      "name": "VLOBJ",
+      "source": "dafont",
+      "category": "Techno - LCD",
+      "file_path": "fonts/dafont/VLOBJ.ttf",
+      "url": "https://www.dafont.com/valter-font.font"
+    },
+    {
+      "name": "VOLTRAX",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VOLTRAX.otf",
+      "url": null
+    },
+    {
+      "name": "VOODS___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VOODS___.TTF",
+      "url": null
+    },
+    {
+      "name": "Vabulous",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Vabulous.ttf",
+      "url": "https://www.dafont.com/vabulous.font"
+    },
+    {
+      "name": "Vacation",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Vacation.otf",
+      "url": "https://www.dafont.com/vacation-7.font"
+    },
+    {
+      "name": "VacerSansBookPersonal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VacerSansBookPersonal.ttf",
+      "url": null
+    },
+    {
+      "name": "Vahika It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vahika It.otf",
+      "url": null
+    },
+    {
+      "name": "Valentine Balloon",
+      "source": "dafont",
+      "category": "Basic - Sans Serif",
+      "file_path": "fonts/dafont/Valentine Balloon.ttf",
+      "url": "https://www.dafont.com/valentine-balloon.font"
+    },
+    {
+      "name": "Valentine In Love",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Valentine In Love.ttf",
+      "url": "https://www.dafont.com/valentine-in-love.font"
+    },
+    {
+      "name": "Valentine Romantic",
+      "source": "dafont",
+      "category": "Basic - Sans Serif",
+      "file_path": "fonts/dafont/Valentine Romantic.otf",
+      "url": "https://www.dafont.com/valentine-romantic-2.font"
+    },
+    {
+      "name": "Valentine Whisper",
+      "source": "dafont",
+      "category": "Basic - Sans Serif",
+      "file_path": "fonts/dafont/Valentine Whisper.ttf",
+      "url": "https://www.dafont.com/valentine-whisper.font"
+    },
+    {
+      "name": "Valenzka",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Valenzka.ttf",
+      "url": "https://www.dafont.com/valenzka.font"
+    },
+    {
+      "name": "Valverde-CondSemBdIta",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Valverde-CondSemBdIta.otf",
+      "url": null
+    },
+    {
+      "name": "Vamfired",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Vamfired.ttf",
+      "url": "https://www.dafont.com/vamfired.font"
+    },
+    {
+      "name": "Vampiro G\u00f3tico",
+      "source": "dafont",
+      "category": "Bitmap - Pixel",
+      "file_path": "fonts/dafont/Vampiro G\u00f3tico.otf",
+      "url": "https://www.dafont.com/vampiro-gotico.font"
+    },
+    {
+      "name": "Vanilla Pancake",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Vanilla Pancake.ttf",
+      "url": "https://www.dafont.com/vanilla-pancake.font"
+    },
+    {
+      "name": "Vanilla Whale",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/Vanilla Whale.otf",
+      "url": "https://www.dafont.com/vanilla-whale.font"
+    },
+    {
+      "name": "VanjarFree",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VanjarFree.otf",
+      "url": null
+    },
+    {
+      "name": "Vankours",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vankours.otf",
+      "url": null
+    },
+    {
+      "name": "Vantely PersonalUseOnly",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vantely PersonalUseOnly.ttf",
+      "url": null
+    },
+    {
+      "name": "Varokah Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Varokah Demo.otf",
+      "url": null
+    },
+    {
+      "name": "Vasgas",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Vasgas.ttf",
+      "url": "https://www.dafont.com/vasgas.font"
+    },
+    {
+      "name": "Vastenburg Typeface",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/VastenburgTypeface.ttf",
+      "url": "https://www.dafont.com/vastenburg-typeface.font"
+    },
+    {
+      "name": "Vastine Personal Use Only",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vastine Personal Use Only.ttf",
+      "url": null
+    },
+    {
+      "name": "Vazari Sans Serif",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Vazari_Sans_Serif.ttf",
+      "url": "https://www.dafont.com/vazari-sans-serif.font"
+    },
+    {
+      "name": "Velissa",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Velissa.ttf",
+      "url": "https://www.dafont.com/velissa.font"
+    },
+    {
+      "name": "Venice Bridge",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/VeniceBridge.otf",
+      "url": "https://www.dafont.com/venice-bridge.font"
+    },
+    {
+      "name": "Ventography_Personal_Use_Only",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Ventography_Personal_Use_Only.ttf",
+      "url": null
+    },
+    {
+      "name": "Vera",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vera.ttf",
+      "url": null
+    },
+    {
+      "name": "VeraMoIt",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VeraMoIt.ttf",
+      "url": null
+    },
+    {
+      "name": "VeraSe",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VeraSe.ttf",
+      "url": null
+    },
+    {
+      "name": "Verah___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Verah___.ttf",
+      "url": null
+    },
+    {
+      "name": "Verahi__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Verahi__.ttf",
+      "url": null
+    },
+    {
+      "name": "Verily Serif Mono",
+      "source": "dafont",
+      "category": "Gothic - Celtic",
+      "file_path": "fonts/dafont/VerilySerifMono.otf",
+      "url": "https://www.dafont.com/verily-serif-mono.font"
+    },
+    {
+      "name": "Vermin Magic",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Vermin Magic.ttf",
+      "url": "https://www.dafont.com/vermin-magic.font"
+    },
+    {
+      "name": "Vermin Vore",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Vermin Vore.otf",
+      "url": "https://www.dafont.com/vermin-vore.font"
+    },
+    {
+      "name": "VersatyloRoundedPersonalUseOnly",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VersatyloRoundedPersonalUseOnly.ttf",
+      "url": null
+    },
+    {
+      "name": "Vertically",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Vertically.otf",
+      "url": "https://www.dafont.com/vertically.font"
+    },
+    {
+      "name": "Vertigon",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Vertigon.otf",
+      "url": "https://www.dafont.com/vertigon.font"
+    },
+    {
+      "name": "Veteran Typewriter",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Veteran Typewriter.ttf",
+      "url": "https://www.dafont.com/veteran-typewriter.font"
+    },
+    {
+      "name": "Vibrocentric Bd It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vibrocentric Bd It.otf",
+      "url": null
+    },
+    {
+      "name": "Vibrocentric Rg It",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vibrocentric Rg It.otf",
+      "url": null
+    },
+    {
+      "name": "Vibrocentric Rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vibrocentric Rg.otf",
+      "url": null
+    },
+    {
+      "name": "Victoria CAT",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/VictoriaCAT.ttf",
+      "url": "https://www.dafont.com/victoria-cat.font"
+    },
+    {
+      "name": "VictoriaDemo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VictoriaDemo.ttf",
+      "url": null
+    },
+    {
+      "name": "Victorian Parlor Vintage Alternate_free",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Victorian Parlor Vintage Alternate_free.ttf",
+      "url": null
+    },
+    {
+      "name": "VignettesDEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VignettesDEMO.otf",
+      "url": null
+    },
+    {
+      "name": "Viimeinen syksy",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Viimeinen syksy.ttf",
+      "url": "https://www.dafont.com/viimeinen-syksy.font"
+    },
+    {
+      "name": "Vikingueiro",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/Vikingueiro.ttf",
+      "url": "https://www.dafont.com/vikingueiro.font"
+    },
+    {
+      "name": "Viktors Littl Creepy Horror",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/Viktors Littl Creepy Horror.ttf",
+      "url": "https://www.dafont.com/viktors-littl-creepy-horror.font"
+    },
+    {
+      "name": "Viktribe",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Viktribe.ttf",
+      "url": "https://www.dafont.com/viktribe.font"
+    },
+    {
+      "name": "Vilgorda Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vilgorda Demo.otf",
+      "url": null
+    },
+    {
+      "name": "Village",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Village.ttf",
+      "url": "https://www.dafont.com/prisoner.font"
+    },
+    {
+      "name": "Vinque Rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vinque Rg.otf",
+      "url": null
+    },
+    {
+      "name": "Vintage Avalanche",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Vintage Avalanche.otf",
+      "url": "https://www.dafont.com/vintage-avalanche.font"
+    },
+    {
+      "name": "Vintage Machine",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Vintage Machine.otf",
+      "url": "https://www.dafont.com/vintage-machine.font"
+    },
+    {
+      "name": "Vintage Rovery",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Vintage Rovery.otf",
+      "url": "https://www.dafont.com/vintage-rovery.font"
+    },
+    {
+      "name": "VintageVoyage",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/VintageVoyage.otf",
+      "url": null
+    },
+    {
+      "name": "Vintage Voyage",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/VintageVoyage.ttf",
+      "url": "https://www.dafont.com/vintage-voyage.font"
+    },
+    {
+      "name": "Virtual Vector Vortex",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/VirtualVectorVortex.ttf",
+      "url": "https://www.dafont.com/virtualvectorvortex.font"
+    },
+    {
+      "name": "Viva Persib",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Viva Persib.ttf",
+      "url": "https://www.dafont.com/viva-persib.font"
+    },
+    {
+      "name": "Vivacious HF",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Vivacious HF.ttf",
+      "url": "https://www.dafont.com/vivacious-hf.font"
+    },
+    {
+      "name": "Viyola",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Viyola.ttf",
+      "url": "https://www.dafont.com/viyola.font"
+    },
+    {
+      "name": "Vloderstone Antique_3",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vloderstone Antique_3.ttf",
+      "url": null
+    },
+    {
+      "name": "Vocago",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Vocago.ttf",
+      "url": "https://www.dafont.com/vocago.font"
+    },
+    {
+      "name": "Voigante Display",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/VoiganteDisplay.ttf",
+      "url": "https://www.dafont.com/voigantedisplay.font"
+    },
+    {
+      "name": "VonFont",
+      "source": "dafont",
+      "category": "Script - Graffiti",
+      "file_path": "fonts/dafont/VonFont.ttf",
+      "url": "https://www.dafont.com/vonfont.font"
+    },
+    {
+      "name": "Vonique 92_D",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Vonique 92_D.otf",
+      "url": null
+    },
+    {
+      "name": "Vortigra",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Vortigra.otf",
+      "url": "https://www.dafont.com/vortigra.font"
+    },
+    {
+      "name": "Voxbox",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Voxbox.ttf",
+      "url": "https://www.dafont.com/voxbox.font"
+    },
+    {
+      "name": "WARZONE 99",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WARZONE 99.ttf",
+      "url": null
+    },
+    {
+      "name": "WBXGTI__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WBXGTI__.TTF",
+      "url": null
+    },
+    {
+      "name": "WBX_GT__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WBX_GT__.TTF",
+      "url": null
+    },
+    {
+      "name": "WC Speed Bta",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/WC_Speed_Bta.ttf",
+      "url": "https://www.dafont.com/wc-speed-bta.font"
+    },
+    {
+      "name": "WELLSLEY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WELLSLEY.TTF",
+      "url": null
+    },
+    {
+      "name": "WESTG___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WESTG___.TTF",
+      "url": null
+    },
+    {
+      "name": "WEST____",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WEST____.TTF",
+      "url": null
+    },
+    {
+      "name": "WHACKAD_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WHACKAD_.ttf",
+      "url": null
+    },
+    {
+      "name": "WHACUI__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WHACUI__.ttf",
+      "url": null
+    },
+    {
+      "name": "WHACUWI_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WHACUWI_.ttf",
+      "url": null
+    },
+    {
+      "name": "WHACU___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WHACU___.ttf",
+      "url": null
+    },
+    {
+      "name": "WHITEWASHER",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WHITEWASHER.ttf",
+      "url": null
+    },
+    {
+      "name": "WILLG___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WILLG___.TTF",
+      "url": null
+    },
+    {
+      "name": "WINNER",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WINNER.otf",
+      "url": null
+    },
+    {
+      "name": "WOODCUTTER DRIPPING CLASSIC FONT",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WOODCUTTER DRIPPING CLASSIC FONT.ttf",
+      "url": null
+    },
+    {
+      "name": "WW2BAH__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WW2BAH__.TTF",
+      "url": null
+    },
+    {
+      "name": "WW2BH___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WW2BH___.TTF",
+      "url": null
+    },
+    {
+      "name": "Wackomisha",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Wackomisha.ttf",
+      "url": "https://www.dafont.com/wackomisha.font"
+    },
+    {
+      "name": "Wade",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Wade.ttf",
+      "url": "https://www.dafont.com/wade.font"
+    },
+    {
+      "name": "Waffle Story",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Waffle Story.ttf",
+      "url": "https://www.dafont.com/waffle-story.font"
+    },
+    {
+      "name": "Waflerd DEMO VERSION",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Waflerd DEMO VERSION.otf",
+      "url": null
+    },
+    {
+      "name": "Wagstaf",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Wagstaf.ttf",
+      "url": "https://www.dafont.com/wagstaf.font"
+    },
+    {
+      "name": "Wakaharo",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Wakaharo.ttf",
+      "url": "https://www.dafont.com/wakaharo.font"
+    },
+    {
+      "name": "Wakolltu-Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wakolltu-Demo.ttf",
+      "url": null
+    },
+    {
+      "name": "Walau",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Walau.ttf",
+      "url": "https://www.dafont.com/walau.font"
+    },
+    {
+      "name": "Waldorf Astoria",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Waldorf Astoria.ttf",
+      "url": null
+    },
+    {
+      "name": "Walker Bot LDR",
+      "source": "dafont",
+      "category": "Techno - LCD",
+      "file_path": "fonts/dafont/Walker_Bot_LDR.ttf",
+      "url": "https://www.dafont.com/walker-bot-ldr.font"
+    },
+    {
+      "name": "Walktrought",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/Walktrought.otf",
+      "url": "https://www.dafont.com/walktrought.font"
+    },
+    {
+      "name": "Wall Bomber",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/Wall Bomber.ttf",
+      "url": "https://www.dafont.com/wall-bomber.font"
+    },
+    {
+      "name": "Wallington-Pro",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wallington-Pro.ttf",
+      "url": null
+    },
+    {
+      "name": "Wallrous",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/Wallrous.ttf",
+      "url": "https://www.dafont.com/wallrous.font"
+    },
+    {
+      "name": "WardshusCalligraphy_PERSONAL_USE_ONLY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WardshusCalligraphy_PERSONAL_USE_ONLY.otf",
+      "url": null
+    },
+    {
+      "name": "Warlock",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Warlock.otf",
+      "url": "https://www.dafont.com/warlock-3.font"
+    },
+    {
+      "name": "Warlords",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/Warlords.otf",
+      "url": "https://www.dafont.com/warlords.font"
+    },
+    {
+      "name": "Warm Milk",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/Warm Milk.ttf",
+      "url": "https://www.dafont.com/warm-milk.font"
+    },
+    {
+      "name": "Warm Winter",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Warm Winter.ttf",
+      "url": "https://www.dafont.com/warm-winter.font"
+    },
+    {
+      "name": "Warsuck",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Warsuck.otf",
+      "url": null
+    },
+    {
+      "name": "Warsuck",
+      "source": "dafont",
+      "category": "Bitmap - Pixel",
+      "file_path": "fonts/dafont/Warsuck.ttf",
+      "url": "https://www.dafont.com/warsuck.font"
+    },
+    {
+      "name": "Warung Kopi",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Warung Kopi.otf",
+      "url": "https://www.dafont.com/warung-kopi.font"
+    },
+    {
+      "name": "Waschkueche",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Waschkueche.ttf",
+      "url": "https://www.dafont.com/waschkueche.font"
+    },
+    {
+      "name": "Washington Basketball",
+      "source": "dafont",
+      "category": "Script - Calligraphy",
+      "file_path": "fonts/dafont/Washington Basketball.ttf",
+      "url": "https://www.dafont.com/washington-basketball.font"
+    },
+    {
+      "name": "Washington Text",
+      "source": "dafont",
+      "category": "Bitmap - Pixel",
+      "file_path": "fonts/dafont/WashingtonText.ttf",
+      "url": "https://www.dafont.com/washington-text.font"
+    },
+    {
+      "name": "Water Air",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Water Air.otf",
+      "url": "https://www.dafont.com/water-air.font"
+    },
+    {
+      "name": "Water Galon",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Water Galon.otf",
+      "url": null
+    },
+    {
+      "name": "Water Lemon",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Water Lemon.ttf",
+      "url": "https://www.dafont.com/water-lemon.font"
+    },
+    {
+      "name": "Water Orange PERSONAL USE ONLY!",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Water Orange PERSONAL USE ONLY!.ttf",
+      "url": null
+    },
+    {
+      "name": "Watermelon Family",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/WatermelonFamily.ttf",
+      "url": "https://www.dafont.com/watermelon-family.font"
+    },
+    {
+      "name": "Wave Zone",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Wave Zone.otf",
+      "url": "https://www.dafont.com/wave-zone.font"
+    },
+    {
+      "name": "Wavemax Trial",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wavemax Trial.otf",
+      "url": null
+    },
+    {
+      "name": "Wavetosh",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/Wavetosh.ttf",
+      "url": "https://www.dafont.com/wavetosh.font"
+    },
+    {
+      "name": "Wavy lines demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wavy lines demo.ttf",
+      "url": null
+    },
+    {
+      "name": "We are potatoes",
+      "source": "dafont",
+      "category": "Fancy - Various",
+      "file_path": "fonts/dafont/Wearepotatoes.ttf",
+      "url": "https://www.dafont.com/we-are-potatoes.font"
+    },
+    {
+      "name": "Web Serveroff",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Web Serveroff.ttf",
+      "url": "https://www.dafont.com/web-serveroff.font"
+    },
+    {
+      "name": "Webcomic Whore",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/Webcomic Whore.ttf",
+      "url": "https://www.dafont.com/webcomic-whore.font"
+    },
+    {
+      "name": "Wednesday Lettering Practice",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Wednesday Lettering Practice.otf",
+      "url": "https://www.dafont.com/wednesday-lettering-practice.font"
+    },
+    {
+      "name": "Weird Words DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Weird Words DEMO.otf",
+      "url": null
+    },
+    {
+      "name": "Wes",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Wes.otf",
+      "url": "https://www.dafont.com/wes.font"
+    },
+    {
+      "name": "Western Cowboys",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Western Cowboys.otf",
+      "url": "https://www.dafont.com/western-cowboys.font"
+    },
+    {
+      "name": "Western Eastern",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/Western Eastern.ttf",
+      "url": "https://www.dafont.com/western-eastern.font"
+    },
+    {
+      "name": "WesternCowboy",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WesternCowboy.otf",
+      "url": null
+    },
+    {
+      "name": "Westpart Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Westpart Demo.otf",
+      "url": null
+    },
+    {
+      "name": "What The FUN",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/What The FUN.otf",
+      "url": null
+    },
+    {
+      "name": "Whatever it takes",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Whatever it takes.ttf",
+      "url": "https://www.dafont.com/whatever-it-takes.font"
+    },
+    {
+      "name": "Whats Happened",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/WhatsHappened.ttf",
+      "url": "https://www.dafont.com/whats-happened.font"
+    },
+    {
+      "name": "Whimster Glympse Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Whimster Glympse Demo.otf",
+      "url": null
+    },
+    {
+      "name": "Whipsmart",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Whipsmart.ttf",
+      "url": "https://www.dafont.com/whipsmart.font"
+    },
+    {
+      "name": "Whirly Wood",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/WhirlyWood.ttf",
+      "url": "https://www.dafont.com/whirly-wood.font"
+    },
+    {
+      "name": "Whisper",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Whisper.otf",
+      "url": "https://www.dafont.com/whisper-2.font"
+    },
+    {
+      "name": "WhitbyBrewers",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WhitbyBrewers.otf",
+      "url": null
+    },
+    {
+      "name": "Whitby Brewers",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/WhitbyBrewers.ttf",
+      "url": "https://www.dafont.com/whitbybrewers.font"
+    },
+    {
+      "name": "Why do we blink so frequently.",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Why do we blink so frequently..ttf",
+      "url": null
+    },
+    {
+      "name": "WigendaTypewrite ",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WigendaTypewrite .ttf",
+      "url": null
+    },
+    {
+      "name": "Wild Bandit Serif",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wild Bandit Serif.ttf",
+      "url": null
+    },
+    {
+      "name": "Wild Bandit",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/Wild Bandit.ttf",
+      "url": "https://www.dafont.com/wild-bandit.font"
+    },
+    {
+      "name": "Wild Crow - TTF",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wild Crow - TTF.ttf",
+      "url": null
+    },
+    {
+      "name": "Wild Script",
+      "source": "dafont",
+      "category": "Script - Calligraphy",
+      "file_path": "fonts/dafont/Wild Script.ttf",
+      "url": "https://www.dafont.com/wild-script-pl.font"
+    },
+    {
+      "name": "Wild Spain",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/Wild Spain.otf",
+      "url": "https://www.dafont.com/wild-spain.font"
+    },
+    {
+      "name": "Wildrock",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Wildrock.ttf",
+      "url": "https://www.dafont.com/wildrock.font"
+    },
+    {
+      "name": "Will You Call My Name",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/WillYouCallMyName.ttf",
+      "url": "https://www.dafont.com/willyoucallmyname.font"
+    },
+    {
+      "name": "Willfteka",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Willfteka.otf",
+      "url": "https://www.dafont.com/willfteka.font"
+    },
+    {
+      "name": "Willowheart",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Willowheart.ttf",
+      "url": "https://www.dafont.com/willowheart.font"
+    },
+    {
+      "name": "Window Notes",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Window Notes.otf",
+      "url": "https://www.dafont.com/window-notes.font"
+    },
+    {
+      "name": "Windy Wood Demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Windy Wood Demo.ttf",
+      "url": null
+    },
+    {
+      "name": "WindyMondayGTDemo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WindyMondayGTDemo.otf",
+      "url": null
+    },
+    {
+      "name": "WindyMondayGTDemo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WindyMondayGTDemo.ttf",
+      "url": null
+    },
+    {
+      "name": "Winter Drink",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Winter Drink.ttf",
+      "url": "https://www.dafont.com/winter-drink.font"
+    },
+    {
+      "name": "Winter Garden",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Winter Garden.ttf",
+      "url": "https://www.dafont.com/winter-garden.font"
+    },
+    {
+      "name": "Winter Glowing",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Winter Glowing.otf",
+      "url": "https://www.dafont.com/winter-glowing.font"
+    },
+    {
+      "name": "Winter Storm",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Winter Storm.ttf",
+      "url": "https://www.dafont.com/winter-storm.font"
+    },
+    {
+      "name": "Winter Wishes",
+      "source": "dafont",
+      "category": "Basic - Various",
+      "file_path": "fonts/dafont/Winter Wishes.ttf",
+      "url": "https://www.dafont.com/winter-wishes.font"
+    },
+    {
+      "name": "WinzerSerifOp_PERSONAL_USE_ONLY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/WinzerSerifOp_PERSONAL_USE_ONLY.otf",
+      "url": null
+    },
+    {
+      "name": "Wischy Stylus",
+      "source": "dafont",
+      "category": "Fancy - Destroy",
+      "file_path": "fonts/dafont/WischyStylus.ttf",
+      "url": "https://www.dafont.com/wischystylus.font"
+    },
+    {
+      "name": "Wish Shore",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/WishShore.ttf",
+      "url": "https://www.dafont.com/wish-shore.font"
+    },
+    {
+      "name": "Witch Party",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Witch Party.ttf",
+      "url": "https://www.dafont.com/witch-party.font"
+    },
+    {
+      "name": "Witch",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Witch.otf",
+      "url": "https://www.dafont.com/witch-3.font"
+    },
+    {
+      "name": "Witches Magic",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Witches Magic.ttf",
+      "url": "https://www.dafont.com/witches-magic.font"
+    },
+    {
+      "name": "Witchness",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Witchness.ttf",
+      "url": "https://www.dafont.com/witchness.font"
+    },
+    {
+      "name": "Witchy Whiskers Free",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Witchy Whiskers Free.ttf",
+      "url": null
+    },
+    {
+      "name": "Witka",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Witka.ttf",
+      "url": "https://www.dafont.com/witka.font"
+    },
+    {
+      "name": "Wobbly",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/Wobbly.ttf",
+      "url": "https://www.dafont.com/wobbly2.font"
+    },
+    {
+      "name": "Wolvos",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/Wolvos.ttf",
+      "url": "https://www.dafont.com/wolvos.font"
+    },
+    {
+      "name": "Woman of the Apocalypse",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/Woman of the Apocalypse.ttf",
+      "url": "https://www.dafont.com/woman-of-the-apocalypse.font"
+    },
+    {
+      "name": "Wonder Night",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Wonder Night.otf",
+      "url": null
+    },
+    {
+      "name": "Wonder Night",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Wonder Night.ttf",
+      "url": "https://www.dafont.com/wonder-night.font"
+    },
+    {
+      "name": "Wonderly",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Wonderly.otf",
+      "url": "https://www.dafont.com/wonderly.font"
+    },
+    {
+      "name": "Wonton",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/Wonton.ttf",
+      "url": "https://www.dafont.com/wonton.font"
+    },
+    {
+      "name": "Wood Craft",
+      "source": "dafont",
+      "category": "Fancy - Destroy",
+      "file_path": "fonts/dafont/Wood Craft.ttf",
+      "url": "https://www.dafont.com/wood-craft.font"
+    },
+    {
+      "name": "Woodcutter Typewritter",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Woodcutter Typewritter.ttf",
+      "url": "https://www.dafont.com/woodcutter-typewritter.font"
+    },
+    {
+      "name": "Workaholic",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Workaholic.ttf",
+      "url": "https://www.dafont.com/workaholic.font"
+    },
+    {
+      "name": "Workbar",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Workbar.ttf",
+      "url": "https://www.dafont.com/workbar.font"
+    },
+    {
+      "name": "Workout",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Workout.ttf",
+      "url": "https://www.dafont.com/workout-2.font"
+    },
+    {
+      "name": "Wortellina",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Wortellina.ttf",
+      "url": "https://www.dafont.com/wortellina.font"
+    },
+    {
+      "name": "Wripetyter",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Wripetyter.ttf",
+      "url": "https://www.dafont.com/wripetyter.font"
+    },
+    {
+      "name": "XXIIGeomDEMO-Book",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/XXIIGeomDEMO-Book.otf",
+      "url": null
+    },
+    {
+      "name": "Xabfayin",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Xabfayin.ttf",
+      "url": "https://www.dafont.com/xabfayin.font"
+    },
+    {
+      "name": "Xbka",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Xbka.otf",
+      "url": "https://www.dafont.com/xbka.font"
+    },
+    {
+      "name": "Xmas Year Zero",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Xmas Year Zero.ttf",
+      "url": "https://www.dafont.com/xmas-year-zero.font"
+    },
+    {
+      "name": "XmasTerpiece",
+      "source": "dafont",
+      "category": "Bitmap - Pixel",
+      "file_path": "fonts/dafont/XmasTerpiece.ttf",
+      "url": "https://www.dafont.com/xmasterpiece.font"
+    },
+    {
+      "name": "Xtradex",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Xtradex.ttf",
+      "url": "https://www.dafont.com/xtradex.font"
+    },
+    {
+      "name": "Xyling Font by Situjuh (7NTypes)",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Xyling Font by Situjuh (7NTypes).otf",
+      "url": null
+    },
+    {
+      "name": "Y2K Neophyte",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Y2K_Neophyte.ttf",
+      "url": "https://www.dafont.com/y2k-neophyte.font"
+    },
+    {
+      "name": "YEKOWtrial",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/YEKOWtrial.otf",
+      "url": null
+    },
+    {
+      "name": "YEKOWtrial",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/YEKOWtrial.ttf",
+      "url": null
+    },
+    {
+      "name": "YIKES!__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/YIKES!__.TTF",
+      "url": null
+    },
+    {
+      "name": "Yaahowu",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Yaahowu.ttf",
+      "url": "https://www.dafont.com/yaahowu.font"
+    },
+    {
+      "name": "Yaelah",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/Yaelah.ttf",
+      "url": "https://www.dafont.com/yaelah.font"
+    },
+    {
+      "name": "Yasmen",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Yasmen.ttf",
+      "url": "https://www.dafont.com/yasmen.font"
+    },
+    {
+      "name": "Yellow Cat",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/Yellow Cat.ttf",
+      "url": "https://www.dafont.com/yellow-cat-2.font"
+    },
+    {
+      "name": "Yellowc",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Yellowc.ttf",
+      "url": null
+    },
+    {
+      "name": "Yes Yes No",
+      "source": "dafont",
+      "category": "Gothic - Celtic",
+      "file_path": "fonts/dafont/YesYesNo.ttf",
+      "url": "https://www.dafont.com/yesyesno.font"
+    },
+    {
+      "name": "Yesterday",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Yesterday.otf",
+      "url": "https://www.dafont.com/yesterday.font"
+    },
+    {
+      "name": "YetUntitledDemo01",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/YetUntitledDemo01.otf",
+      "url": null
+    },
+    {
+      "name": "Ympyroity",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Ympyroity.ttf",
+      "url": "https://www.dafont.com/ympyroity.font"
+    },
+    {
+      "name": "Ynnovatta",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Ynnovatta.ttf",
+      "url": "https://www.dafont.com/ynnovatta.font"
+    },
+    {
+      "name": "Yogurt Mango",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Yogurt Mango.ttf",
+      "url": "https://www.dafont.com/yogurt-mango.font"
+    },
+    {
+      "name": "Yok Puasa",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/Yok Puasa.ttf",
+      "url": "https://www.dafont.com/yok-puasa.font"
+    },
+    {
+      "name": "Yonky Display DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Yonky Display DEMO.ttf",
+      "url": null
+    },
+    {
+      "name": "You Idiot",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/You Idiot.ttf",
+      "url": "https://www.dafont.com/you-idiot.font"
+    },
+    {
+      "name": "You Know It",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/YouKnowIt.ttf",
+      "url": "https://www.dafont.com/you-know-it.font"
+    },
+    {
+      "name": "Young Daughter Font by 7NTypes",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Young Daughter Font by 7NTypes.otf",
+      "url": null
+    },
+    {
+      "name": "Young Writer",
+      "source": "dafont",
+      "category": "Script - School",
+      "file_path": "fonts/dafont/YoungWriter.ttf",
+      "url": "https://www.dafont.com/youngwriter.font"
+    },
+    {
+      "name": "Yummy Cupcakes",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/YummyCupcakes.ttf",
+      "url": "https://www.dafont.com/yummycupcakes.font"
+    },
+    {
+      "name": "Drafting Table",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/ZAM.TTF",
+      "url": "https://www.dafont.com/drafting-table.font"
+    },
+    {
+      "name": "ZEN",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ZEN.TTF",
+      "url": null
+    },
+    {
+      "name": "ZILLMT__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ZILLMT__.ttf",
+      "url": null
+    },
+    {
+      "name": "Zabdilus",
+      "source": "dafont",
+      "category": "Bitmap - Bitmap",
+      "file_path": "fonts/dafont/Zabdilus.ttf",
+      "url": "https://www.dafont.com/zabdilus.font"
+    },
+    {
+      "name": "Zabelint",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/Zabelint.ttf",
+      "url": "https://www.dafont.com/zabelint.font"
+    },
+    {
+      "name": "Zabezink",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/Zabezink.ttf",
+      "url": "https://www.dafont.com/zabezink.font"
+    },
+    {
+      "name": "Zabinezer",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/Zabinezer.ttf",
+      "url": "https://www.dafont.com/zabinezer.font"
+    },
+    {
+      "name": "Zabrusa",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/Zabrusa.ttf",
+      "url": "https://www.dafont.com/zabrusa.font"
+    },
+    {
+      "name": "Zabwater",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/Zabwater.ttf",
+      "url": "https://www.dafont.com/zabwater.font"
+    },
+    {
+      "name": "Zabzibun",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Zabzibun.ttf",
+      "url": "https://www.dafont.com/zabzibun.font"
+    },
+    {
+      "name": "Zachary",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/Zachary.ttf",
+      "url": "https://www.dafont.com/zachary.font"
+    },
+    {
+      "name": "Zachary Binx",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/ZacharyBinx.ttf",
+      "url": "https://www.dafont.com/zacharybinx.font"
+    },
+    {
+      "name": "Zachery",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Zachery.otf",
+      "url": "https://www.dafont.com/zachery.font"
+    },
+    {
+      "name": "ZakenManus_PERSONAL_USE_ONLY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ZakenManus_PERSONAL_USE_ONLY.otf",
+      "url": null
+    },
+    {
+      "name": "Zamaica",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/Zamaica.ttf",
+      "url": "https://www.dafont.com/zamaica.font"
+    },
+    {
+      "name": "Zame",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zame.ttf",
+      "url": null
+    },
+    {
+      "name": "Zami",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zami.ttf",
+      "url": null
+    },
+    {
+      "name": "Zamonia",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/Zamonia.ttf",
+      "url": "https://www.dafont.com/zamonia.font"
+    },
+    {
+      "name": "Zapadni",
+      "source": "dafont",
+      "category": "Fancy - Horror",
+      "file_path": "fonts/dafont/Zapadni.ttf",
+      "url": "https://www.dafont.com/zapadni.font"
+    },
+    {
+      "name": "Zasline",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/Zasline.otf",
+      "url": "https://www.dafont.com/zasline.font"
+    },
+    {
+      "name": "Zawijasy",
+      "source": "dafont",
+      "category": "Fancy - Destroy",
+      "file_path": "fonts/dafont/Zawijasy.otf",
+      "url": "https://www.dafont.com/zawijasy.font"
+    },
+    {
+      "name": "Zdyk Cancer",
+      "source": "dafont",
+      "category": "Fancy - Cartoon",
+      "file_path": "fonts/dafont/Zdyk Cancer.otf",
+      "url": "https://www.dafont.com/zdyk-cancer.font"
+    },
+    {
+      "name": "ZenithaClassic_PERSONAL_USE_ONLY",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ZenithaClassic_PERSONAL_USE_ONLY.otf",
+      "url": null
+    },
+    {
+      "name": "Zeoruz",
+      "source": "dafont",
+      "category": "Techno - Various",
+      "file_path": "fonts/dafont/Zeoruz.ttf",
+      "url": "https://www.dafont.com/zeoruz.font"
+    },
+    {
+      "name": "ZeroGene",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/ZeroGene.ttf",
+      "url": "https://www.dafont.com/zerogene.font"
+    },
+    {
+      "name": "Zeroes Three",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zeroes Three.otf",
+      "url": null
+    },
+    {
+      "name": "Zibryain demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zibryain demo.ttf",
+      "url": null
+    },
+    {
+      "name": "Ziggy Zaggy",
+      "source": "dafont",
+      "category": "Fancy - Groovy",
+      "file_path": "fonts/dafont/ZiggyZaggy.otf",
+      "url": "https://www.dafont.com/ziggyzaggy.font"
+    },
+    {
+      "name": "Zignature",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/Zignature.ttf",
+      "url": "https://www.dafont.com/zignature.font"
+    },
+    {
+      "name": "Zolofn_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zolofn_.ttf",
+      "url": null
+    },
+    {
+      "name": "Zombie Brush",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/Zombie Brush.ttf",
+      "url": "https://www.dafont.com/zombie-brush-2.font"
+    },
+    {
+      "name": "Zombie Hunger",
+      "source": "dafont",
+      "category": "Basic - Fixed Width",
+      "file_path": "fonts/dafont/Zombie Hunger.otf",
+      "url": "https://www.dafont.com/zombie-hunger.font"
+    },
+    {
+      "name": "Zombie Queen 2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zombie Queen 2.ttf",
+      "url": null
+    },
+    {
+      "name": "Zombie Queen XED",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zombie Queen XED.ttf",
+      "url": null
+    },
+    {
+      "name": "Zombie Queen Zlash",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zombie Queen Zlash.ttf",
+      "url": null
+    },
+    {
+      "name": "Zombie Queen",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/Zombie Queen.ttf",
+      "url": "https://www.dafont.com/zombie-queen.font"
+    },
+    {
+      "name": "Zombie Girlfriend",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/ZombieGirlfriend.ttf",
+      "url": "https://www.dafont.com/zombiegirlfriend.font"
+    },
+    {
+      "name": "ZombieTai",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/ZombieTai.ttf",
+      "url": "https://www.dafont.com/zombietai.font"
+    },
+    {
+      "name": "Zowieyoe",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zowieyoe.otf",
+      "url": null
+    },
+    {
+      "name": "Zu Kabarett Destroy",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zu Kabarett Destroy.ttf",
+      "url": null
+    },
+    {
+      "name": "Zubajda Rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/Zubajda Rg.ttf",
+      "url": null
+    },
+    {
+      "name": "ZyphyteCondense",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ZyphyteCondense.ttf",
+      "url": null
+    },
+    {
+      "name": "_decterm",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/_decterm.ttf",
+      "url": null
+    },
+    {
+      "name": "a Acakadut",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/aAcakadut.ttf",
+      "url": "https://www.dafont.com/a-acakadut.font"
+    },
+    {
+      "name": "aAgenGiveaway",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAgenGiveaway.ttf",
+      "url": null
+    },
+    {
+      "name": "aAidilfitri",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAidilfitri.otf",
+      "url": null
+    },
+    {
+      "name": "aAidilfitri",
+      "source": "dafont",
+      "category": "Foreign Look - Chinese",
+      "file_path": "fonts/dafont/aAidilfitri.ttf",
+      "url": "https://www.dafont.com/aaidilfitri.font"
+    },
+    {
+      "name": "aAlwaysSmile",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAlwaysSmile.otf",
+      "url": null
+    },
+    {
+      "name": "a Always Smile",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/aAlwaysSmile.ttf",
+      "url": "https://www.dafont.com/a-always-smile.font"
+    },
+    {
+      "name": "aAnggota",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAnggota.otf",
+      "url": null
+    },
+    {
+      "name": "aAnomanObong",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAnomanObong.otf",
+      "url": null
+    },
+    {
+      "name": "aAntiCorona",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAntiCorona.otf",
+      "url": null
+    },
+    {
+      "name": "a Anti Corona",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/aAntiCorona.ttf",
+      "url": "https://www.dafont.com/a-anti-corona.font"
+    },
+    {
+      "name": "a Assassin Ninja",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/aAssassinNinja.ttf",
+      "url": "https://www.dafont.com/aassassinninja.font"
+    },
+    {
+      "name": "aAtomicMd",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAtomicMd.otf",
+      "url": null
+    },
+    {
+      "name": "aAtos",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAtos.otf",
+      "url": null
+    },
+    {
+      "name": "aAwalRamadhan",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aAwalRamadhan.otf",
+      "url": null
+    },
+    {
+      "name": "abbey_m1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/abbey_m1.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3cond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3cond.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3condital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3condital.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3expand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3expand.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3expandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3expandital.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3left",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3left.ttf",
+      "url": null
+    },
+    {
+      "name": "achilles3semital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/achilles3semital.ttf",
+      "url": null
+    },
+    {
+      "name": "advent-Bd1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/advent-Bd1.otf",
+      "url": null
+    },
+    {
+      "name": "advent-Lt1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/advent-Lt1.otf",
+      "url": null
+    },
+    {
+      "name": "advent-Lt2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/advent-Lt2.otf",
+      "url": null
+    },
+    {
+      "name": "aflfont",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aflfont.TTF",
+      "url": null
+    },
+    {
+      "name": "americankestralcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/americankestralcond.ttf",
+      "url": null
+    },
+    {
+      "name": "americankestralital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/americankestralital.ttf",
+      "url": null
+    },
+    {
+      "name": "americankestralstraightcond1_2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/americankestralstraightcond1_2.ttf",
+      "url": null
+    },
+    {
+      "name": "andarilho-font",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/andarilho-font.ttf",
+      "url": null
+    },
+    {
+      "name": "aptango_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/aptango_.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangerscond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangerscond.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangerscondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangerscondital.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangersexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangersexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangersexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangersexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangersital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangersital.ttf",
+      "url": null
+    },
+    {
+      "name": "armyrangersleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/armyrangersleft.ttf",
+      "url": null
+    },
+    {
+      "name": "astrolyt",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/astrolyt.ttf",
+      "url": null
+    },
+    {
+      "name": "atwriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/atwriter.ttf",
+      "url": null
+    },
+    {
+      "name": "autoradiographic rg it",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/autoradiographic rg it.otf",
+      "url": null
+    },
+    {
+      "name": "b Bablas Angine",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/bBablasAngine.ttf",
+      "url": "https://www.dafont.com/b-bablas-angine.font"
+    },
+    {
+      "name": "b Bangkitkan Bangsa",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/bBangkitkanBangsa.ttf",
+      "url": "https://www.dafont.com/b-bangkitkan-bangsa.font"
+    },
+    {
+      "name": "b Batman Robinson",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/bBatmanRobinson.ttf",
+      "url": "https://www.dafont.com/b-batman-robinson.font"
+    },
+    {
+      "name": "b Beach Ocean",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/bBeachOcean.ttf",
+      "url": "https://www.dafont.com/b-beach-ocean.font"
+    },
+    {
+      "name": "b Bee Pollen",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/bBeePollen.ttf",
+      "url": "https://www.dafont.com/b-bee-pollen.font"
+    },
+    {
+      "name": "b Before Sans",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/bBeforeSans.ttf",
+      "url": "https://www.dafont.com/b-before-sans.font"
+    },
+    {
+      "name": "b Bekicot",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBekicot.ttf",
+      "url": "https://www.dafont.com/b-bekicot.font"
+    },
+    {
+      "name": "b Berkhitan",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/bBerkhitan.ttf",
+      "url": "https://www.dafont.com/b-berkhitan.font"
+    },
+    {
+      "name": "b Biggest Garbage",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBiggestGarbage.ttf",
+      "url": "https://www.dafont.com/b-biggest-garbage.font"
+    },
+    {
+      "name": "b Bike to Work",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBiketoWork.ttf",
+      "url": "https://www.dafont.com/b-bike-to-work.font"
+    },
+    {
+      "name": "b Blaco Bear",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/bBlacoBear.ttf",
+      "url": "https://www.dafont.com/b-blaco-bear.font"
+    },
+    {
+      "name": "b Blue Vanilla",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/bBlueVanilla.ttf",
+      "url": "https://www.dafont.com/b-blue-vanilla.font"
+    },
+    {
+      "name": "b Breaking Abuse",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBreakingAbuse.ttf",
+      "url": "https://www.dafont.com/b-breaking-abuse.font"
+    },
+    {
+      "name": "b Brisket",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBrisket.ttf",
+      "url": "https://www.dafont.com/b-brisket.font"
+    },
+    {
+      "name": "b Bubur Diaduk",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/bBuburDiaduk.ttf",
+      "url": "https://www.dafont.com/b-bubur-diaduk.font"
+    },
+    {
+      "name": "b Buih Kopi",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/bBuihKopi.ttf",
+      "url": "https://www.dafont.com/b-buih-kopi.font"
+    },
+    {
+      "name": "bBulanRajab",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bBulanRajab.otf",
+      "url": null
+    },
+    {
+      "name": "b Bumbu Sushi",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/bBumbuSushi.ttf",
+      "url": "https://www.dafont.com/b-bumbu-sushi.font"
+    },
+    {
+      "name": "b Burled Walnut",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/bBurledWalnut.ttf",
+      "url": "https://www.dafont.com/b-burled-walnut.font"
+    },
+    {
+      "name": "b Burnt Corn",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/bBurntCorn.ttf",
+      "url": "https://www.dafont.com/b-burnt-corn.font"
+    },
+    {
+      "name": "bamfexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bamfexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "bamfexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bamfexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "bamftitle",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bamftitle.ttf",
+      "url": null
+    },
+    {
+      "name": "bamftitleital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bamftitleital.ttf",
+      "url": null
+    },
+    {
+      "name": "banditandsnowmanleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/banditandsnowmanleft.ttf",
+      "url": null
+    },
+    {
+      "name": "base4",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/base4.ttf",
+      "url": null
+    },
+    {
+      "name": "base5",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/base5.ttf",
+      "url": null
+    },
+    {
+      "name": "base6",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/base6.ttf",
+      "url": null
+    },
+    {
+      "name": "beneg___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/beneg___.ttf",
+      "url": null
+    },
+    {
+      "name": "bingbong_revised",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bingbong_revised.otf",
+      "url": null
+    },
+    {
+      "name": "brettoncond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brettoncond.ttf",
+      "url": null
+    },
+    {
+      "name": "brettoncondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brettoncondital.ttf",
+      "url": null
+    },
+    {
+      "name": "brettonexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brettonexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "brettonital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brettonital.ttf",
+      "url": null
+    },
+    {
+      "name": "brettonleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brettonleft.ttf",
+      "url": null
+    },
+    {
+      "name": "brokw___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/brokw___.ttf",
+      "url": null
+    },
+    {
+      "name": "buttonsi",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/buttonsi.ttf",
+      "url": null
+    },
+    {
+      "name": "buttonsl",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/buttonsl.ttf",
+      "url": null
+    },
+    {
+      "name": "buttonsli",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/buttonsli.ttf",
+      "url": null
+    },
+    {
+      "name": "bwptype",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/bwptype.ttf",
+      "url": null
+    },
+    {
+      "name": "c Carno",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/cCarno.ttf",
+      "url": "https://www.dafont.com/c-carno.font"
+    },
+    {
+      "name": "c Cement Stone",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/cCementStone.ttf",
+      "url": "https://www.dafont.com/c-cement-stone.font"
+    },
+    {
+      "name": "c Cengkeh",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/cCengkeh.ttf",
+      "url": "https://www.dafont.com/c-cengkeh.font"
+    },
+    {
+      "name": "c Cermay",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/cCermay.ttf",
+      "url": "https://www.dafont.com/c-cermay.font"
+    },
+    {
+      "name": "c Chimpo",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/cChimpo.ttf",
+      "url": "https://www.dafont.com/c-chimpo.font"
+    },
+    {
+      "name": "c Click Speed",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/cClickSpeed.ttf",
+      "url": "https://www.dafont.com/c-click-speed.font"
+    },
+    {
+      "name": "c Cringo",
+      "source": "dafont",
+      "category": "Fancy - Various",
+      "file_path": "fonts/dafont/cCringo.ttf",
+      "url": "https://www.dafont.com/c-cringo.font"
+    },
+    {
+      "name": "c Cumi",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/cCumi.ttf",
+      "url": "https://www.dafont.com/c-cumi.font"
+    },
+    {
+      "name": "cafe brewery",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cafe brewery.ttf",
+      "url": null
+    },
+    {
+      "name": "candlebright_sample",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/candlebright_sample.otf",
+      "url": null
+    },
+    {
+      "name": "captain pilot weknowfont",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/captain pilot weknowfont.otf",
+      "url": null
+    },
+    {
+      "name": "Categories Elegant",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/categories elegant demo.otf",
+      "url": "https://www.dafont.com/categories-elegant.font"
+    },
+    {
+      "name": "charmeladeDEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/charmeladeDEMO.otf",
+      "url": null
+    },
+    {
+      "name": "chint___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/chint___.ttf",
+      "url": null
+    },
+    {
+      "name": "chocoleta",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/chocoleta.otf",
+      "url": null
+    },
+    {
+      "name": "chocoromance-ssDEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/chocoromance-ssDEMO.otf",
+      "url": null
+    },
+    {
+      "name": "chp-fire",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/chp-fire.ttf",
+      "url": null
+    },
+    {
+      "name": "cibreo_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cibreo_.ttf",
+      "url": null
+    },
+    {
+      "name": "cilica-multispore",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cilica-multispore.ttf",
+      "url": null
+    },
+    {
+      "name": "cilica-spore",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cilica-spore.ttf",
+      "url": null
+    },
+    {
+      "name": "cilica-virus",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cilica-virus.ttf",
+      "url": null
+    },
+    {
+      "name": "cinta",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cinta.ttf",
+      "url": null
+    },
+    {
+      "name": "cipher__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cipher__.ttf",
+      "url": null
+    },
+    {
+      "name": "cityburn-\u2310",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/cityburn-\u2310.ttf",
+      "url": null
+    },
+    {
+      "name": "clasict1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/clasict1.ttf",
+      "url": null
+    },
+    {
+      "name": "clonewars2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/clonewars2.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianbreakcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianbreakcond.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianbreakcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianbreakcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianbreakexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianbreakexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianbreakital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianbreakital.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianbreakleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianbreakleft.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianjetcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianjetcond.ttf",
+      "url": null
+    },
+    {
+      "name": "concielianjetcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/concielianjetcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "crapaud_petit",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crapaud_petit.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowhead",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowhead.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowheadexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowheadexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowheadexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowheadexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowheadital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowheadital.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowheadleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowheadleft.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowshaft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowshaft.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowshaftexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowshaftexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowshaftexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowshaftexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "crossbowshaftital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/crossbowshaftital.ttf",
+      "url": null
+    },
+    {
+      "name": "dDAFTt-U",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dDAFTt-U.ttf",
+      "url": null
+    },
+    {
+      "name": "d Debu",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDebu.ttf",
+      "url": "https://www.dafont.com/d-debu.font"
+    },
+    {
+      "name": "d Decak",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/dDecak.ttf",
+      "url": "https://www.dafont.com/d-decak.font"
+    },
+    {
+      "name": "d Delapan",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDelapan.ttf",
+      "url": "https://www.dafont.com/d-delapan.font"
+    },
+    {
+      "name": "d Demangan",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/dDemangan.ttf",
+      "url": "https://www.dafont.com/d-demangan.font"
+    },
+    {
+      "name": "d Dengerin",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/dDengerin.ttf",
+      "url": "https://www.dafont.com/d-dengerin.font"
+    },
+    {
+      "name": "d Destruksi",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/dDestruksi.ttf",
+      "url": "https://www.dafont.com/d-destruksi.font"
+    },
+    {
+      "name": "d Diksi",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/dDiksi.ttf",
+      "url": "https://www.dafont.com/d-diksi.font"
+    },
+    {
+      "name": "d Dimana",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDimana.ttf",
+      "url": "https://www.dafont.com/d-dimana.font"
+    },
+    {
+      "name": "d Dliyut",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/dDliyut.ttf",
+      "url": "https://www.dafont.com/d-dliyut.font"
+    },
+    {
+      "name": "d Down Cloud",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDownCloud.ttf",
+      "url": "https://www.dafont.com/d-down-cloud.font"
+    },
+    {
+      "name": "d Duaribu",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDuaribu.ttf",
+      "url": "https://www.dafont.com/d-duaribu.font"
+    },
+    {
+      "name": "d Dunia Imaji",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDuniaImaji.ttf",
+      "url": "https://www.dafont.com/d-dunia-imaji.font"
+    },
+    {
+      "name": "d Dustery",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/dDustery.ttf",
+      "url": "https://www.dafont.com/d-dustery.font"
+    },
+    {
+      "name": "daisywhl",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/daisywhl.otf",
+      "url": null
+    },
+    {
+      "name": "defatted_milk-Reg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/defatted_milk-Reg.ttf",
+      "url": null
+    },
+    {
+      "name": "dingleSW",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dingleSW.ttf",
+      "url": null
+    },
+    {
+      "name": "dis",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dis.ttf",
+      "url": null
+    },
+    {
+      "name": "divona__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/divona__.ttf",
+      "url": null
+    },
+    {
+      "name": "dotcom",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dotcom.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboard",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboard.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardb",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardb.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardbi",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardbi.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardc",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardc.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardci",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardci.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboarde",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboarde.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardei",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardei.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardi",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardi.ttf",
+      "url": null
+    },
+    {
+      "name": "draftingboardl",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/draftingboardl.ttf",
+      "url": null
+    },
+    {
+      "name": "dream orphanage rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dream orphanage rg.otf",
+      "url": null
+    },
+    {
+      "name": "drosselmeyercondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/drosselmeyercondital.ttf",
+      "url": null
+    },
+    {
+      "name": "drosselmeyerexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/drosselmeyerexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "drosselmeyerital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/drosselmeyerital.ttf",
+      "url": null
+    },
+    {
+      "name": "drosselmeyerleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/drosselmeyerleft.ttf",
+      "url": null
+    },
+    {
+      "name": "dubellit",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/dubellit.ttf",
+      "url": null
+    },
+    {
+      "name": "e Buena Classic",
+      "source": "dafont",
+      "category": "Gothic - Modern",
+      "file_path": "fonts/dafont/eBuenaClassic.ttf",
+      "url": "https://www.dafont.com/ebuenaclassic.font"
+    },
+    {
+      "name": "e Edan",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/eEdan.ttf",
+      "url": "https://www.dafont.com/e-edan.font"
+    },
+    {
+      "name": "e Edisi Misteri",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/eEdisiMisteri.ttf",
+      "url": "https://www.dafont.com/e-edisi-misteri.font"
+    },
+    {
+      "name": "e Edukasi Murid",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/eEdukasiMurid.ttf",
+      "url": "https://www.dafont.com/e-edukasi-murid.font"
+    },
+    {
+      "name": "e Elodea",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/eElodea.ttf",
+      "url": "https://www.dafont.com/e-elodea.font"
+    },
+    {
+      "name": "e Embuhlah",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/eEmbuhlah.ttf",
+      "url": "https://www.dafont.com/e-embuhlah.font"
+    },
+    {
+      "name": "e Engkong",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/eEngkong.ttf",
+      "url": "https://www.dafont.com/e-engkong.font"
+    },
+    {
+      "name": "e Epic Slap",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/eEpicSlap.ttf",
+      "url": "https://www.dafont.com/e-epic-slap.font"
+    },
+    {
+      "name": "e Erupsi Semeru",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/eErupsiSemeru.ttf",
+      "url": "https://www.dafont.com/e-erupsi-semeru.font"
+    },
+    {
+      "name": "e Es Blewah",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/eEsBlewah.ttf",
+      "url": "https://www.dafont.com/e-es-blewah.font"
+    },
+    {
+      "name": "e Esensi Hukum",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/eEsensiHukum.ttf",
+      "url": "https://www.dafont.com/e-esensi-hukum.font"
+    },
+    {
+      "name": "e Estafet",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/eEstafet.ttf",
+      "url": "https://www.dafont.com/e-estafet.font"
+    },
+    {
+      "name": "eXO2 Stencil",
+      "source": "dafont",
+      "category": "Fancy - Hearts",
+      "file_path": "fonts/dafont/eXO2 Stencil.ttf",
+      "url": "https://www.dafont.com/exo2-stencil.font"
+    },
+    {
+      "name": "embro___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/embro___.ttf",
+      "url": null
+    },
+    {
+      "name": "eppstrg_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eppstrg_.ttf",
+      "url": null
+    },
+    {
+      "name": "eurof35",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eurof35.ttf",
+      "url": null
+    },
+    {
+      "name": "eurof36",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eurof36.ttf",
+      "url": null
+    },
+    {
+      "name": "eurof55",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eurof55.ttf",
+      "url": null
+    },
+    {
+      "name": "eurof56",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eurof56.ttf",
+      "url": null
+    },
+    {
+      "name": "evilgreenplant1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/evilgreenplant1.ttf",
+      "url": null
+    },
+    {
+      "name": "expressway rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/expressway rg.otf",
+      "url": null
+    },
+    {
+      "name": "eyes_see_souls-2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/eyes_see_souls-2.ttf",
+      "url": null
+    },
+    {
+      "name": "f1-secuencia-quad-ffp-defharo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/f1-secuencia-quad-ffp-defharo.ttf",
+      "url": null
+    },
+    {
+      "name": "f1-secuencia-quad-ffp",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/f1-secuencia-quad-ffp.ttf",
+      "url": null
+    },
+    {
+      "name": "f Fagers",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/fFagers.ttf",
+      "url": "https://www.dafont.com/f-fagers.font"
+    },
+    {
+      "name": "f Fallow",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFallow.ttf",
+      "url": "https://www.dafont.com/f-fallow.font"
+    },
+    {
+      "name": "f Falsafah",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/fFalsafah.ttf",
+      "url": "https://www.dafont.com/f-falsafah.font"
+    },
+    {
+      "name": "f Falsetag",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/fFalsetag.ttf",
+      "url": "https://www.dafont.com/f-falsetag.font"
+    },
+    {
+      "name": "f Famzaso",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/fFamzaso.ttf",
+      "url": "https://www.dafont.com/f-famzaso.font"
+    },
+    {
+      "name": "f Fantastic Rock",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/fFantasticRock.ttf",
+      "url": "https://www.dafont.com/f-fantastic-rock.font"
+    },
+    {
+      "name": "f Farek",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/fFarek.ttf",
+      "url": "https://www.dafont.com/f-farek.font"
+    },
+    {
+      "name": "f Farso",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFarso.ttf",
+      "url": "https://www.dafont.com/f-farso.font"
+    },
+    {
+      "name": "f Feargas",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/fFeargas.ttf",
+      "url": "https://www.dafont.com/f-feargas.font"
+    },
+    {
+      "name": "f Filsan",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFilsan.ttf",
+      "url": "https://www.dafont.com/f-filsan.font"
+    },
+    {
+      "name": "f Firebrand",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFirebrand.ttf",
+      "url": "https://www.dafont.com/f-firebrand.font"
+    },
+    {
+      "name": "f Fisha",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFisha.ttf",
+      "url": "https://www.dafont.com/f-fisha.font"
+    },
+    {
+      "name": "f Float Drink",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFloatDrink.ttf",
+      "url": "https://www.dafont.com/f-float-drink.font"
+    },
+    {
+      "name": "f Fodrocy",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/fFodrocy.ttf",
+      "url": "https://www.dafont.com/f-fodrocy.font"
+    },
+    {
+      "name": "f Folking",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/fFolking.ttf",
+      "url": "https://www.dafont.com/f-folking.font"
+    },
+    {
+      "name": "f Forest Road",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/fForestRoad.ttf",
+      "url": "https://www.dafont.com/f-forest-road.font"
+    },
+    {
+      "name": "f Foresthome",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/fForesthome.ttf",
+      "url": "https://www.dafont.com/f-foresthome.font"
+    },
+    {
+      "name": "f Frabotta",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/fFrabotta.ttf",
+      "url": "https://www.dafont.com/f-frabotta.font"
+    },
+    {
+      "name": "f Froxel",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/fFroxel.ttf",
+      "url": "https://www.dafont.com/f-froxel.font"
+    },
+    {
+      "name": "Final Fantasy",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/fanta___.ttf",
+      "url": "https://www.dafont.com/final-fantasy.font"
+    },
+    {
+      "name": "fashi954",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/fashi954.ttf",
+      "url": null
+    },
+    {
+      "name": "fashl954",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/fashl954.ttf",
+      "url": null
+    },
+    {
+      "name": "fawn",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/fawn.ttf",
+      "url": null
+    },
+    {
+      "name": "fifawelcome1.3",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/fifawelcome1.3.ttf",
+      "url": null
+    },
+    {
+      "name": "filler_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/filler_.ttf",
+      "url": null
+    },
+    {
+      "name": "flashext",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/flashext.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontheruncond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontheruncond.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontheruncondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontheruncondital.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunexpandsuperital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunexpandsuperital.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunital.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunleft.ttf",
+      "url": null
+    },
+    {
+      "name": "foxontherunsemital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/foxontherunsemital.ttf",
+      "url": null
+    },
+    {
+      "name": "freud",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/freud.ttf",
+      "url": null
+    },
+    {
+      "name": "funnynoteDEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/funnynoteDEMO.otf",
+      "url": null
+    },
+    {
+      "name": "g Galemu",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/gGalemu.ttf",
+      "url": "https://www.dafont.com/g-galemu.font"
+    },
+    {
+      "name": "g Gatink",
+      "source": "dafont",
+      "category": "Fancy - Eroded",
+      "file_path": "fonts/dafont/gGatink.ttf",
+      "url": "https://www.dafont.com/g-gatink.font"
+    },
+    {
+      "name": "g Gelem",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGelem.ttf",
+      "url": "https://www.dafont.com/g-gelem.font"
+    },
+    {
+      "name": "g Gilap",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGilap.ttf",
+      "url": "https://www.dafont.com/g-gilap.font"
+    },
+    {
+      "name": "g Godong Garing",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/gGodongGaring.ttf",
+      "url": "https://www.dafont.com/g-godong-garing.font"
+    },
+    {
+      "name": "g Gorla",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/gGorla.ttf",
+      "url": "https://www.dafont.com/g-gorla.font"
+    },
+    {
+      "name": "g Grinzo",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/gGrinzo.ttf",
+      "url": "https://www.dafont.com/g-grinzo.font"
+    },
+    {
+      "name": "g Gross Profit",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGrossProfit.ttf",
+      "url": "https://www.dafont.com/g-gross-profit.font"
+    },
+    {
+      "name": "g Grungink",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/gGrungink.ttf",
+      "url": "https://www.dafont.com/g-grungink.font"
+    },
+    {
+      "name": "g Guanyu",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/gGuanyu.ttf",
+      "url": "https://www.dafont.com/g-guanyu.font"
+    },
+    {
+      "name": "g Gudang",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGudang.ttf",
+      "url": "https://www.dafont.com/g-gudang.font"
+    },
+    {
+      "name": "g Guelo",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGuelo.ttf",
+      "url": "https://www.dafont.com/g-guelo.font"
+    },
+    {
+      "name": "g Gule",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGule.ttf",
+      "url": "https://www.dafont.com/g-gule.font"
+    },
+    {
+      "name": "g Gunain",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/gGunain.ttf",
+      "url": "https://www.dafont.com/g-gunain.font"
+    },
+    {
+      "name": "gabriele-bad",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gabriele-bad.ttf",
+      "url": null
+    },
+    {
+      "name": "garagesh",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/garagesh.ttf",
+      "url": null
+    },
+    {
+      "name": "gianiteh Personal Use only",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gianiteh Personal Use only.otf",
+      "url": null
+    },
+    {
+      "name": "gibi_tm",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gibi_tm.ttf",
+      "url": null
+    },
+    {
+      "name": "gismonda",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gismonda.ttf",
+      "url": null
+    },
+    {
+      "name": "glasket500",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/glasket500.ttf",
+      "url": null
+    },
+    {
+      "name": "gomarice_fine_serif_hosomozi",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gomarice_fine_serif_hosomozi.ttf",
+      "url": null
+    },
+    {
+      "name": "gomarice_rocks",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gomarice_rocks.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsmidexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsmidexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsmidleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsmidleft.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsmidsuperital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsmidsuperital.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsshiftcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsshiftcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsshiftexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsshiftexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsshiftleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsshiftleft.ttf",
+      "url": null
+    },
+    {
+      "name": "gothamknightsshiftsuperital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothamknightsshiftsuperital.ttf",
+      "url": null
+    },
+    {
+      "name": "gothica class 2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/gothica class 2.ttf",
+      "url": null
+    },
+    {
+      "name": "graffitistreetcompactital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/graffitistreetcompactital.ttf",
+      "url": null
+    },
+    {
+      "name": "graffitistreetcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/graffitistreetcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "graffitistreetexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/graffitistreetexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "graffitistreetital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/graffitistreetital.ttf",
+      "url": null
+    },
+    {
+      "name": "graffitistreetleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/graffitistreetleft.ttf",
+      "url": null
+    },
+    {
+      "name": "guayaba sans - personal use",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/guayaba sans - personal use.ttf",
+      "url": null
+    },
+    {
+      "name": "h Habis",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/hHabis.ttf",
+      "url": "https://www.dafont.com/h-habis.font"
+    },
+    {
+      "name": "h Hachimaki",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/hHachimaki.ttf",
+      "url": "https://www.dafont.com/h-hachimaki.font"
+    },
+    {
+      "name": "h Hagi",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/hHagi.ttf",
+      "url": "https://www.dafont.com/h-hagi.font"
+    },
+    {
+      "name": "h Halotagz",
+      "source": "dafont",
+      "category": "Script - Various",
+      "file_path": "fonts/dafont/hHalotagz.ttf",
+      "url": "https://www.dafont.com/h-halotagz.font"
+    },
+    {
+      "name": "h Halua",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/hHalua.ttf",
+      "url": "https://www.dafont.com/h-halua.font"
+    },
+    {
+      "name": "h Halusino",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/hHalusino.ttf",
+      "url": "https://www.dafont.com/h-halusino.font"
+    },
+    {
+      "name": "h Harden",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/hHarden.ttf",
+      "url": "https://www.dafont.com/h-harden.font"
+    },
+    {
+      "name": "h Harestone",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/hHarestone.ttf",
+      "url": "https://www.dafont.com/h-harestone.font"
+    },
+    {
+      "name": "h Hebat",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/hHebat.ttf",
+      "url": "https://www.dafont.com/h-hebat.font"
+    },
+    {
+      "name": "h Hidan",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/hHidan.ttf",
+      "url": "https://www.dafont.com/h-hidan.font"
+    },
+    {
+      "name": "h Hitam Ink",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/hHitamInk.ttf",
+      "url": "https://www.dafont.com/h-hitam-ink.font"
+    },
+    {
+      "name": "h Hiu",
+      "source": "dafont",
+      "category": "Gothic - Initials",
+      "file_path": "fonts/dafont/hHiu.ttf",
+      "url": "https://www.dafont.com/h-hiu.font"
+    },
+    {
+      "name": "h Houji",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/hHouji.ttf",
+      "url": "https://www.dafont.com/h-houji.font"
+    },
+    {
+      "name": "h Huddle Stone",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/hHuddleStone.ttf",
+      "url": "https://www.dafont.com/h-huddle-stone.font"
+    },
+    {
+      "name": "h Hukum",
+      "source": "dafont",
+      "category": "Fancy - Retro",
+      "file_path": "fonts/dafont/hHukum.ttf",
+      "url": "https://www.dafont.com/h-hukum.font"
+    },
+    {
+      "name": "h Hutaner",
+      "source": "dafont",
+      "category": "Fancy - Initials",
+      "file_path": "fonts/dafont/hHutaner.ttf",
+      "url": "https://www.dafont.com/h-hutaner.font"
+    },
+    {
+      "name": "handmeds",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/handmeds.ttf",
+      "url": null
+    },
+    {
+      "name": "headinj____",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/headinj____.ttf",
+      "url": null
+    },
+    {
+      "name": "hockey",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/hockey.ttf",
+      "url": null
+    },
+    {
+      "name": "holsb___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/holsb___.ttf",
+      "url": null
+    },
+    {
+      "name": "htish_blocky",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/htish_blocky.otf",
+      "url": null
+    },
+    {
+      "name": "i Ibran",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/iIbran.ttf",
+      "url": "https://www.dafont.com/i-ibran.font"
+    },
+    {
+      "name": "i Ichimaru",
+      "source": "dafont",
+      "category": "Foreign Look - Arabic",
+      "file_path": "fonts/dafont/iIchimaru.ttf",
+      "url": "https://www.dafont.com/i-ichimaru.font"
+    },
+    {
+      "name": "i Icika",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/iIcika.ttf",
+      "url": "https://www.dafont.com/i-icika.font"
+    },
+    {
+      "name": "i Ignora",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/iIgnora.ttf",
+      "url": "https://www.dafont.com/i-ignora.font"
+    },
+    {
+      "name": "i Ikatan",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/iIkatan.ttf",
+      "url": "https://www.dafont.com/i-ikatan.font"
+    },
+    {
+      "name": "i Imbro",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/iImbro.ttf",
+      "url": "https://www.dafont.com/i-imbro.font"
+    },
+    {
+      "name": "i Imorsi",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/iImorsi.ttf",
+      "url": "https://www.dafont.com/i-imorsi.font"
+    },
+    {
+      "name": "i Ini Sans",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/iIniSans.ttf",
+      "url": "https://www.dafont.com/i-ini-sans.font"
+    },
+    {
+      "name": "i Ireng",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/iIreng.ttf",
+      "url": "https://www.dafont.com/i-ireng.font"
+    },
+    {
+      "name": "i Ironi",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/iIroni.ttf",
+      "url": "https://www.dafont.com/i-ironi.font"
+    },
+    {
+      "name": "i Isma",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/iIsma.ttf",
+      "url": "https://www.dafont.com/i-isma.font"
+    },
+    {
+      "name": "i Istime",
+      "source": "dafont",
+      "category": "Fancy - Curly",
+      "file_path": "fonts/dafont/iIstime.ttf",
+      "url": "https://www.dafont.com/i-istime.font"
+    },
+    {
+      "name": "ill.skillz.[fontvir.us]",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ill.skillz.[fontvir.us].ttf",
+      "url": null
+    },
+    {
+      "name": "imposs",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/imposs.ttf",
+      "url": null
+    },
+    {
+      "name": "imposs_accents",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/imposs_accents.ttf",
+      "url": null
+    },
+    {
+      "name": "incredible-soups",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/incredible-soups.ttf",
+      "url": null
+    },
+    {
+      "name": "inglobalb",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/inglobalb.ttf",
+      "url": null
+    },
+    {
+      "name": "inglobali",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/inglobali.ttf",
+      "url": null
+    },
+    {
+      "name": "j.d",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/j.d.ttf",
+      "url": null
+    },
+    {
+      "name": "j Jagong",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/jJagong.ttf",
+      "url": "https://www.dafont.com/j-jagong.font"
+    },
+    {
+      "name": "j Jayaque",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/jJayaque.ttf",
+      "url": "https://www.dafont.com/j-jayaque.font"
+    },
+    {
+      "name": "j Johar",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/jJohar.ttf",
+      "url": "https://www.dafont.com/j-johar.font"
+    },
+    {
+      "name": "j Jujur",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/jJujur.ttf",
+      "url": "https://www.dafont.com/j-jujur.font"
+    },
+    {
+      "name": "j Julukan",
+      "source": "dafont",
+      "category": "Fancy - Fire-Ice",
+      "file_path": "fonts/dafont/jJulukan.ttf",
+      "url": "https://www.dafont.com/j-julukan.font"
+    },
+    {
+      "name": "jancieni",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/jancieni.ttf",
+      "url": null
+    },
+    {
+      "name": "jap_trad_ttf_1.183.1",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/jap_trad_ttf_1.183.1.otf",
+      "url": null
+    },
+    {
+      "name": "jd_hands",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/jd_hands.ttf",
+      "url": null
+    },
+    {
+      "name": "jorvik",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/jorvik.TTF",
+      "url": null
+    },
+    {
+      "name": "jugend",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/jugend.ttf",
+      "url": null
+    },
+    {
+      "name": "justanotherstampfont_demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/justanotherstampfont_demo.ttf",
+      "url": null
+    },
+    {
+      "name": "katyfont",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/katyfont.ttf",
+      "url": null
+    },
+    {
+      "name": "kishore-sharp",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/kishore-sharp.ttf",
+      "url": null
+    },
+    {
+      "name": "kkhawsn.kdf",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/kkhawsn.kdf.ttf",
+      "url": null
+    },
+    {
+      "name": "kraut____typefuck11",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/kraut____typefuck11.ttf",
+      "url": null
+    },
+    {
+      "name": "ksbrush",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ksbrush.ttf",
+      "url": null
+    },
+    {
+      "name": "lacabeza",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lacabeza.otf",
+      "url": null
+    },
+    {
+      "name": "lady",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lady.ttf",
+      "url": null
+    },
+    {
+      "name": "lekton005_l",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lekton005_l.otf",
+      "url": null
+    },
+    {
+      "name": "lelim_300",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lelim_300.ttf",
+      "url": null
+    },
+    {
+      "name": "leteske Final",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/leteske Final.otf",
+      "url": null
+    },
+    {
+      "name": "lino-set",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lino-set.ttf",
+      "url": null
+    },
+    {
+      "name": "littleinsect",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/littleinsect.ttf",
+      "url": null
+    },
+    {
+      "name": "lobato",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/lobato.ttf",
+      "url": null
+    },
+    {
+      "name": "loppemarked 3 DEMO",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/loppemarked 3 DEMO.otf",
+      "url": null
+    },
+    {
+      "name": "luxcontratenebrasexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/luxcontratenebrasexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "luxcontratenebrasrotal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/luxcontratenebrasrotal.ttf",
+      "url": null
+    },
+    {
+      "name": "mallorymaloneyshandwriting",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/mallorymaloneyshandwriting.ttf",
+      "url": null
+    },
+    {
+      "name": "manjiro",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/manjiro.ttf",
+      "url": null
+    },
+    {
+      "name": "mantodea_druck",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/mantodea_druck.ttf",
+      "url": null
+    },
+    {
+      "name": "Mcgannahan",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/mcgarg__.ttf",
+      "url": "https://www.dafont.com/mcgannahan.font"
+    },
+    {
+      "name": "megalomania___x",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/megalomania___x.ttf",
+      "url": null
+    },
+    {
+      "name": "mh2__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/mh2__.ttf",
+      "url": null
+    },
+    {
+      "name": "mh__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/mh__.ttf",
+      "url": null
+    },
+    {
+      "name": "militech_r_2019-04-13",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/militech_r_2019-04-13.otf",
+      "url": null
+    },
+    {
+      "name": "modern-vision",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/modern-vision.ttf",
+      "url": null
+    },
+    {
+      "name": "monoMMM_5",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/monoMMM_5.ttf",
+      "url": null
+    },
+    {
+      "name": "monof55",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/monof55.ttf",
+      "url": null
+    },
+    {
+      "name": "motrg___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/motrg___.ttf",
+      "url": null
+    },
+    {
+      "name": "mouthbrebb",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/mouthbrebb.ttf",
+      "url": null
+    },
+    {
+      "name": "My Old Remington",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/myoldrem.ttf",
+      "url": "https://www.dafont.com/my-old-remington.font"
+    },
+    {
+      "name": "n Nafiba",
+      "source": "dafont",
+      "category": "Fancy - Western",
+      "file_path": "fonts/dafont/nNafiba.ttf",
+      "url": "https://www.dafont.com/n-nafiba.font"
+    },
+    {
+      "name": "n Nambal Ban",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/nNambalBan.ttf",
+      "url": "https://www.dafont.com/n-nambal-ban.font"
+    },
+    {
+      "name": "n Namun",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/nNamun.ttf",
+      "url": "https://www.dafont.com/n-namun.font"
+    },
+    {
+      "name": "n Naruse",
+      "source": "dafont",
+      "category": "Script - Handwritten",
+      "file_path": "fonts/dafont/nNaruse.ttf",
+      "url": "https://www.dafont.com/n-naruse.font"
+    },
+    {
+      "name": "n Nembost",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/nNembost.ttf",
+      "url": "https://www.dafont.com/n-nembost.font"
+    },
+    {
+      "name": "n Nemkoz",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/nNemkoz.ttf",
+      "url": "https://www.dafont.com/n-nemkoz.font"
+    },
+    {
+      "name": "n Neriman",
+      "source": "dafont",
+      "category": "Script - Brush",
+      "file_path": "fonts/dafont/nNeriman.ttf",
+      "url": "https://www.dafont.com/n-neriman.font"
+    },
+    {
+      "name": "n Newzoom",
+      "source": "dafont",
+      "category": "Fancy - Old School",
+      "file_path": "fonts/dafont/nNewzoom.ttf",
+      "url": "https://www.dafont.com/n-newzoom.font"
+    },
+    {
+      "name": "n Nightask",
+      "source": "dafont",
+      "category": "Gothic - Medieval",
+      "file_path": "fonts/dafont/nNightask.ttf",
+      "url": "https://www.dafont.com/n-nightask.font"
+    },
+    {
+      "name": "n Nublek",
+      "source": "dafont",
+      "category": "Script - Trash",
+      "file_path": "fonts/dafont/nNublek.ttf",
+      "url": "https://www.dafont.com/n-nublek.font"
+    },
+    {
+      "name": "nabatea-defharo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/nabatea-defharo.ttf",
+      "url": null
+    },
+    {
+      "name": "nee",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/nee.ttf",
+      "url": null
+    },
+    {
+      "name": "neonclipper_normal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/neonclipper_normal.ttf",
+      "url": null
+    },
+    {
+      "name": "nicolette demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/nicolette demo.ttf",
+      "url": null
+    },
+    {
+      "name": "nobilty",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/nobilty.ttf",
+      "url": null
+    },
+    {
+      "name": "nusamd",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/nusamd.ttf",
+      "url": null
+    },
+    {
+      "name": "obcecada-sans-ffp",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/obcecada-sans-ffp.otf",
+      "url": null
+    },
+    {
+      "name": "obcecada-serif-FFP",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/obcecada-serif-FFP.otf",
+      "url": null
+    },
+    {
+      "name": "obcecada-serif-FFP",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/obcecada-serif-FFP.ttf",
+      "url": null
+    },
+    {
+      "name": "octab-017",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/octab-017.ttf",
+      "url": null
+    },
+    {
+      "name": "octar-017",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/octar-017.ttf",
+      "url": null
+    },
+    {
+      "name": "onuava__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/onuava__.ttf",
+      "url": null
+    },
+    {
+      "name": "other-f",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/other-f.ttf",
+      "url": null
+    },
+    {
+      "name": "papercuts-2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/papercuts-2.ttf",
+      "url": null
+    },
+    {
+      "name": "parahyangan space",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/parahyangan space.ttf",
+      "url": null
+    },
+    {
+      "name": "peachyday demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/peachyday demo.ttf",
+      "url": null
+    },
+    {
+      "name": "portcreb",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/portcreb.ttf",
+      "url": null
+    },
+    {
+      "name": "poti",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/poti.ttf",
+      "url": null
+    },
+    {
+      "name": "probsecrnormal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/probsecrnormal.ttf",
+      "url": null
+    },
+    {
+      "name": "puree____2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/puree____2.ttf",
+      "url": null
+    },
+    {
+      "name": "pykes_peak_zero",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/pykes_peak_zero.otf",
+      "url": null
+    },
+    {
+      "name": "quillswordcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordcond.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordital.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordleft.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordrotal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordrotal.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordrotate",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordrotate.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordrotate2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordrotate2.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordsemital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordsemital.ttf",
+      "url": null
+    },
+    {
+      "name": "quillswordsuperital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/quillswordsuperital.ttf",
+      "url": null
+    },
+    {
+      "name": "rm_midse",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/rm_midse.ttf",
+      "url": null
+    },
+    {
+      "name": "roastink demo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/roastink demo.otf",
+      "url": null
+    },
+    {
+      "name": "robosapienleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/robosapienleft.ttf",
+      "url": null
+    },
+    {
+      "name": "rocknroll_typo_crazy",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/rocknroll_typo_crazy.ttf",
+      "url": null
+    },
+    {
+      "name": "roidci",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/roidci.ttf",
+      "url": null
+    },
+    {
+      "name": "romance fatal serif JC Fonts",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/romance fatal serif JC Fonts.ttf",
+      "url": null
+    },
+    {
+      "name": "rusty_typewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/rusty_typewriter.otf",
+      "url": null
+    },
+    {
+      "name": "santor 1.002",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/santor 1.002.otf",
+      "url": null
+    },
+    {
+      "name": "sbmodernstd",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/sbmodernstd.ttf",
+      "url": null
+    },
+    {
+      "name": "script soft normal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/script soft normal.ttf",
+      "url": null
+    },
+    {
+      "name": "secrcode",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/secrcode.ttf",
+      "url": null
+    },
+    {
+      "name": "senza",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/senza.ttf",
+      "url": null
+    },
+    {
+      "name": "sharkhandwriteabc",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/sharkhandwriteabc.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldcond.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldital.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldleft.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldsemileft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldsemileft.ttf",
+      "url": null
+    },
+    {
+      "name": "shiningheraldsemital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shiningheraldsemital.ttf",
+      "url": null
+    },
+    {
+      "name": "shoplift",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/shoplift.ttf",
+      "url": null
+    },
+    {
+      "name": "skull_font",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/skull_font.ttf",
+      "url": null
+    },
+    {
+      "name": "snaphand-v1-free",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/snaphand-v1-free.ttf",
+      "url": null
+    },
+    {
+      "name": "space Xrebron",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/space Xrebron.ttf",
+      "url": null
+    },
+    {
+      "name": "spongefont",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/spongefont.ttf",
+      "url": null
+    },
+    {
+      "name": "springsteel-lig",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/springsteel-lig.otf",
+      "url": null
+    },
+    {
+      "name": "stnicholas",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/stnicholas.ttf",
+      "url": null
+    },
+    {
+      "name": "sweet purple",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/sweet purple.otf",
+      "url": null
+    },
+    {
+      "name": "swerveli",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/swerveli.ttf",
+      "url": null
+    },
+    {
+      "name": "taller_evolution_rev",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/taller_evolution_rev.otf",
+      "url": null
+    },
+    {
+      "name": "tarnh___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/tarnh___.ttf",
+      "url": null
+    },
+    {
+      "name": "technick",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/technick.ttf",
+      "url": null
+    },
+    {
+      "name": "tertre-xbol",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/tertre-xbol.otf",
+      "url": null
+    },
+    {
+      "name": "thryn___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/thryn___.ttf",
+      "url": null
+    },
+    {
+      "name": "timeburnernormal",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/timeburnernormal.ttf",
+      "url": null
+    },
+    {
+      "name": "tipo",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/tipo.ttf",
+      "url": null
+    },
+    {
+      "name": "toony_loons",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/toony_loons.otf",
+      "url": null
+    },
+    {
+      "name": "traditio",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/traditio.ttf",
+      "url": null
+    },
+    {
+      "name": "turmoil",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/turmoil.ttf",
+      "url": null
+    },
+    {
+      "name": "type_right",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/type_right.ttf",
+      "url": null
+    },
+    {
+      "name": "typeo___",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/typeo___.ttf",
+      "url": null
+    },
+    {
+      "name": "uberv2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/uberv2.ttf",
+      "url": null
+    },
+    {
+      "name": "uberv2c",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/uberv2c.ttf",
+      "url": null
+    },
+    {
+      "name": "uberv2e",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/uberv2e.ttf",
+      "url": null
+    },
+    {
+      "name": "uberv2i",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/uberv2i.ttf",
+      "url": null
+    },
+    {
+      "name": "uwch",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/uwch.ttf",
+      "url": null
+    },
+    {
+      "name": "victoria-serif",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/victoria-serif.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxcond.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxcondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxcondital.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxcondsemital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxcondsemital.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxital.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxleft.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxsuperital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxsuperital.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxtitle",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxtitle.ttf",
+      "url": null
+    },
+    {
+      "name": "voxboxtitleital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/voxboxtitleital.ttf",
+      "url": null
+    },
+    {
+      "name": "wbv",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wbv.ttf",
+      "url": null
+    },
+    {
+      "name": "wbvcond",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wbvcond.ttf",
+      "url": null
+    },
+    {
+      "name": "wbvexpand",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wbvexpand.ttf",
+      "url": null
+    },
+    {
+      "name": "wbvital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wbvital.ttf",
+      "url": null
+    },
+    {
+      "name": "wbvleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wbvleft.ttf",
+      "url": null
+    },
+    {
+      "name": "whoa! 2",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/whoa! 2.ttf",
+      "url": null
+    },
+    {
+      "name": "wickhop-handwriting",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/wickhop-handwriting.ttf",
+      "url": null
+    },
+    {
+      "name": "woodcutter Old Guard",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/woodcutter Old Guard.ttf",
+      "url": null
+    },
+    {
+      "name": "xilosa_",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/xilosa_.ttf",
+      "url": null
+    },
+    {
+      "name": "y2kboogie",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/y2kboogie.ttf",
+      "url": null
+    },
+    {
+      "name": "ylee Mortal Heart, Immortal Memory v.1.11 (OTF)",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/ylee Mortal Heart, Immortal Memory v.1.11 (OTF).otf",
+      "url": null
+    },
+    {
+      "name": "My type of font",
+      "source": "dafont",
+      "category": "Fancy - Modern",
+      "file_path": "fonts/dafont/yt.ttf",
+      "url": "https://www.dafont.com/my-type-of-font.font"
+    },
+    {
+      "name": "zai_BrushyFreshy",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_BrushyFreshy.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_ConsulPolishTypewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_ConsulPolishTypewriter.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_CourierPolski1941",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_CourierPolski1941.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_DrukarniaAkademiiKrakowskiej1674",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_DrukarniaAkademiiKrakowskiej1674.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_HongKongGraffiti",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_HongKongGraffiti.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_OlivettiLettera22Typewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_OlivettiLettera22Typewriter.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_PencilTypewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_PencilTypewriter.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_Smith-CoronaGalaxieTypewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_Smith-CoronaGalaxieTypewriter.otf",
+      "url": null
+    },
+    {
+      "name": "zai_TornPaper",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_TornPaper.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_TributeToCaselli'sPantelegraph",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_TributeToCaselli'sPantelegraph.ttf",
+      "url": null
+    },
+    {
+      "name": "zai_UraniaPiccolaTypewriter",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zai_UraniaPiccolaTypewriter.otf",
+      "url": null
+    },
+    {
+      "name": "zfont",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zfont.ttf",
+      "url": null
+    },
+    {
+      "name": "zilverstone_eyefs",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zilverstone_eyefs.ttf",
+      "url": null
+    },
+    {
+      "name": "zirconiancondital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zirconiancondital.ttf",
+      "url": null
+    },
+    {
+      "name": "zirconianexpandital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zirconianexpandital.ttf",
+      "url": null
+    },
+    {
+      "name": "zirconianital",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zirconianital.ttf",
+      "url": null
+    },
+    {
+      "name": "zirconianleft",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zirconianleft.ttf",
+      "url": null
+    },
+    {
+      "name": "zolofb__",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zolofb__.ttf",
+      "url": null
+    },
+    {
+      "name": "zrnic rg",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zrnic rg.otf",
+      "url": null
+    },
+    {
+      "name": "zxspectr",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/zxspectr.ttf",
+      "url": null
+    },
+    {
+      "name": "{skinny} jeans solid",
+      "source": "dafont",
+      "category": null,
+      "file_path": "fonts/dafont/{skinny} jeans solid.ttf",
+      "url": null
+    }
+  ]
+}

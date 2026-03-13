@@ -12,18 +12,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/docker/stroke_model/logs"
 CKPT_DIR="$SCRIPT_DIR/docker/stroke_model/checkpoints"
+CACHE_DIR="$SCRIPT_DIR/docker/stroke_model/glyph_cache"
 BUILD_LOG="$LOG_DIR/build.log"
 TRAIN_LOG="$LOG_DIR/train.log"
 STATUS_FILE="$LOG_DIR/status.json"
 
-mkdir -p "$LOG_DIR" "$CKPT_DIR"
+mkdir -p "$LOG_DIR" "$CKPT_DIR" "$CACHE_DIR"
 
 # Defaults
 SKIP_BUILD=false
 EPOCHS=100
-BATCH_SIZE=8
+BATCH_SIZE=32
 LR="1e-4"
 RENDER_EVERY=2
+NUM_WORKERS=8
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -69,21 +71,24 @@ echo "[$(date)] Starting training: $EPOCHS epochs, batch=$BATCH_SIZE, lr=$LR"
 
 docker run --rm --gpus all \
     --name stroke-model-train \
+    --shm-size=2g \
     -v "$SCRIPT_DIR/fonts:/fonts:ro" \
     -v "$SCRIPT_DIR/fonts.db:/data/fonts.db:ro" \
     -v "$CKPT_DIR:/app/checkpoints" \
+    -v "$CACHE_DIR:/app/cache" \
     stroke-model:latest \
     python3 /app/train.py \
         --db /data/fonts.db \
         --font-dir / \
         --output-dir /app/checkpoints \
+        --cache-dir /app/cache \
         --epochs "$EPOCHS" \
         --batch-size "$BATCH_SIZE" \
         --lr "$LR" \
         --augment \
-        --num-workers 4 \
-        --log-every 100 \
-        --save-every 10 \
+        --num-workers "$NUM_WORKERS" \
+        --log-every 50 \
+        --save-every 5 \
         --render-every "$RENDER_EVERY" \
     > "$TRAIN_LOG" 2>&1
 
