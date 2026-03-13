@@ -157,7 +157,7 @@ def main():
     if device.type == 'cuda':
         logger.info("GPU: %s, VRAM: %.1f GB",
                      torch.cuda.get_device_name(),
-                     torch.cuda.get_device_properties(0).total_mem / 1e9)
+                     torch.cuda.get_device_properties(0).total_memory / 1e9)
 
     # Set up pydiffvg
     import pydiffvg

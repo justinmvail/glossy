@@ -36,16 +36,22 @@ RUN pip3 install --no-cache-dir \
     scikit-image
 
 # Clone and build DiffVG from source (for differentiable rendering loss)
+# Set CUDA env vars so cmake finds nvcc and enables GPU support
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
 WORKDIR /opt
+# Cache-bust: force CUDA build v2
 RUN git clone https://github.com/BachiLi/diffvg.git && \
     cd diffvg && \
     git submodule update --init --recursive && \
-    python3 setup.py install
+    DIFFVG_CUDA=1 python3 setup.py install
 
 # Install additional ML dependencies
 RUN pip3 install --no-cache-dir \
     timm>=0.9.0 \
-    tensorboard>=2.14.0
+    tensorboard>=2.14.0 \
+    cssutils \
+    matplotlib
 
 WORKDIR /app
 
