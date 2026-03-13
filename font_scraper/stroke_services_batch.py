@@ -5,6 +5,7 @@ extracted from stroke_routes_batch.py to improve code organization.
 
 Services:
     - DiffVG integration (lazy loading)
+    - Stroke model integration (lazy loading)
     - Ray casting for point centering
     - Skeleton and stroke generation
     - Test run management
@@ -56,6 +57,33 @@ def get_diffvg() -> Any:
                     _diffvg = None
                 _diffvg_initialized = True
     return _diffvg
+
+
+# Lazy-loaded Stroke Model instance
+_stroke_model = None
+_stroke_model_initialized = False
+_stroke_model_lock = threading.Lock()
+
+
+def get_stroke_model() -> Any:
+    """Get the Stroke Model Docker instance, lazily initializing on first use.
+
+    Thread-safe initialization using double-checked locking pattern.
+
+    Returns:
+        StrokeModelDocker instance, or None if unavailable.
+    """
+    global _stroke_model, _stroke_model_initialized
+    if not _stroke_model_initialized:
+        with _stroke_model_lock:
+            if not _stroke_model_initialized:
+                try:
+                    from docker.stroke_model_docker import StrokeModelDocker
+                    _stroke_model = StrokeModelDocker()
+                except ImportError:
+                    _stroke_model = None
+                _stroke_model_initialized = True
+    return _stroke_model
 
 
 def get_stroke_funcs() -> tuple:

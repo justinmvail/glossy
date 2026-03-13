@@ -185,8 +185,10 @@
       <button id="btnSkeletonFull" class="process" onclick="runSkeletonFull()"><kbd>F</kbd> Skel+Resample</button>
       <button id="btnOptLive" class="process" onclick="runOptimizeLive()" style="background:#2a5a2a"><kbd>O</kbd> Optimize Live</button>
       <button id="btnDiffVG" class="process" onclick="runDiffVG()" style="background:#2a4a5a"><kbd>Y</kbd> DiffVG Refine</button>
+      <button id="btnMLStrokes" class="process" onclick="runMLStrokes()" style="background:#2a3a5a"><kbd>L</kbd> ML Strokes</button>
       <button id="btnThinPreview" class="process" onclick="showThinPreview()" style="background:#4a4a2a"><kbd>T</kbd> Thin Preview</button>
       <button id="btnMinimalStrokes" class="process" onclick="loadMinimalStrokes()" style="background:#4a2a4a"><kbd>U</kbd> Minimal Strokes</button>
+      <button id="btnSimon" class="process" onclick="loadSimon()" style="background:#5a4a2a"><kbd>I</kbd> Simon</button>
       <button id="btnRidgeTrace" class="process" onclick="runRidgeTrace()" style="background:#2a4a4a"><kbd>J</kbd> Ridge Trace</button>
       <button id="btnClearCache" class="process" onclick="clearShapeCache()" style="background:#5a2a2a">Clear Cache</button>
       <button id="btnAutoJoin" class="process" onclick="runAutoJoin()"><kbd>W</kbd> Auto-Join</button>
@@ -250,6 +252,7 @@
       <div class="row"><span class="key"><kbd>F</kbd></span> Skeleton + resample</div>
       <div class="row"><span class="key"><kbd>W</kbd></span> Auto-join nearby strokes</div>
       <div class="row"><span class="key"><kbd>Q</kbd></span> Reduce strokes (aggressive merge)</div>
+      <div class="row"><span class="key"><kbd>I</kbd></span> Simon skeleton strokes</div>
       <div class="row"><span class="key"><kbd>Y</kbd></span> DiffVG refine (GPU)</div>
       <div class="row"><span class="key"><kbd>1</kbd></span> Place vertex marker (junction)</div>
       <div class="row"><span class="key"><kbd>2</kbd></span> Place termination marker (endpoint)</div>
@@ -739,14 +742,14 @@ function runCenterBorders() {
 
 let thinPreviewImg = null;
 
-function showThinPreview(thin = 5) {
+function showThinPreview(thin = 0) {
   const url = `/api/thin-preview/${FONT_ID}?c=${encodeURIComponent(CHAR)}&thin=${thin}`;
   // Load as overlay on canvas
   const img = new Image();
   img.onload = function() {
     thinPreviewImg = img;
     draw();
-    setStatus(`Thin preview (${thin} iterations) - press Esc to hide`);
+    setStatus(`Thin preview (full skeleton) - press Esc to hide`);
   };
   img.onerror = function() {
     setStatus('Failed to load thin preview');
@@ -989,6 +992,37 @@ function runDiffVG(thin = 0) {
   });
 }
 
+function runMLStrokes() {
+  pushUndo();
+  startRecording('ML Strokes');
+  setStatus('ML Strokes predicting...');
+  fetch(`/api/ml-strokes/${FONT_ID}?c=${encodeURIComponent(CHAR)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({})
+  }).then(r => r.json()).then(d => {
+    if (d.strokes && d.strokes.length > 0) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      const score = d.score ? d.score.toFixed(3) : '?';
+      const elapsed = d.elapsed ? d.elapsed.toFixed(1) : '?';
+      setStatus(`ML Strokes: score=${score}, ${elapsed}s`);
+      recordFrame(`ML Strokes: score=${score}`);
+    } else {
+      setStatus('ML Strokes error: ' + (d.error || 'no strokes returned'));
+    }
+    stopRecording();
+  }).catch(err => {
+    setStatus('ML Strokes failed: ' + err);
+    stopRecording();
+  });
+}
+
 function runSkeleton() {
   if (state.strokes.length > 0 && !confirm('Replace existing strokes with skeleton?')) return;
   pushUndo();
@@ -1039,6 +1073,31 @@ function runRidgeTrace() {
       const pts = d.strokes.reduce((a, s) => a + s.length, 0);
       setStatus(`Ridge: ${d.strokes.length} strokes, ${pts} points`);
       recordFrame(`Ridge: ${d.strokes.length} strokes, ${pts} pts`);
+    } else {
+      setStatus('Error: ' + (d.error || 'unknown'));
+    }
+    stopRecording();
+  });
+}
+
+function loadSimon() {
+  if (state.strokes.length > 0 && !confirm('Replace existing strokes with Simon skeleton strokes?')) return;
+  pushUndo();
+  startRecording('Simon');
+  setStatus('Simon: extracting strokes...');
+  fetch(`/api/simon/${FONT_ID}?c=${encodeURIComponent(CHAR)}`)
+    .then(r => r.json()).then(d => {
+    if (d.strokes) {
+      state.strokes = d.strokes;
+      state.selectedStroke = -1;
+      state.selectedPoint = -1;
+      state.selectedMulti = [];
+      state.dirty = true;
+      draw();
+      updateStrokeList();
+      const pts = d.strokes.reduce((a, s) => a + s.length, 0);
+      setStatus(`Simon: ${d.strokes.length} strokes, ${pts} points`);
+      recordFrame(`Simon: ${d.strokes.length} strokes, ${pts} pts`);
     } else {
       setStatus('Error: ' + (d.error || 'unknown'));
     }
@@ -2772,9 +2831,11 @@ document.addEventListener('keydown', e => {
     case 'w': runAutoJoin(); break;
     case 'q': runReduce(); break;
     case 'y': runDiffVG(); break;
+    case 'l': runMLStrokes(); break;
     case 'J': runRidgeTrace(); break;
     case 't': if (!e.ctrlKey) showThinPreview(); break;
     case 'u': loadMinimalStrokes(); break;
+    case 'i': loadSimon(); break;
     case 'p': togglePlay(); break;
     case '1': setMode('addVertex'); break;
     case '2': setMode('addTermination'); break;

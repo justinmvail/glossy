@@ -412,3 +412,202 @@ def center_strokes_on_glyph(strokes: list, mask: np.ndarray) -> list:
         result.append(centered_stroke)
 
     return result
+
+
+def simon_extract_strokes(font_path: str, char: str, size: int = 224,
+                          bezier_error: float = 5, pts_per_segment: int = 8) -> list:
+    """Extract strokes using Simon Cozens' skeleton pipeline.
+
+    Pipeline: Lee skeletonize → graph-based path extraction → Bezier curve
+    fitting → resample to polylines.
+
+    Args:
+        font_path: Path to font file.
+        char: Character to extract strokes for.
+        size: Canvas size in pixels.
+        bezier_error: Error tolerance for Bezier curve fitting (pixels).
+        pts_per_segment: Points to sample per Bezier segment.
+
+    Returns:
+        List of strokes, each stroke is a list of [x, y] points.
+    """
+    from beziers.path import BezierPath
+    from beziers.point import Point
+    from skimage.morphology import skeletonize
+
+    mask = render_glyph_mask(font_path, char, size)
+    if mask is None:
+        return []
+
+    skel = skeletonize(mask > 0, method='lee') > 0
+    if not skel.any():
+        return []
+
+    edges = _skeleton_to_graph_edges(skel)
+    if not edges:
+        return []
+
+    strokes = []
+    for edge in edges:
+        # Skip tiny junction-to-junction fragments
+        if len(edge) < 5:
+            continue
+
+        # Convert (row, col) to (x, y) Points
+        points = [Point(float(c), float(r)) for r, c in edge]
+
+        try:
+            bp = BezierPath.fromPoints(points, error=bezier_error)
+            segments = bp.asSegments()
+
+            polyline = []
+            for seg in segments:
+                for i in range(pts_per_segment):
+                    t = i / pts_per_segment
+                    pt = seg.pointAtTime(t)
+                    polyline.append([round(pt.x, 1), round(pt.y, 1)])
+            # Final point of last segment
+            pt = segments[-1].pointAtTime(1.0)
+            polyline.append([round(pt.x, 1), round(pt.y, 1)])
+
+            # Deduplicate consecutive identical points
+            deduped = [polyline[0]]
+            for p in polyline[1:]:
+                if p != deduped[-1]:
+                    deduped.append(p)
+
+            if len(deduped) >= 2:
+                strokes.append(deduped)
+        except Exception:
+            # Fallback: subsample raw skeleton points
+            step = max(1, len(edge) // 20)
+            raw = [[float(c), float(r)] for r, c in edge[::step]]
+            if edge[-1] != edge[-1 * step]:
+                raw.append([float(edge[-1][1]), float(edge[-1][0])])
+            if len(raw) >= 2:
+                strokes.append(raw)
+
+    return strokes
+
+
+def _skeleton_to_graph_edges(skel: np.ndarray) -> list[list[tuple[int, int]]]:
+    """Extract graph edges from a binary skeleton image.
+
+    Builds a graph where nodes are endpoints (degree 1) and junctions
+    (degree > 2). Each edge is a path of pixels connecting two nodes,
+    traced through degree-2 pixels. This produces semantically meaningful
+    strokes rather than fragments.
+
+    For skeletons with no junctions (simple curves), traces endpoint
+    to endpoint.
+
+    Args:
+        skel: Binary skeleton image (True = skeleton pixel).
+
+    Returns:
+        List of edges, each edge is a list of (row, col) tuples.
+    """
+    h, w = skel.shape
+
+    # Compute neighbor count for each skeleton pixel
+    neighbor_count = np.zeros((h, w), dtype=int)
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            if dy == 0 and dx == 0:
+                continue
+            # Manual shift to avoid np.roll wrap-around artifacts
+            src_r = slice(max(0, -dy), h + min(0, -dy))
+            dst_r = slice(max(0, dy), h + min(0, dy))
+            src_c = slice(max(0, -dx), w + min(0, -dx))
+            dst_c = slice(max(0, dx), w + min(0, dx))
+            neighbor_count[dst_r, dst_c] += skel[src_r, src_c].astype(int)
+    neighbor_count *= skel
+
+    # Classify pixels
+    node_set = set()  # endpoints and junctions
+    endpoint_list = []
+    junction_list = []
+
+    rows, cols = np.where(skel)
+    for r, c in zip(rows, cols):
+        nc = neighbor_count[r, c]
+        if nc == 1:
+            endpoint_list.append((r, c))
+            node_set.add((r, c))
+        elif nc > 2:
+            junction_list.append((r, c))
+            node_set.add((r, c))
+
+    def get_skel_neighbors(r, c):
+        nbrs = []
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                if dy == 0 and dx == 0:
+                    continue
+                nr, nc_ = r + dy, c + dx
+                if 0 <= nr < h and 0 <= nc_ < w and skel[nr, nc_]:
+                    nbrs.append((nr, nc_))
+        return nbrs
+
+    def trace_edge(start, first_step):
+        """Trace from start through first_step until reaching another node."""
+        path = [start, first_step]
+        prev = start
+        cur = first_step
+        while cur not in node_set or cur == start:
+            nbrs = get_skel_neighbors(cur[0], cur[1])
+            # Continue to a neighbor that isn't where we came from
+            next_px = None
+            for n in nbrs:
+                if n != prev:
+                    next_px = n
+                    break
+            if next_px is None:
+                break  # dead end (shouldn't happen in clean skeleton)
+            prev = cur
+            cur = next_px
+            path.append(cur)
+            if cur in node_set:
+                break
+        return path
+
+    edges = []
+    visited_edges = set()  # Track visited (node, first_step) to avoid duplicates
+
+    # Trace edges from all nodes
+    start_points = endpoint_list + junction_list
+    for node in start_points:
+        nbrs = get_skel_neighbors(node[0], node[1])
+        for nbr in nbrs:
+            edge_key = (node, nbr)
+            if edge_key in visited_edges:
+                continue
+            path = trace_edge(node, nbr)
+            if len(path) >= 2:
+                edges.append(path)
+                # Mark both directions as visited
+                visited_edges.add((node, nbr))
+                if len(path) >= 2:
+                    visited_edges.add((path[-1], path[-2]))
+
+    # Handle components with no nodes (pure loops — all degree-2)
+    if not node_set:
+        visited = np.zeros_like(skel, dtype=bool)
+        for r, c in zip(rows, cols):
+            if visited[r, c]:
+                continue
+            path = [(r, c)]
+            visited[r, c] = True
+            cur_r, cur_c = r, c
+            while True:
+                nbrs = [(nr, nc_) for nr, nc_ in get_skel_neighbors(cur_r, cur_c)
+                        if not visited[nr, nc_]]
+                if not nbrs:
+                    break
+                cur_r, cur_c = nbrs[0]
+                visited[cur_r, cur_c] = True
+                path.append((cur_r, cur_c))
+            if len(path) >= 3:
+                edges.append(path)
+
+    return edges

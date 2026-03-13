@@ -68,6 +68,7 @@ from stroke_flask import (
 from stroke_rendering import render_glyph_mask
 from stroke_services_batch import (
     get_diffvg,
+    get_stroke_model,
     get_stroke_funcs,
     cast_ray,
     center_point_in_glyph,
@@ -1056,3 +1057,64 @@ def api_diffvg(fid: int) -> Response | tuple[str, int]:
         logger.error("DiffVG optimization failed for font %d char '%s': %s", fid, c, r['error'])
         return jsonify(error="Optimization failed"), 500
     return jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0), source=src)
+
+
+@app.route('/api/ml-strokes/<int:fid>', methods=['POST'])
+def api_ml_strokes(fid: int) -> Response | tuple[str, int]:
+    """Predict strokes using the trained ML stroke model.
+
+    Uses Docker-containerized CNN+Transformer model to predict centerline
+    strokes from a glyph raster image.
+
+    Args:
+        fid: Font ID from URL path.
+
+    Returns:
+        Response: JSON response with predicted strokes.
+
+    Request:
+        POST /api/ml-strokes/<fid>?c=A
+
+    Query Parameters:
+        c (str, required): Character to predict strokes for.
+
+    Response:
+        Success (200)::
+
+            {
+                "strokes": [[[x1, y1], [x2, y2], ...], ...],
+                "score": 0.85,
+                "elapsed": 0.12
+            }
+
+        Error (400)::
+
+            {"error": "Missing ?c= parameter"}
+
+        Error (404)::
+
+            {"error": "Font not found"}
+
+        Error (500)::
+
+            {"error": "ML stroke prediction failed"}
+
+        Error (503)::
+
+            {"error": "Stroke Model Docker not available"}
+    """
+    c, err = get_char_param_or_error()
+    if err:
+        return err
+    stroke_model = get_stroke_model()
+    if stroke_model is None:
+        return error_response("Stroke Model Docker not available", 503)
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
+    fp = resolve_font_path(f['file_path'])
+    r = stroke_model.predict(font_path=fp, char=c, canvas_size=DEFAULT_CANVAS_SIZE)
+    if 'error' in r:
+        logger.error("ML stroke prediction failed for font %d char '%s': %s", fid, c, r['error'])
+        return jsonify(error="ML stroke prediction failed"), 500
+    return jsonify(strokes=r.get('strokes', []), score=r.get('score', 0), elapsed=r.get('elapsed', 0))

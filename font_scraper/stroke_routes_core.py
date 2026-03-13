@@ -113,6 +113,7 @@ from stroke_services_core import (
     process_strokes,
     snap_strokes_to_boundary,
     center_strokes_on_glyph,
+    simon_extract_strokes,
     MIN_SHAPE_COUNT,
     MAX_SHAPE_COUNT,
     MAX_WIDTH_RATIO,
@@ -508,10 +509,10 @@ def api_thin_preview(fid: int) -> Response | tuple[str, int]:
     m = render_glyph_mask(f['file_path'], c)
     if m is None:
         return error_response("Could not render glyph", 500, 'text')
-    thin_iter = request.args.get('thin', 5, type=int)
-    if thin_iter is None or thin_iter < 0 or thin_iter > 100:
+    thin_iter = request.args.get('thin', 0, type=int)
+    if thin_iter < 0 or thin_iter > 100:
         return error_response("Invalid thin parameter", 400, 'text')
-    th = thin(m, max_num_iter=thin_iter)
+    th = thin(m, max_num_iter=thin_iter or None)
     img = np.full((224, 224, 3), 255, dtype=np.uint8)
     img[m], img[th] = [200, 200, 200], [0, 0, 0]
     return send_pil_image_as_png(Image.fromarray(img))
@@ -2691,3 +2692,33 @@ def api_register_existing_fonts() -> Response:
     except Exception as e:
         logger.error("Font registration failed: %s", e)
         return error_response(f"Registration failed: {str(e)}", 500)
+
+
+@app.route('/api/simon/<int:fid>')
+def api_simon(fid: int) -> Response | tuple[str, int]:
+    """Extract strokes using Simon Cozens' skeleton pipeline.
+
+    Uses Lee skeletonization, pixel path tracing, and Bezier curve fitting
+    to produce smooth centerline strokes.
+
+    Args:
+        fid: Font ID from URL path.
+
+    Query Parameters:
+        c (str, required): Character to process.
+
+    Returns:
+        Response: JSON with strokes array.
+    """
+    c, err = get_char_param_or_error()
+    if err:
+        return err
+    f, err = get_font_or_error(fid)
+    if err:
+        return err
+
+    strokes = simon_extract_strokes(f['file_path'], c)
+    if not strokes:
+        return jsonify(error="No strokes extracted"), 500
+
+    return jsonify(strokes=strokes)
