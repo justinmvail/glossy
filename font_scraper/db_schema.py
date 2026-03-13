@@ -144,6 +144,11 @@ CREATE TABLE IF NOT EXISTS characters (
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+    -- Editor metadata
+    markers TEXT,
+    shape_params_cache TEXT,
+    template_variant TEXT,
+
     UNIQUE(font_id, char)
 );
 
