@@ -547,20 +547,26 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     loss_smooth = smoothness_penalty_batched(points, existence, n_points, canvas_size)
     loss_reversal = reversal_penalty_batched(points, existence, n_points, canvas_size)
 
-    # 3. Total stroke length: sum of segment lengths across all strokes
-    # Penalizes long, winding paths — encourages short, direct strokes
+    # 3. Sinuosity: path_length / endpoint_distance per stroke
+    # Straight line: 1.0 (free). Zigzag: >> 1.0 (penalized).
     B, S, N, _ = points.shape
     pts_scaled = points * canvas_size  # (B, S, N, 2)
     segments = pts_scaled[:, :, 1:] - pts_scaled[:, :, :-1]  # (B, S, N-1, 2)
     seg_lengths = segments.norm(dim=-1)  # (B, S, N-1)
 
-    # Mask invalid segments and inactive strokes
     valid_seg = torch.arange(N - 1, device=device) < (n_points - 1).unsqueeze(-1)  # (B, S, N-1)
-    active = (existence > 0.3).unsqueeze(-1)  # (B, S, 1)
-    masked_lengths = seg_lengths * valid_seg.float() * active.float()
+    path_length = (seg_lengths * valid_seg.float()).sum(dim=2)  # (B, S)
 
-    # Total length per sample, averaged over batch
-    loss_length = masked_lengths.sum(dim=(1, 2)).mean() / canvas_size  # normalize
+    # Endpoint distance: first point to last valid point
+    last_idx = (n_points - 1).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, -1, 2)
+    last_point = pts_scaled.gather(2, last_idx).squeeze(2)  # (B, S, 2)
+    first_point = pts_scaled[:, :, 0]  # (B, S, 2)
+    endpoint_dist = (last_point - first_point).norm(dim=-1).clamp(min=1e-6)  # (B, S)
+
+    sinuosity = path_length / endpoint_dist  # >= 1.0
+    excess_sinuosity = (sinuosity - 1.0).clamp(min=0)
+    active = (existence > 0.3).float()
+    loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
     # 4. Existence decay: later strokes cost more to activate
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
@@ -569,7 +575,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     total = (weights.get('canvas_mse', 1.0) * loss_canvas +
              weights.get('smoothness', 0.0) * loss_smooth +
              weights.get('reversal', 0.0) * loss_reversal +
-             weights.get('stroke_length', 0.0) * loss_length +
+             weights.get('sinuosity', 0.0) * loss_sinuosity +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -577,8 +583,155 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'canvas_mse': loss_canvas.item(),
         'smoothness': loss_smooth.item(),
         'reversal': loss_reversal.item(),
-        'stroke_length': loss_length.item(),
+        'sinuosity': loss_sinuosity.item(),
         'exist_decay': loss_exist.item(),
+    }
+
+    return total, loss_dict
+
+
+def pretrain_loss(model_output: dict, gt_strokes: dict,
+                  canvas_size: int = CANVAS_SIZE, weights: dict = None) -> tuple:
+    """Loss for synthetic pretraining phase.
+
+    Matches predicted strokes to GT strokes via greedy Chamfer distance,
+    then penalizes point distance, width mismatch, and existence errors.
+    Also includes canvas MSE for overall quality.
+
+    Args:
+        model_output: Dict from autoregressive StrokePredictor.forward().
+        gt_strokes: Dict with gt_points (B, S, N, 2), gt_widths (B, S),
+                    gt_existence (B, S), gt_n_points (B, S).
+        canvas_size: int.
+        weights: Dict of loss weights.
+
+    Returns:
+        Tuple of (total_loss_tensor, loss_dict).
+    """
+    if weights is None:
+        weights = {'canvas_mse': 1.0, 'chamfer': 5.0, 'width': 1.0,
+                   'existence': 1.0, 'sinuosity': 0.5}
+
+    device = model_output['canvas_inv'].device
+
+    # 1. Canvas MSE (same as autoregressive_loss)
+    canvas_inv = model_output['canvas_inv']
+    target = model_output['target']
+    ink = 1.0 - canvas_inv
+    sq_err = (ink - target) ** 2
+    weight_map = target * 10.0 + (1.0 - target) * 10.0
+    loss_canvas = (sq_err * weight_map).mean()
+
+    # 2. Stroke matching via greedy Chamfer distance
+    pred_pts = model_output['points']       # (B, S, N, 2)
+    pred_widths = model_output['widths']    # (B, S)
+    pred_exist = model_output['existence']  # (B, S)
+    pred_pc = model_output['point_count_logits']
+    pred_n = pred_pc.argmax(dim=-1).clamp(min=1, max=pred_pts.shape[2])  # (B, S)
+
+    gt_pts = gt_strokes['gt_points'].to(device)       # (B, S, N, 2)
+    gt_widths = gt_strokes['gt_widths'].to(device)     # (B, S)
+    gt_exist = gt_strokes['gt_existence'].to(device)   # (B, S)
+    gt_n = gt_strokes['gt_n_points'].to(device)        # (B, S)
+
+    B, S, N, _ = pred_pts.shape
+
+    # Scale points to canvas
+    pred_scaled = pred_pts * canvas_size  # (B, S, N, 2)
+    gt_scaled = gt_pts * canvas_size      # (B, S, N, 2)
+
+    # Compute all-pairs Chamfer distances: (B, S_pred, S_gt)
+    chamfer_matrix = torch.zeros(B, S, S, device=device)
+    for i in range(S):
+        for j in range(S):
+            # Chamfer between pred stroke i and GT stroke j
+            p = pred_scaled[:, i]  # (B, N, 2)
+            g = gt_scaled[:, j]    # (B, N, 2)
+            dists = torch.cdist(p, g)  # (B, N, N)
+
+            # Mask invalid points
+            p_valid = torch.arange(N, device=device) < pred_n[:, i].unsqueeze(-1)  # (B, N)
+            g_valid = torch.arange(N, device=device) < gt_n[:, j].unsqueeze(-1)    # (B, N)
+            dists = dists.masked_fill(~p_valid.unsqueeze(2), 1e6)
+            dists = dists.masked_fill(~g_valid.unsqueeze(1), 1e6)
+
+            fwd = dists.min(dim=2).values  # (B, N)
+            fwd = (fwd * p_valid.float()).sum(dim=1) / pred_n[:, i].float().clamp(min=1)
+            bwd = dists.min(dim=1).values  # (B, N)
+            bwd = (bwd * g_valid.float()).sum(dim=1) / gt_n[:, j].float().clamp(min=1)
+
+            chamfer_matrix[:, i, j] = fwd + bwd
+
+    # Greedy matching per sample (8x8 is tiny, loop is fine)
+    loss_chamfer = torch.tensor(0.0, device=device)
+    loss_width = torch.tensor(0.0, device=device)
+    loss_exist_bce = torch.tensor(0.0, device=device)
+    n_matched = 0
+
+    for b in range(B):
+        used_pred = set()
+        used_gt = set()
+        # Match GT strokes to predictions greedily
+        for _ in range(S):
+            best_cost = 1e6
+            best_i, best_j = -1, -1
+            for j in range(S):
+                if j in used_gt or gt_exist[b, j] < 0.5:
+                    continue
+                for i in range(S):
+                    if i in used_pred:
+                        continue
+                    cost = chamfer_matrix[b, i, j].item()
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_i, best_j = i, j
+            if best_i < 0:
+                break
+            used_pred.add(best_i)
+            used_gt.add(best_j)
+            loss_chamfer = loss_chamfer + chamfer_matrix[b, best_i, best_j]
+            loss_width = loss_width + (pred_widths[b, best_i] - gt_widths[b, best_j]).abs()
+            n_matched += 1
+
+        # Existence BCE: matched preds should exist, unmatched should not
+        target_exist = torch.zeros(S, device=device)
+        for i in used_pred:
+            target_exist[i] = 1.0
+        loss_exist_bce = loss_exist_bce + F.binary_cross_entropy(
+            pred_exist[b], target_exist)
+
+    loss_chamfer = loss_chamfer / max(n_matched, 1)
+    loss_width = loss_width / max(n_matched, 1)
+    loss_exist_bce = loss_exist_bce / B
+
+    # 3. Sinuosity on predicted strokes
+    n_points = pred_pc.argmax(dim=-1) + 1
+    n_points = n_points.clamp(min=2, max=N)
+    segments = pred_scaled[:, :, 1:] - pred_scaled[:, :, :-1]
+    seg_lengths = segments.norm(dim=-1)
+    valid_seg = torch.arange(N - 1, device=device) < (n_points - 1).unsqueeze(-1)
+    path_length = (seg_lengths * valid_seg.float()).sum(dim=2)
+    last_idx = (n_points - 1).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, -1, 2)
+    last_point = pred_scaled.gather(2, last_idx).squeeze(2)
+    first_point = pred_scaled[:, :, 0]
+    endpoint_dist = (last_point - first_point).norm(dim=-1).clamp(min=1e-6)
+    sinuosity = (path_length / endpoint_dist - 1.0).clamp(min=0)
+    active = (pred_exist > 0.3).float()
+    loss_sinuosity = (sinuosity * active).sum(dim=1).mean()
+
+    total = (weights.get('canvas_mse', 1.0) * loss_canvas +
+             weights.get('chamfer', 5.0) * loss_chamfer +
+             weights.get('width', 1.0) * loss_width +
+             weights.get('existence', 1.0) * loss_exist_bce +
+             weights.get('sinuosity', 0.5) * loss_sinuosity)
+
+    loss_dict = {
+        'total': total.item(),
+        'canvas_mse': loss_canvas.item(),
+        'chamfer': loss_chamfer.item(),
+        'width_l1': loss_width.item(),
+        'exist_bce': loss_exist_bce.item(),
+        'sinuosity': loss_sinuosity.item(),
     }
 
     return total, loss_dict

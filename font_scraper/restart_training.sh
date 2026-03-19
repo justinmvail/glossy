@@ -87,7 +87,8 @@ run "docker run -d --gpus all --name $CONTAINER_NAME \
     --save-every 5 \
     --render-every 1 \
     --augment \
-    --loss-weights '{\"canvas_mse\": 1.0, \"stroke_length\": 0.1, \"exist_decay\": 0.0}'"
+    --pretrain-epochs 5 \
+    --loss-weights '{\"canvas_mse\": 1.0, \"sinuosity\": 0.5, \"exist_decay\": 0.0}'"
 
 if ! $DRY_RUN; then
     echo ""

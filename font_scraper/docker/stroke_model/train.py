@@ -47,7 +47,53 @@ def parse_args():
     parser.add_argument('--augment', action='store_true', help='Enable data augmentation')
     parser.add_argument('--num-workers', type=int, default=4, help='DataLoader workers')
     parser.add_argument('--loss-weights', type=str, default=None, help='JSON string of loss weights')
+    parser.add_argument('--pretrain-epochs', type=int, default=0, help='Synthetic pretraining epochs before real data')
+    parser.add_argument('--pretrain-samples', type=int, default=100000, help='Number of synthetic samples per pretrain epoch')
     return parser.parse_args()
+
+
+def pretrain_epoch(model, dataloader, optimizer, device, epoch, args, writer=None):
+    """Run one pretraining epoch on synthetic stroke data."""
+    from losses import pretrain_loss
+
+    model.train()
+    epoch_loss = 0.0
+    epoch_losses = {}
+    n_steps = 0
+    global_step = epoch * len(dataloader)
+
+    for step, (images, char_indices, glyph_masks, gt_strokes) in enumerate(dataloader):
+        images = images.to(device)
+        char_indices = char_indices.to(device)
+        glyph_masks = glyph_masks.to(device)
+
+        optimizer.zero_grad()
+
+        output = model(images, char_indices, glyph_masks)
+        loss, loss_dict = pretrain_loss(output, gt_strokes)
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        epoch_loss += loss_dict['total']
+        for k, v in loss_dict.items():
+            epoch_losses[k] = epoch_losses.get(k, 0.0) + v
+        n_steps += 1
+
+        if step % args.log_every == 0:
+            logger.info(
+                "Pretrain Epoch %d Step %d/%d | Loss: %.4f | %s",
+                epoch, step, len(dataloader), loss_dict['total'],
+                ' '.join(f"{k}={v:.4f}" for k, v in loss_dict.items() if k != 'total'),
+            )
+
+        if writer:
+            writer.add_scalar('pretrain/loss', loss_dict['total'], global_step + step)
+
+    avg_loss = epoch_loss / max(n_steps, 1)
+    avg_losses = {k: v / max(n_steps, 1) for k, v in epoch_losses.items()}
+    return avg_loss, avg_losses
 
 
 def train_epoch(model, dataloader, optimizer, device, epoch, args, writer=None,
@@ -324,7 +370,54 @@ def main():
     # Fixed tracking samples
     tracking_samples = _build_tracking_samples(args.db, args.font_dir, device)
 
-    # Training loop
+    # Phase 1: Synthetic pretraining
+    if args.pretrain_epochs > 0:
+        from dataset import SyntheticStrokeDataset, collate_synthetic
+        syn_dataset = SyntheticStrokeDataset(
+            num_samples=args.pretrain_samples,
+            canvas_size=model.encoder.feature_dim if hasattr(model.encoder, 'feature_dim') else 224,
+        )
+        # Fix: use CANVAS_SIZE not feature_dim
+        syn_dataset = SyntheticStrokeDataset(num_samples=args.pretrain_samples)
+        syn_loader = DataLoader(
+            syn_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            collate_fn=collate_synthetic,
+            pin_memory=(device.type == 'cuda'),
+            drop_last=True,
+        )
+
+        logger.info("Starting pretraining: %d epochs, %d synthetic samples",
+                     args.pretrain_epochs, len(syn_dataset))
+
+        for epoch in range(args.pretrain_epochs):
+            t0 = time.time()
+            avg_loss, avg_losses = pretrain_epoch(
+                model, syn_loader, optimizer, device, epoch, args, writer=writer,
+            )
+            elapsed = time.time() - t0
+            logger.info(
+                "Pretrain %d/%d complete | Loss: %.4f | Time: %.1fs | %s",
+                epoch, args.pretrain_epochs, avg_loss, elapsed,
+                ' '.join(f"{k}={v:.4f}" for k, v in avg_losses.items() if k != 'total'),
+            )
+            # Save pretrain checkpoint and tracking
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                save_checkpoint(
+                    model, optimizer, epoch, avg_loss,
+                    os.path.join(args.output_dir, 'best_model.pt'),
+                )
+                _render_tracking_samples(
+                    model, tracking_samples, device, args.output_dir, epoch,
+                )
+
+        logger.info("Pretraining complete. Switching to real font training.")
+        best_loss = float('inf')  # reset for real training
+
+    # Phase 2: Real font training
     logger.info("Starting training: %d epochs, %d samples, batch_size=%d",
                 args.epochs, len(dataset), args.batch_size)
 

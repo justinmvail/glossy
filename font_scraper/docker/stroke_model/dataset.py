@@ -217,6 +217,108 @@ class GlyphDataset(Dataset):
         return img_tensor
 
 
+class SyntheticStrokeDataset(Dataset):
+    """Generate random polyline strokes, render them, use as training data.
+
+    Each sample: rendered image + GT stroke parameters. Used for pretraining
+    the autoregressive model to learn stroke primitives before real fonts.
+    """
+
+    def __init__(self, num_samples: int = 100000, canvas_size: int = CANVAS_SIZE,
+                 max_strokes: int = 8, max_points: int = 20):
+        self.num_samples = num_samples
+        self.canvas_size = canvas_size
+        self.max_strokes = max_strokes
+        self.max_points = max_points
+        # Use model's MAX_POINTS for padding
+        from model import MAX_POINTS
+        self.pad_points = MAX_POINTS
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        import random
+
+        cs = self.canvas_size
+        n_strokes = random.randint(1, self.max_strokes)
+        margin = int(cs * 0.05)
+
+        all_points = []
+        all_widths = []
+        all_n_points = []
+
+        for _ in range(n_strokes):
+            n_pts = random.randint(2, self.max_points)
+            width = random.uniform(2.0, 16.0)
+
+            # Generate smooth stroke via random walk with momentum
+            x = random.uniform(margin, cs - margin)
+            y = random.uniform(margin, cs - margin)
+            dx = random.uniform(-40, 40)
+            dy = random.uniform(-40, 40)
+
+            points = [(x, y)]
+            for _ in range(n_pts - 1):
+                dx += random.uniform(-20, 20)
+                dy += random.uniform(-20, 20)
+                # Dampen velocity to stay on canvas
+                dx *= 0.85
+                dy *= 0.85
+                x = max(margin, min(cs - margin, x + dx))
+                y = max(margin, min(cs - margin, y + dy))
+                points.append((x, y))
+
+            all_points.append(points)
+            all_widths.append(width)
+            all_n_points.append(n_pts)
+
+        # Render to image
+        img = Image.new('L', (cs, cs), 255)
+        draw = ImageDraw.Draw(img)
+        for pts, w in zip(all_points, all_widths):
+            for i in range(len(pts) - 1):
+                draw.line([pts[i], pts[i + 1]], fill=0, width=max(1, int(w)))
+        img_array = np.array(img, dtype=np.float32) / 255.0  # 1=white, 0=black
+
+        # Convert to tensors
+        img_tensor = torch.from_numpy(img_array).unsqueeze(0)  # (1, H, W)
+        char_idx = random.randint(0, 61)  # random, meaningless for synthetic
+
+        # GT stroke parameters (padded to max)
+        gt_points = torch.zeros(self.max_strokes, self.pad_points, 2)
+        gt_widths = torch.zeros(self.max_strokes)
+        gt_existence = torch.zeros(self.max_strokes)
+        gt_n_points = torch.ones(self.max_strokes, dtype=torch.long) * 2  # default 2
+
+        for i, (pts, w, n) in enumerate(zip(all_points, all_widths, all_n_points)):
+            gt_existence[i] = 1.0
+            gt_widths[i] = w
+            gt_n_points[i] = n
+            for j, (px, py) in enumerate(pts):
+                if j < self.pad_points:
+                    gt_points[i, j, 0] = px / cs  # normalize to [0, 1]
+                    gt_points[i, j, 1] = py / cs
+
+        return (img_tensor, char_idx, gt_points, gt_widths, gt_existence, gt_n_points)
+
+
+def collate_synthetic(batch: list) -> tuple:
+    """Collate function for SyntheticStrokeDataset."""
+    images = torch.stack([b[0] for b in batch])
+    char_indices = torch.tensor([b[1] for b in batch], dtype=torch.long)
+    glyph_masks = (images.squeeze(1) < 0.5).float()
+
+    gt_strokes = {
+        'gt_points': torch.stack([b[2] for b in batch]),
+        'gt_widths': torch.stack([b[3] for b in batch]),
+        'gt_existence': torch.stack([b[4] for b in batch]),
+        'gt_n_points': torch.stack([b[5] for b in batch]),
+    }
+
+    return images, char_indices, glyph_masks, gt_strokes
+
+
 def collate_with_masks(batch: list) -> tuple:
     """Custom collate function that also generates glyph masks from images.
 
