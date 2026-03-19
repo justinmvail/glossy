@@ -271,7 +271,7 @@ start_training() {
         --log-every 50 \
         --save-every $SAVE_EVERY \
         --render-every $RENDER_EVERY \
-        --loss-weights '{\"coverage\": 1.0, \"outside\": 5.0, \"overlap\": 0.0, \"smoothness\": 0.0, \"unique_coverage\": 5.0, \"existence\": 0.1}' \
+        --loss-weights '{\"canvas_mse\": 1.0, \"stroke_length\": 0.1, \"exist_decay\": 0.0}' \
         $RESUME_FLAG \
         > ${REMOTE_DIR}/train.log 2>&1 &
     echo \$! > ${REMOTE_DIR}/train.pid
