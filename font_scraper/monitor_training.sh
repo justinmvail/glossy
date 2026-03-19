@@ -48,16 +48,31 @@ parse_progress() {
         total_epochs=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('epochs', 100))" 2>/dev/null || echo 100)
     fi
 
-    # Calculate percentages
+    # Find session start epoch (first epoch logged after last "Starting training")
+    local start_epoch=0
+    local start_line
+    start_line=$(get_training_logs | grep "Starting training" | tail -1)
+    if [ -n "$start_line" ]; then
+        local first_step_line
+        first_step_line=$(get_training_logs | grep -A1 "Starting training" | grep "Epoch.*Step" | tail -1)
+        if [ -n "$first_step_line" ]; then
+            start_epoch=$(echo "$first_step_line" | grep -oP 'Epoch \K[0-9]+')
+        fi
+    fi
+
+    # Calculate percentages (relative to session)
     local epoch_pct=0 total_pct=0
     if [ -n "$step" ] && [ -n "$total_steps" ] && [ "$total_steps" -gt 0 ]; then
         epoch_pct=$(python3 -c "print(f'{100*$step/$total_steps:.1f}')")
-        total_pct=$(python3 -c "print(f'{100*($epoch*$total_steps+$step)/($total_epochs*$total_steps):.2f}')")
+        total_pct=$(python3 -c "
+session_done = ($epoch - $start_epoch) * $total_steps + $step
+session_total = ($total_epochs - $start_epoch) * $total_steps
+print(f'{100*session_done/session_total:.2f}' if session_total > 0 else '0.00')
+")
     fi
 
-    # Estimate time remaining
-    local start_line eta_str=""
-    start_line=$(get_training_logs | grep "Starting training" | tail -1)
+    # Estimate time remaining (relative to session start, not epoch 0)
+    local eta_str=""
     if [ -n "$start_line" ]; then
         local start_ts
         start_ts=$(echo "$start_line" | grep -oP '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
@@ -69,10 +84,11 @@ from datetime import datetime
 start = datetime.strptime('$start_ts', '%Y-%m-%d %H:%M:%S')
 now = datetime.strptime('$last_ts', '%Y-%m-%d %H:%M:%S')
 elapsed = (now - start).total_seconds()
-pct = ($epoch * $total_steps + $step) / ($total_epochs * $total_steps)
-if pct > 0:
-    total_est = elapsed / pct
-    remain = total_est - elapsed
+start_epoch = $start_epoch
+session_done = ($epoch - start_epoch) * $total_steps + $step
+session_total = ($total_epochs - start_epoch) * $total_steps
+if session_done > 0:
+    remain = elapsed * (session_total - session_done) / session_done
     hours = int(remain // 3600)
     mins = int((remain % 3600) // 60)
     elapsed_h = int(elapsed // 3600)
@@ -85,7 +101,7 @@ else:
     fi
 
     # Display
-    echo "  Epoch:    $epoch / $total_epochs  (step $step / $total_steps)"
+    echo "  Epoch:    $epoch / $total_epochs  (step $step / $total_steps)  [resumed from $start_epoch]"
 
     # Progress bar for current epoch
     local bar_width=30
@@ -108,7 +124,7 @@ else:
 
 print_status() {
     echo "═══════════════════════════════════════════════════════"
-    echo "  STROKE MODEL TRAINING MONITOR"
+    echo "  STROKE MODEL TRAINING MONITOR  $(date '+%Y-%m-%d %H:%M:%S')"
     echo "═══════════════════════════════════════════════════════"
     echo ""
 
@@ -174,7 +190,7 @@ case "${1:-}" in
         while true; do
             clear
             print_status
-            sleep 5
+            sleep 1
         done
         ;;
     --tail)

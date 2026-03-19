@@ -1,5 +1,6 @@
 checkpoints/
 glyph_cache/
+experiments/
 logs/
 __pycache__/
 *.pyc

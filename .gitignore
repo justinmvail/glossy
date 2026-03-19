@@ -113,6 +113,7 @@ vast_setup/onedm_data.tar.gz
 
 # Font scraper artifacts
 font_scraper/*.png
+font_scraper/docker/stroke_model/experiments/
 font_scraper/prefilter_samples/
 font_scraper/characters/
 font_scraper/inksight_progress*.txt

@@ -1,18 +1,19 @@
-"""Neural network for predicting centerline strokes from glyph rasters.
+"""Autoregressive stroke prediction from glyph rasters.
 
-Architecture: ResNet-18 encoder + Transformer decoder with learned stroke queries.
-The model takes a 224x224 grayscale glyph image and a character label, and predicts
-up to 8 strokes with variable point counts.
+Architecture: ResNet-18 encoder + autoregressive decoder that predicts one stroke
+at a time, conditioned on what's already been drawn (the residual).
 
-Output per stroke query:
-    - existence: sigmoid probability (does this stroke exist?)
-    - points: up to 40 x 2 coordinates (normalized to [0, 1])
-    - width: single float (stroke width in pixels)
-    - point_count: how many of the 40 points are valid
+Each step:
+    1. Encode the residual (what's left to draw) + current canvas
+    2. Attend to glyph features + canvas state
+    3. Predict one stroke (points, width, existence)
+    4. Render stroke onto canvas
+    5. Repeat until MAX_STROKES or existence < threshold
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import timm
 
 
@@ -22,6 +23,7 @@ MAX_POINTS = 40
 NUM_CHARS = 62  # A-Z + a-z + 0-9
 CHAR_EMBED_DIM = 32
 CANVAS_SIZE = 224
+RENDER_SIZE = 56
 
 
 class StrokeEncoder(nn.Module):
@@ -79,131 +81,227 @@ class StrokeEncoder(nn.Module):
         return self.proj(fused)
 
 
-class StrokeDecoder(nn.Module):
-    """Transformer decoder with learned stroke queries.
+class ResidualEncoder(nn.Module):
+    """Lightweight CNN to encode current canvas state and residual.
 
-    Uses MAX_STROKES learned queries to attend to encoder features
-    and produce per-stroke predictions.
+    Input: 2-channel (canvas, residual) at RENDER_SIZE x RENDER_SIZE.
+    Output: (B, 49, state_dim) spatial tokens aligned with encoder's 7x7 grid.
     """
 
-    def __init__(self, feature_dim: int = 256, num_heads: int = 4,
-                 num_layers: int = 3):
+    def __init__(self, state_dim: int = 64):
         super().__init__()
-        self.feature_dim = feature_dim
-
-        # Learned stroke queries: (MAX_STROKES, feature_dim)
-        self.stroke_queries = nn.Parameter(
-            torch.randn(MAX_STROKES, feature_dim) * 0.02,
+        # 3 stride-2 convs: 56 -> 28 -> 14 -> 7
+        self.conv = nn.Sequential(
+            nn.Conv2d(2, 32, 3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, state_dim, 3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
         )
+
+    def forward(self, canvas_and_residual: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            canvas_and_residual: (B, 2, R, R) where R=RENDER_SIZE.
+
+        Returns:
+            (B, 49, state_dim) spatial tokens.
+        """
+        feat = self.conv(canvas_and_residual)  # (B, state_dim, 7, 7)
+        B, C, H, W = feat.shape
+        return feat.reshape(B, C, H * W).permute(0, 2, 1)  # (B, 49, state_dim)
+
+
+class StrokeDecoderStep(nn.Module):
+    """Single-stroke decoder: one query attends to glyph features + canvas state."""
+
+    def __init__(self, feature_dim: int = 256, state_dim: int = 64,
+                 num_heads: int = 4, num_layers: int = 2):
+        super().__init__()
+
+        # Project state tokens to match feature dim
+        self.state_proj = nn.Linear(state_dim, feature_dim)
+
+        # Single learned query
+        self.stroke_query = nn.Parameter(torch.randn(1, feature_dim) * 0.02)
+
+        # Step embedding so decoder knows which stroke number it's predicting
+        self.step_embed = nn.Embedding(MAX_STROKES, feature_dim)
 
         # Transformer decoder
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model=feature_dim, nhead=num_heads, dim_feedforward=feature_dim * 4,
-            dropout=0.1, batch_first=True,
+            d_model=feature_dim, nhead=num_heads,
+            dim_feedforward=feature_dim * 4, dropout=0.1, batch_first=True,
         )
         self.transformer = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
 
-    def forward(self, encoder_features: torch.Tensor) -> torch.Tensor:
-        """Decode stroke representations from encoder features.
+    def forward(self, encoder_features: torch.Tensor,
+                state_tokens: torch.Tensor, step: int) -> torch.Tensor:
+        """Decode a single stroke representation.
 
         Args:
-            encoder_features: (B, S, feature_dim) from encoder.
+            encoder_features: (B, 49, feature_dim) from StrokeEncoder.
+            state_tokens: (B, 49, state_dim) from ResidualEncoder.
+            step: int, which stroke number (0-7).
 
         Returns:
-            (B, MAX_STROKES, feature_dim) decoded stroke features.
+            (B, feature_dim) stroke feature vector.
         """
         B = encoder_features.shape[0]
-        # Expand queries for batch: (B, MAX_STROKES, feature_dim)
-        queries = self.stroke_queries.unsqueeze(0).expand(B, -1, -1)
+        device = encoder_features.device
 
-        return self.transformer(queries, encoder_features)
+        # Project state and concatenate with glyph features along sequence dim
+        state_proj = self.state_proj(state_tokens)  # (B, 49, feature_dim)
+        memory = torch.cat([encoder_features, state_proj], dim=1)  # (B, 98, feature_dim)
+
+        # Query with step embedding
+        step_t = torch.tensor([step], device=device)
+        query = self.stroke_query.unsqueeze(0).expand(B, -1, -1)  # (B, 1, feature_dim)
+        query = query + self.step_embed(step_t).unsqueeze(0)  # add step identity
+
+        # Decode
+        out = self.transformer(query, memory)  # (B, 1, feature_dim)
+        return out.squeeze(1)  # (B, feature_dim)
 
 
 class StrokePredictor(nn.Module):
-    """Full model: encoder + decoder + output heads.
+    """Autoregressive stroke predictor.
 
-    Predicts up to MAX_STROKES strokes from a glyph image and character label.
-    Each stroke has: existence flag, point coordinates, width, point count.
+    Predicts strokes one at a time, rendering each onto a canvas and using
+    the residual (what's left to cover) to inform the next stroke.
     """
 
-    def __init__(self, feature_dim: int = 256):
+    def __init__(self, feature_dim: int = 256, state_dim: int = 64):
         super().__init__()
         self.encoder = StrokeEncoder(feature_dim=feature_dim)
-        self.decoder = StrokeDecoder(feature_dim=feature_dim)
+        self.residual_encoder = ResidualEncoder(state_dim=state_dim)
+        self.decoder = StrokeDecoderStep(
+            feature_dim=feature_dim, state_dim=state_dim,
+        )
 
-        # Output heads (per stroke query)
+        # Output heads (single stroke)
         self.existence_head = nn.Linear(feature_dim, 1)
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
         self.width_head = nn.Linear(feature_dim, 1)
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
-    def forward(self, image: torch.Tensor, char_idx: torch.Tensor) -> dict:
-        """Predict strokes from glyph image and character label.
+    def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
+                glyph_mask: torch.Tensor) -> dict:
+        """Predict strokes autoregressively.
 
         Args:
-            image: (B, 1, 224, 224) grayscale glyph image (white bg, black glyph).
-            char_idx: (B,) integer character indices (0-61).
+            image: (B, 1, 224, 224) grayscale glyph image.
+            char_idx: (B,) integer character indices.
+            glyph_mask: (B, H, W) binary glyph mask (1=glyph, 0=bg).
 
         Returns:
-            Dict with:
-                existence: (B, MAX_STROKES) sigmoid probabilities.
-                points: (B, MAX_STROKES, MAX_POINTS, 2) coordinates in [0, 1].
-                widths: (B, MAX_STROKES) stroke widths (positive).
-                point_counts: (B, MAX_STROKES, MAX_POINTS) logits over point positions.
+            Dict with per-step predictions and final canvas.
         """
-        # Encode
-        features = self.encoder(image, char_idx)
+        from triton_render import render_single_stroke_triton
 
-        # Decode
-        stroke_features = self.decoder(features)
+        B = image.shape[0]
+        device = image.device
+        R = RENDER_SIZE
 
-        # Output heads
-        existence = torch.sigmoid(self.existence_head(stroke_features).squeeze(-1))
-        points_raw = self.points_head(stroke_features)
-        points = torch.sigmoid(points_raw.reshape(-1, MAX_STROKES, MAX_POINTS, 2))
-        widths = torch.nn.functional.softplus(self.width_head(stroke_features).squeeze(-1)) + 2.0
-        point_count_logits = self.point_count_head(stroke_features)
+        # Encode glyph once
+        features = self.encoder(image, char_idx)  # (B, 49, 256)
+
+        # Downsample glyph mask to render resolution
+        target = F.interpolate(
+            glyph_mask.unsqueeze(1), size=(R, R),
+            mode='bilinear', align_corners=False,
+        ).squeeze(1)  # (B, R, R)
+
+        # Canvas in "inverse ink" space: 1=blank, 0=inked
+        canvas_inv = torch.ones(B, R, R, device=device)
+
+        all_existence = []
+        all_points = []
+        all_widths = []
+        all_point_counts = []
+
+        for step in range(MAX_STROKES):
+            # Current ink and residual
+            ink = 1.0 - canvas_inv  # 1=inked, 0=blank
+            residual = (target - ink).clamp(0, 1)  # what still needs covering
+
+            # Encode canvas state
+            state_input = torch.stack([ink, residual], dim=1)  # (B, 2, R, R)
+            state_tokens = self.residual_encoder(state_input)  # (B, 49, 64)
+
+            # Decode single stroke
+            stroke_feat = self.decoder(features, state_tokens, step)  # (B, 256)
+
+            # Predict stroke parameters
+            existence = torch.sigmoid(self.existence_head(stroke_feat).squeeze(-1))  # (B,)
+            points_raw = self.points_head(stroke_feat)  # (B, 80)
+            points = torch.sigmoid(points_raw.reshape(B, MAX_POINTS, 2))  # (B, 40, 2)
+            width = F.softplus(self.width_head(stroke_feat).squeeze(-1)) + 1.0  # (B,)
+            pc_logits = self.point_count_head(stroke_feat)  # (B, 40)
+            n_pts = pc_logits.argmax(dim=-1) + 1  # (B,)
+            n_pts = n_pts.clamp(min=2, max=MAX_POINTS)
+
+            # Render this stroke: (B, R, R), 1=bg, 0=ink
+            stroke_render = render_single_stroke_triton(
+                points, width, n_pts, CANVAS_SIZE, R,
+            )
+
+            # Composite with existence masking (differentiable multiply-blend)
+            # If existence=1: canvas_inv *= stroke_render (add ink)
+            # If existence=0: canvas_inv *= 1.0 (no change)
+            blend = stroke_render * existence.unsqueeze(-1).unsqueeze(-1) + \
+                    1.0 * (1.0 - existence.unsqueeze(-1).unsqueeze(-1))
+            canvas_inv = canvas_inv * blend
+
+            all_existence.append(existence)
+            all_points.append(points)
+            all_widths.append(width)
+            all_point_counts.append(pc_logits)
 
         return {
-            'existence': existence,
-            'points': points,
-            'widths': widths,
-            'point_count_logits': point_count_logits,
+            'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES)
+            'points': torch.stack(all_points, dim=1),               # (B, MAX_STROKES, 40, 2)
+            'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES)
+            'point_count_logits': torch.stack(all_point_counts, dim=1),
+            'canvas_inv': canvas_inv,                               # (B, R, R)
+            'target': target,                                        # (B, R, R)
         }
 
     def predict_strokes(self, image: torch.Tensor, char_idx: torch.Tensor,
                         canvas_size: int = CANVAS_SIZE,
-                        existence_threshold: float = 0.5) -> list:
-        """Predict strokes and convert to list format for JSON output.
+                        existence_threshold: float = 0.5) -> tuple:
+        """Predict strokes for inference (no ground truth mask needed).
 
         Args:
             image: (1, 1, 224, 224) single glyph image.
             char_idx: (1,) character index.
             canvas_size: Canvas size to scale coordinates to.
-            existence_threshold: Minimum existence probability to include a stroke.
+            existence_threshold: Minimum existence probability.
 
         Returns:
-            List of strokes: [[[x1, y1], [x2, y2], ...], ...]
+            Tuple of (strokes_list, avg_width).
         """
         self.eval()
-        with torch.no_grad():
-            out = self.forward(image, char_idx)
+        # Derive glyph mask from input image
+        glyph_mask = (image.squeeze(1) < 0.5).float()  # (1, 224, 224)
 
-        existence = out['existence'][0]  # (MAX_STROKES,)
-        points = out['points'][0]  # (MAX_STROKES, MAX_POINTS, 2)
-        widths = out['widths'][0]  # (MAX_STROKES,)
-        point_count_logits = out['point_count_logits'][0]  # (MAX_STROKES, MAX_POINTS)
+        with torch.no_grad():
+            out = self.forward(image, char_idx, glyph_mask)
+
+        existence = out['existence'][0]
+        points = out['points'][0]
+        widths = out['widths'][0]
+        point_count_logits = out['point_count_logits'][0]
 
         strokes = []
         for i in range(MAX_STROKES):
             if existence[i].item() < existence_threshold:
-                continue
+                break  # autoregressive: stop at first non-existent stroke
 
-            # Determine point count from logits (argmax gives last valid index)
             n_points = torch.argmax(point_count_logits[i]).item() + 1
             n_points = max(2, min(n_points, MAX_POINTS))
 
-            # Scale from [0, 1] to canvas coordinates and round
             stroke_pts = points[i, :n_points] * canvas_size
             stroke = [[round(float(p[0]), 1), round(float(p[1]), 1)]
                       for p in stroke_pts]

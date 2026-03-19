@@ -21,6 +21,8 @@ import time
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import numpy as np
+from PIL import Image, ImageDraw
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -65,8 +67,6 @@ def train_epoch(model, dataloader, optimizer, device, epoch, args, writer=None,
     Returns:
         Average total loss for the epoch.
     """
-    from losses import total_loss
-
     model.train()
     epoch_loss = 0.0
     epoch_losses = {}
@@ -80,17 +80,12 @@ def train_epoch(model, dataloader, optimizer, device, epoch, args, writer=None,
 
         optimizer.zero_grad()
 
-        # Forward pass
-        output = model(images, char_indices)
+        # Forward pass (autoregressive model needs glyph_mask)
+        output = model(images, char_indices, glyph_masks)
 
-        # Compute loss (with optional render skipping for speed)
-        if args.render_every > 1 and step % args.render_every != 0:
-            # Lightweight loss: existence only (skip expensive rendering)
-            from losses import existence_loss
-            loss = existence_loss(output['existence'])
-            loss_dict = {'total': loss.item(), 'existence': loss.item()}
-        else:
-            loss, loss_dict = total_loss(output, glyph_masks, weights=loss_weights)
+        # Compute loss
+        from losses import autoregressive_loss
+        loss, loss_dict = autoregressive_loss(output, weights=loss_weights)
 
         loss.backward()
 
@@ -135,6 +130,113 @@ def save_checkpoint(model, optimizer, epoch, loss, path):
     logger.info("Saved checkpoint: %s (epoch %d, loss %.4f)", path, epoch, loss)
 
 
+def _build_tracking_samples(db_path, font_dir, device):
+    """Build a fixed set of samples to render at each checkpoint."""
+    import sqlite3
+    from model import char_to_index, CANVAS_SIZE
+    from PIL import ImageFont
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("""
+        SELECT f.file_path, f.name FROM fonts f
+        LEFT JOIN font_checks fc ON f.id = fc.font_id
+        LEFT JOIN font_removals fr ON f.id = fr.font_id
+        WHERE fr.font_id IS NULL
+        AND (fc.prefilter_passed = 1 OR fc.prefilter_passed IS NULL)
+        AND (fc.is_cursive = 0 OR fc.is_cursive IS NULL)
+        LIMIT 100
+    """).fetchall()
+    conn.close()
+
+    indices = [0, len(rows) // 2, len(rows) - 1]
+    fonts = [rows[i] for i in indices if i < len(rows)]
+    chars = ['A', 'g', 'R', '8']
+
+    samples = []
+    for fp_raw, font_name in fonts:
+        fp = fp_raw if os.path.isabs(fp_raw) else os.path.join(font_dir, fp_raw)
+        if not os.path.exists(fp):
+            continue
+        for char in chars:
+            img = Image.new('L', (CANVAS_SIZE, CANVAS_SIZE), 255)
+            draw = ImageDraw.Draw(img)
+            rendered = False
+            for font_size in range(200, 20, -5):
+                try:
+                    font = ImageFont.truetype(fp, font_size)
+                except Exception:
+                    continue
+                bbox = font.getbbox(char)
+                if bbox is None:
+                    break
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                if tw <= CANVAS_SIZE * 0.9 and th <= CANVAS_SIZE * 0.9:
+                    x = (CANVAS_SIZE - tw) / 2 - bbox[0]
+                    y = (CANVAS_SIZE - th) / 2 - bbox[1]
+                    draw.text((x, y), char, fill=0, font=font)
+                    rendered = True
+                    break
+            if not rendered:
+                continue
+
+            mask = np.array(img) < 128
+            img_arr = 1.0 - mask.astype(np.float32)
+            img_tensor = torch.from_numpy(img_arr).float().unsqueeze(0).unsqueeze(0)
+            char_idx = torch.tensor([char_to_index(char)], dtype=torch.long)
+            safe_name = font_name.replace(' ', '_').replace('/', '_')[:20]
+            samples.append({
+                'img_tensor': img_tensor,
+                'char_idx': char_idx,
+                'mask': mask,
+                'label': f"{safe_name}_{char}",
+            })
+
+    logger.info("Tracking %d samples across checkpoints", len(samples))
+    return samples
+
+
+def _render_tracking_samples(model, samples, device, output_dir, epoch):
+    """Render tracking samples and save to epoch-specific directory."""
+    from model import CANVAS_SIZE
+
+    epoch_dir = os.path.join(output_dir, 'tracking', f'epoch_{epoch:03d}')
+    os.makedirs(epoch_dir, exist_ok=True)
+
+    model.eval()
+    colors = [(255, 0, 0), (0, 150, 0), (0, 0, 255), (255, 128, 0),
+              (128, 0, 255), (0, 200, 200), (200, 0, 128), (128, 128, 0)]
+
+    for sample in samples:
+        img_t = sample['img_tensor'].to(device)
+        char_t = sample['char_idx'].to(device)
+
+        with torch.no_grad():
+            strokes, avg_width = model.predict_strokes(
+                img_t, char_t, CANVAS_SIZE, existence_threshold=0.3,
+            )
+
+        img = Image.new('RGB', (CANVAS_SIZE, CANVAS_SIZE), (255, 255, 255))
+        mask = sample['mask']
+        for y in range(CANVAS_SIZE):
+            for x in range(CANVAS_SIZE):
+                if mask[y, x]:
+                    img.putpixel((x, y), (220, 220, 220))
+
+        draw = ImageDraw.Draw(img)
+        for si, stroke in enumerate(strokes):
+            color = colors[si % len(colors)]
+            for i in range(len(stroke) - 1):
+                x1, y1 = stroke[i]
+                x2, y2 = stroke[i + 1]
+                draw.line([(x1, y1), (x2, y2)], fill=color,
+                          width=max(1, int(avg_width)))
+
+        img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
+
+    model.train()
+    logger.info("Saved %d tracking samples to %s", len(samples), epoch_dir)
+
+
 def main():
     args = parse_args()
 
@@ -159,9 +261,12 @@ def main():
                      torch.cuda.get_device_name(),
                      torch.cuda.get_device_properties(0).total_memory / 1e9)
 
-    # Set up pydiffvg
-    import pydiffvg
-    pydiffvg.set_use_gpu(device.type == 'cuda')
+    # Set up pydiffvg (optional — Triton renderer is used for training)
+    try:
+        import pydiffvg
+        pydiffvg.set_use_gpu(device.type == 'cuda')
+    except Exception:
+        logger.warning("pydiffvg not available, using Triton renderer only")
 
     # Create model
     from model import StrokePredictor
@@ -216,6 +321,9 @@ def main():
     except ImportError:
         logger.warning("TensorBoard not available, skipping logging")
 
+    # Fixed tracking samples
+    tracking_samples = _build_tracking_samples(args.db, args.font_dir, device)
+
     # Training loop
     logger.info("Starting training: %d epochs, %d samples, batch_size=%d",
                 args.epochs, len(dataset), args.batch_size)
@@ -242,12 +350,18 @@ def main():
                 model, optimizer, epoch, avg_loss,
                 os.path.join(args.output_dir, 'best_model.pt'),
             )
+            _render_tracking_samples(
+                model, tracking_samples, device, args.output_dir, epoch,
+            )
 
         # Periodic checkpoint
         if (epoch + 1) % args.save_every == 0:
             save_checkpoint(
                 model, optimizer, epoch, avg_loss,
                 os.path.join(args.output_dir, f'checkpoint_epoch{epoch}.pt'),
+            )
+            _render_tracking_samples(
+                model, tracking_samples, device, args.output_dir, epoch,
             )
 
         # TensorBoard epoch summary

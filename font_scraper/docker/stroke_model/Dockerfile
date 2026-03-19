@@ -62,5 +62,6 @@ COPY dataset.py /app/dataset.py
 COPY train.py /app/train.py
 COPY predict.py /app/predict.py
 COPY render_utils.py /app/render_utils.py
+COPY triton_render.py /app/triton_render.py
 
 CMD ["python3"]

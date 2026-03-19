@@ -114,9 +114,12 @@ class GlyphDataset(Dataset):
                 self.cache_dir, f"{fi}_{ci}.npy",
             )
             if os.path.exists(cache_path):
-                arr = np.load(cache_path)
-                img_tensor = torch.from_numpy(arr).float().unsqueeze(0)
-                return img_tensor, char_idx
+                try:
+                    arr = np.load(cache_path)
+                    img_tensor = torch.from_numpy(arr).float().unsqueeze(0)
+                    return img_tensor, char_idx
+                except (EOFError, ValueError):
+                    pass  # Corrupt cache file, fall through to render
 
         # Render glyph
         mask = self._render_glyph(font_path, char)
