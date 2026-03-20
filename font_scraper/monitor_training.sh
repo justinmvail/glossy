@@ -35,12 +35,18 @@ parse_progress() {
         return
     fi
 
-    # Parse: Epoch 0 Step 1900/50336 | Loss: 28.17
-    local epoch step total_steps loss
-    epoch=$(echo "$last_line" | grep -oP 'Epoch \K[0-9]+')
-    step=$(echo "$last_line" | grep -oP 'Step \K[0-9]+')
-    total_steps=$(echo "$last_line" | grep -oP 'Step [0-9]+/\K[0-9]+')
-    loss=$(echo "$last_line" | grep -oP 'Loss: \K[0-9.]+')
+    # Parse: [Pretrain] Epoch 0 Step 1900/50336 | Loss: 28.17
+    local epoch step total_steps loss phase
+    epoch=$(echo "$last_line" | grep -oP 'Epoch \K[0-9]+' || echo "")
+    step=$(echo "$last_line" | grep -oP 'Step \K[0-9]+' || echo "")
+    total_steps=$(echo "$last_line" | grep -oP 'Step [0-9]+/\K[0-9]+' || echo "")
+    loss=$(echo "$last_line" | grep -oP 'Loss: \K[0-9.]+' || echo "?")
+
+    # Detect phase (pretrain vs training)
+    phase=""
+    if echo "$last_line" | grep -q "Pretrain"; then
+        phase=" [PRETRAIN]"
+    fi
 
     # Get total epochs from status file or default
     local total_epochs=100
@@ -48,15 +54,15 @@ parse_progress() {
         total_epochs=$(python3 -c "import json; d=json.load(open('$STATUS_FILE')); print(d.get('epochs', 100))" 2>/dev/null || echo 100)
     fi
 
-    # Find session start epoch (first epoch logged after last "Starting training")
+    # Find session start epoch (first epoch logged after last "Starting")
     local start_epoch=0
     local start_line
-    start_line=$(get_training_logs | grep "Starting training" | tail -1)
+    start_line=$(get_training_logs | grep -E "Starting (training|pretraining)" | tail -1 || true)
     if [ -n "$start_line" ]; then
         local first_step_line
-        first_step_line=$(get_training_logs | grep -A1 "Starting training" | grep "Epoch.*Step" | tail -1)
+        first_step_line=$(get_training_logs | grep "Epoch.*Step" | head -1 || true)
         if [ -n "$first_step_line" ]; then
-            start_epoch=$(echo "$first_step_line" | grep -oP 'Epoch \K[0-9]+')
+            start_epoch=$(echo "$first_step_line" | grep -oP 'Epoch \K[0-9]+' || echo "0")
         fi
     fi
 
@@ -101,7 +107,7 @@ else:
     fi
 
     # Display
-    echo "  Epoch:    $epoch / $total_epochs  (step $step / $total_steps)  [resumed from $start_epoch]"
+    echo "  Epoch:    $epoch / $total_epochs  (step $step / $total_steps)$phase"
 
     # Progress bar for current epoch
     local bar_width=30
@@ -158,8 +164,8 @@ print_status() {
 
     # Checkpoints
     if [ -d "$CKPT_DIR" ]; then
-        n_ckpt=$(ls "$CKPT_DIR"/*.pt 2>/dev/null | wc -l)
-        latest=$(ls -t "$CKPT_DIR"/*.pt 2>/dev/null | head -1)
+        n_ckpt=$(find "$CKPT_DIR" -maxdepth 1 -name "*.pt" 2>/dev/null | wc -l)
+        latest=$(find "$CKPT_DIR" -maxdepth 1 -name "*.pt" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
         if [ -n "$latest" ]; then
             latest_name=$(basename "$latest")
             latest_size=$(du -h "$latest" | cut -f1)
@@ -176,9 +182,11 @@ print_status() {
     last_line=$(get_training_logs | grep "Epoch.*Step" | tail -1)
     if [ -n "$last_line" ]; then
         echo "  ─── Loss Breakdown ───"
-        echo "$last_line" | grep -oP '(coverage|outside|overlap|smoothness|existence)=[0-9.]+' | while read -r component; do
-            printf "    %-14s %s\n" "$(echo "$component" | cut -d= -f1):" "$(echo "$component" | cut -d= -f2)"
+        set +eo pipefail
+        echo "$last_line" | sed 's/.*Loss: [0-9.]* | //' | tr ' ' '\n' | grep '=' | while IFS='=' read -r key val; do
+            printf "    %-14s %s\n" "$key:" "$val"
         done
+        set -eo pipefail
     fi
 
     echo ""

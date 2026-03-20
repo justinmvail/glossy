@@ -295,6 +295,7 @@ class StrokePredictor(nn.Module):
         point_count_logits = out['point_count_logits'][0]
 
         strokes = []
+        stroke_widths = []
         for i in range(MAX_STROKES):
             if existence[i].item() < existence_threshold:
                 break  # autoregressive: stop at first non-existent stroke
@@ -306,8 +307,9 @@ class StrokePredictor(nn.Module):
             stroke = [[round(float(p[0]), 1), round(float(p[1]), 1)]
                       for p in stroke_pts]
             strokes.append(stroke)
+            stroke_widths.append(float(widths[i].item()))
 
-        return strokes, float(widths.mean().item())
+        return strokes, stroke_widths
 
 
 CHARS_LIST = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')

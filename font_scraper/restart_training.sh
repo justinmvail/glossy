@@ -1,9 +1,10 @@
 #!/bin/bash
-# restart_training.sh — Stop training, wipe all state, and start fresh from epoch 0.
+# restart_training.sh — Stop training and start fresh or resume from checkpoint.
 #
 # Usage:
-#   ./restart_training.sh
-#   ./restart_training.sh --dry-run   # Show what would be deleted without doing it
+#   ./restart_training.sh              # Fresh start from epoch 0 (with pretrain)
+#   ./restart_training.sh --resume     # Pick a checkpoint to resume from
+#   ./restart_training.sh --dry-run    # Show what would happen without doing it
 
 set -euo pipefail
 
@@ -11,12 +12,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STROKE_DIR="$SCRIPT_DIR/docker/stroke_model"
 CKPT_DIR="$STROKE_DIR/checkpoints"
 CONTAINER_NAME="stroke-model-train"
+SNAPSHOT_SCRIPT="$SCRIPT_DIR/snapshot_experiment.sh"
 
 DRY_RUN=false
-if [ "${1:-}" = "--dry-run" ]; then
-    DRY_RUN=true
-    echo "[dry-run] Would perform the following:"
-fi
+RESUME_MODE=false
+RESUME_CKPT=""
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=true; echo "[dry-run] Would perform the following:" ;;
+        --resume)  RESUME_MODE=true ;;
+    esac
+done
 
 run() {
     if $DRY_RUN; then
@@ -26,8 +34,92 @@ run() {
     fi
 }
 
+# Handle --resume: list checkpoints and let user pick
+if $RESUME_MODE; then
+    echo "═══ Available Checkpoints ═══"
+    echo ""
+
+    # List all .pt files with details (owned by root, use docker to stat)
+    CKPTS=$(find "$CKPT_DIR" -maxdepth 1 -name "*.pt" 2>/dev/null | sort)
+
+    if [ -z "$CKPTS" ]; then
+        echo "  No checkpoints found in $CKPT_DIR"
+        echo "  Run without --resume to start fresh."
+        exit 1
+    fi
+
+    # Display numbered list
+    i=1
+    declare -a CKPT_ARRAY
+    while IFS= read -r ckpt; do
+        name=$(basename "$ckpt")
+        size=$(du -h "$ckpt" 2>/dev/null | cut -f1)
+        # Try to extract epoch from checkpoint
+        epoch_info=""
+        if echo "$name" | grep -qP 'epoch\d+'; then
+            epoch_info=" ($(echo "$name" | grep -oP 'epoch\d+'))"
+        elif [ "$name" = "best_model.pt" ]; then
+            epoch_info=" (best)"
+        fi
+        printf "  [%d] %s  (%s)%s\n" "$i" "$name" "$size" "$epoch_info"
+        CKPT_ARRAY[$i]="$ckpt"
+        i=$((i + 1))
+    done <<< "$CKPTS"
+
+    echo ""
+    read -rp "Select checkpoint [1-$((i-1))]: " choice
+
+    if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge "$i" ] 2>/dev/null; then
+        echo "Invalid selection."
+        exit 1
+    fi
+
+    RESUME_CKPT="${CKPT_ARRAY[$choice]}"
+    RESUME_NAME=$(basename "$RESUME_CKPT")
+    echo ""
+    echo "Resuming from: $RESUME_NAME"
+
+    # Extract epoch number from checkpoint to delete later ones
+    RESUME_EPOCH=""
+    if echo "$RESUME_NAME" | grep -qP 'epoch(\d+)'; then
+        RESUME_EPOCH=$(echo "$RESUME_NAME" | grep -oP 'epoch\K\d+')
+    elif [ "$RESUME_NAME" = "best_model.pt" ]; then
+        # Read epoch from checkpoint metadata
+        RESUME_EPOCH=$(python3 -c "
+import torch, sys
+try:
+    ckpt = torch.load('$RESUME_CKPT', map_location='cpu', weights_only=False)
+    print(ckpt.get('epoch', ''))
+except:
+    print('')
+" 2>/dev/null || echo "")
+    fi
+
+    # Delete checkpoints AFTER the resume point
+    if [ -n "$RESUME_EPOCH" ]; then
+        echo "Cleaning checkpoints after epoch $RESUME_EPOCH..."
+        for ckpt in "$CKPT_DIR"/checkpoint_epoch*.pt; do
+            [ -f "$ckpt" ] || continue
+            ckpt_epoch=$(basename "$ckpt" | grep -oP 'epoch\K\d+' || true)
+            if [ -n "$ckpt_epoch" ] && [ "$ckpt_epoch" -gt "$RESUME_EPOCH" ]; then
+                echo "  Removing: $(basename "$ckpt")"
+                run "rm -f '$ckpt'"
+            fi
+        done
+
+        # Delete tracking images after resume epoch
+        for tdir in "$CKPT_DIR"/tracking/epoch_*; do
+            [ -d "$tdir" ] || continue
+            t_epoch=$(basename "$tdir" | grep -oP '\d+' || true)
+            if [ -n "$t_epoch" ] && [ "$t_epoch" -gt "$RESUME_EPOCH" ]; then
+                echo "  Removing tracking: $(basename "$tdir")"
+                run "rm -rf '$tdir'"
+            fi
+        done
+    fi
+fi
+
 # 1. Sync current experiment before destroying anything
-SNAPSHOT_SCRIPT="$SCRIPT_DIR/snapshot_experiment.sh"
 if [ -x "$SNAPSHOT_SCRIPT" ] && docker ps --filter "name=$CONTAINER_NAME" --format '{{.ID}}' 2>/dev/null | grep -q .; then
     echo "Syncing current experiment before restart..."
     "$SNAPSHOT_SCRIPT" --sync 2>/dev/null || true
@@ -42,13 +134,15 @@ else
     echo "No container to stop."
 fi
 
-# 3. Clean checkpoints, tracking, tensorboard (owned by root from Docker)
-echo "Cleaning checkpoints and tracking data..."
-if docker image inspect stroke-model:latest &>/dev/null; then
-    run "docker run --rm -v '$CKPT_DIR:/ckpt' stroke-model:latest bash -c 'rm -rf /ckpt/*.pt /ckpt/tracking /ckpt/runs /ckpt/samples'"
-else
-    echo "WARNING: stroke-model image not found, trying direct rm..."
-    run "rm -rf '$CKPT_DIR'/*.pt '$CKPT_DIR/tracking' '$CKPT_DIR/runs' '$CKPT_DIR/samples'"
+# 3. If fresh start, clean everything
+if ! $RESUME_MODE; then
+    echo "Cleaning checkpoints and tracking data..."
+    if docker image inspect stroke-model:latest &>/dev/null; then
+        run "docker run --rm -v '$CKPT_DIR:/ckpt' stroke-model:latest bash -c 'rm -rf /ckpt/*.pt /ckpt/tracking /ckpt/runs /ckpt/samples'"
+    else
+        echo "WARNING: stroke-model image not found, trying direct rm..."
+        run "rm -rf '$CKPT_DIR'/*.pt '$CKPT_DIR/tracking' '$CKPT_DIR/runs' '$CKPT_DIR/samples'"
+    fi
 fi
 
 # 4. Snapshot new experiment before launching
@@ -60,8 +154,28 @@ if [ -x "$SNAPSHOT_SCRIPT" ]; then
     fi
 fi
 
-# 5. Launch fresh training
-echo "Launching fresh training from epoch 0..."
+# 5. Build resume flag
+RESUME_FLAG=""
+if $RESUME_MODE && [ -n "$RESUME_CKPT" ]; then
+    # Map host path to container path
+    CKPT_BASENAME=$(basename "$RESUME_CKPT")
+    RESUME_FLAG="--resume /app/checkpoints/$CKPT_BASENAME"
+    echo "Resume flag: $RESUME_FLAG"
+fi
+
+# 6. Build pretrain flag (skip pretrain if resuming)
+PRETRAIN_FLAG=""
+if ! $RESUME_MODE; then
+    PRETRAIN_FLAG="--pretrain-epochs 5"
+fi
+
+# 7. Launch training
+if $RESUME_MODE; then
+    echo "Resuming training from $RESUME_NAME..."
+else
+    echo "Launching fresh training from epoch 0..."
+fi
+
 run "docker run -d --gpus all --name $CONTAINER_NAME \
   --shm-size=2g \
   -v '$SCRIPT_DIR/fonts.db:/data/fonts.db:ro' \
@@ -80,14 +194,15 @@ run "docker run -d --gpus all --name $CONTAINER_NAME \
     --output-dir /app/checkpoints \
     --cache-dir /app/cache \
     --epochs 100 \
-    --batch-size 96 \
+    --batch-size 144 \
     --lr 1e-4 \
     --num-workers 4 \
     --log-every 50 \
     --save-every 5 \
     --render-every 1 \
     --augment \
-    --pretrain-epochs 5 \
+    $PRETRAIN_FLAG \
+    $RESUME_FLAG \
     --loss-weights '{\"canvas_mse\": 1.0, \"sinuosity\": 0.5, \"exist_decay\": 0.0}'"
 
 if ! $DRY_RUN; then

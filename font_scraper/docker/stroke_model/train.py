@@ -241,11 +241,11 @@ def _build_tracking_samples(db_path, font_dir, device):
     return samples
 
 
-def _render_tracking_samples(model, samples, device, output_dir, epoch):
+def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='epoch'):
     """Render tracking samples and save to epoch-specific directory."""
     from model import CANVAS_SIZE
 
-    epoch_dir = os.path.join(output_dir, 'tracking', f'epoch_{epoch:03d}')
+    epoch_dir = os.path.join(output_dir, 'tracking', f'{prefix}_{epoch:03d}')
     os.makedirs(epoch_dir, exist_ok=True)
 
     model.eval()
@@ -257,7 +257,7 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch):
         char_t = sample['char_idx'].to(device)
 
         with torch.no_grad():
-            strokes, avg_width = model.predict_strokes(
+            strokes, stroke_widths = model.predict_strokes(
                 img_t, char_t, CANVAS_SIZE, existence_threshold=0.3,
             )
 
@@ -271,11 +271,11 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch):
         draw = ImageDraw.Draw(img)
         for si, stroke in enumerate(strokes):
             color = colors[si % len(colors)]
+            w = max(1, int(stroke_widths[si])) if si < len(stroke_widths) else 2
             for i in range(len(stroke) - 1):
                 x1, y1 = stroke[i]
                 x2, y2 = stroke[i + 1]
-                draw.line([(x1, y1), (x2, y2)], fill=color,
-                          width=max(1, int(avg_width)))
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
 
@@ -412,6 +412,7 @@ def main():
                 )
                 _render_tracking_samples(
                     model, tracking_samples, device, args.output_dir, epoch,
+                    prefix='pretrain',
                 )
 
         logger.info("Pretraining complete. Switching to real font training.")
