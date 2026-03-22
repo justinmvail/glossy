@@ -271,10 +271,17 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
         draw = ImageDraw.Draw(img)
         for si, stroke in enumerate(strokes):
             color = colors[si % len(colors)]
-            w = max(1, int(stroke_widths[si])) if si < len(stroke_widths) else 2
+            sw = stroke_widths[si] if si < len(stroke_widths) else [2]
             for i in range(len(stroke) - 1):
                 x1, y1 = stroke[i]
                 x2, y2 = stroke[i + 1]
+                # Per-segment width: average of endpoint widths
+                if isinstance(sw, list) and len(sw) > i + 1:
+                    w = max(1, int((sw[i] + sw[i + 1]) / 2))
+                elif isinstance(sw, list) and len(sw) > 0:
+                    w = max(1, int(sw[0]))
+                else:
+                    w = max(1, int(sw))
                 draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
@@ -331,7 +338,8 @@ def main():
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
-        best_loss = checkpoint.get('loss', float('inf'))
+        # Don't restore best_loss — loss functions may differ between runs
+        # First epoch of new run will always save a checkpoint + tracking images
         logger.info("Resumed from %s (epoch %d)", args.resume, start_epoch)
 
     # Dataset

@@ -41,6 +41,33 @@ warn() { echo -e "${YELLOW}[vastai]${NC} $*"; }
 err() { echo -e "${RED}[vastai]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[vastai]${NC} $*"; }
 
+dump_and_destroy() {
+    # Dump all available logs before destroying an instance
+    local iid="$1"
+    warn "═══ Dumping logs for instance $iid before destroy ═══"
+
+    # Instance status
+    warn "── Instance Status ──"
+    vastai show instance "$iid" --raw 2>/dev/null | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    for k in ['id','actual_status','intended_status','status_msg','public_ipaddr','ssh_host','ssh_port','ports','cur_state','image_uuid']:
+        if k in d:
+            print(f'  {k}: {d[k]}')
+except: pass
+" 2>/dev/null || echo "  (could not read instance status)"
+
+    # Container logs from Vast.ai
+    warn "── Container Logs (last 50 lines) ──"
+    vastai logs "$iid" 2>/dev/null | tail -50 || echo "  (no logs available)"
+
+    warn "═══ End logs ═══"
+    echo ""
+
+    vastai destroy instance "$iid" 2>/dev/null || true
+}
+
 check_deps() {
     if ! command -v vastai &>/dev/null; then
         err "vastai CLI not found. Install: pipx install vastai"
@@ -60,14 +87,19 @@ _load_ssh() {
         exit 1
     fi
     INSTANCE_ID=$(head -1 "$STATE_FILE")
-    SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
+    # Read SSH URL from state file (line 2), saved during create_instance
+    SSH_URL=$(sed -n '2p' "$STATE_FILE" 2>/dev/null || true)
+    if [ -z "$SSH_URL" ]; then
+        # Fall back to vastai ssh-url
+        SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
+    fi
     if [ -z "$SSH_URL" ]; then
         err "Instance $INSTANCE_ID not reachable."
         exit 1
     fi
-    SSH_HOST=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f1)
+    SSH_HOST=$(echo "$SSH_URL" | sed 's|ssh://||' | sed 's|root@||' | cut -d: -f1)
     SSH_PORT=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f2)
-    SSH_CMD="ssh -o StrictHostKeyChecking=no -p $SSH_PORT $SSH_HOST"
+    SSH_CMD="ssh -o StrictHostKeyChecking=no -p $SSH_PORT root@$SSH_HOST"
     RSYNC_CMD="rsync -avz --progress -e 'ssh -o StrictHostKeyChecking=no -p $SSH_PORT'"
 }
 
@@ -139,7 +171,7 @@ print(offers[0]['id'])
     INSTANCE_ID=$(vastai create instance "$OFFER_ID" \
         --image "justinmvail/stroke-model:latest" \
         --disk 80 \
-        --ssh \
+        --ssh --direct \
         --raw 2>/dev/null | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -154,32 +186,104 @@ print(data.get('new_contract', data.get('id', '')))
     echo "$INSTANCE_ID" > "$STATE_FILE"
     log "Instance $INSTANCE_ID created."
 
-    # Wait for SSH URL
-    info "Waiting for SSH URL..."
-    SSH_URL=""
+    # Wait for instance to be running, tailing logs as they appear
+    info "Waiting for instance to start (tailing logs)..."
+    LAST_LOG_COUNT=0
     for i in $(seq 1 120); do
-        SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
-        if [ -n "$SSH_URL" ]; then
+        STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | \
+            python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
+        if [ "$STATUS" = "running" ]; then
+            echo ""
+            log "Instance running."
             break
         fi
-        printf "."
+        # Stream new log lines every 10 seconds
+        if [ $((i % 2)) -eq 0 ]; then
+            ALL_LOGS=$(vastai logs "$INSTANCE_ID" 2>/dev/null || true)
+            if [ -n "$ALL_LOGS" ]; then
+                CURRENT_COUNT=$(echo "$ALL_LOGS" | wc -l)
+                if [ "$CURRENT_COUNT" -gt "$LAST_LOG_COUNT" ]; then
+                    echo "$ALL_LOGS" | tail -n +$((LAST_LOG_COUNT + 1))
+                    LAST_LOG_COUNT=$CURRENT_COUNT
+                fi
+            fi
+        fi
         sleep 5
     done
-    echo ""
 
-    if [ -z "$SSH_URL" ]; then
-        err "No SSH URL after 10 minutes."
+    if [ "$STATUS" != "running" ]; then
+        err "Instance not running after 10 minutes."
+        dump_and_destroy "$INSTANCE_ID"
+        rm -f "$STATE_FILE"
+        CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+        if [ "$CREATE_RETRIES" -ge 3 ]; then
+            err "Failed on 3 instances. Giving up."
+            exit 1
+        fi
+        export CREATE_RETRIES
+        create_instance
+        return
+    fi
+
+    # Get direct SSH connection info (bypass relay)
+    SSH_HOST=""
+    SSH_PORT=""
+    for i in $(seq 1 12); do
+        INSTANCE_JSON=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null || true)
+        if [ -n "$INSTANCE_JSON" ]; then
+            SSH_HOST=$(echo "$INSTANCE_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+# Try direct IP + mapped port first
+ip = d.get('public_ipaddr', '')
+ports = d.get('ports', {})
+ssh_port = ''
+if '22/tcp' in ports:
+    ssh_port = str(ports['22/tcp'][0].get('HostPort', ''))
+if ip and ssh_port:
+    print(ip)
+else:
+    # Fall back to ssh-url style
+    print(d.get('ssh_host', ''))
+" 2>/dev/null || true)
+            SSH_PORT=$(echo "$INSTANCE_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ports = d.get('ports', {})
+if '22/tcp' in ports:
+    print(str(ports['22/tcp'][0].get('HostPort', '')))
+else:
+    print(str(d.get('ssh_port', '')))
+" 2>/dev/null || true)
+        fi
+        if [ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ]; then
+            break
+        fi
+        sleep 5
+    done
+
+    if [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
+        # Fall back to vastai ssh-url
+        warn "Direct connection info not available, trying ssh-url..."
+        SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
+        if [ -n "$SSH_URL" ]; then
+            SSH_HOST=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f1)
+            SSH_PORT=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f2)
+        fi
+    fi
+
+    if [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
+        err "Could not get SSH connection info."
         exit 1
     fi
 
-    echo "$SSH_URL" >> "$STATE_FILE"
-    SSH_HOST=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f1)
-    SSH_PORT=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f2)
+    echo "ssh://root@${SSH_HOST}:${SSH_PORT}" >> "$STATE_FILE"
+    info "SSH target: $SSH_HOST:$SSH_PORT"
 
-    # Wait for SSH to accept connections (10 min — includes Docker image pull time)
-    info "Waiting for SSH at $SSH_HOST:$SSH_PORT (10 min timeout)..."
-    for i in $(seq 1 120); do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$SSH_PORT" "$SSH_HOST" "echo ok" 2>/dev/null; then
+    # Wait for SSH to accept connections
+    info "Waiting for SSH connection (5 min timeout)..."
+    for i in $(seq 1 60); do
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$SSH_PORT" "root@$SSH_HOST" "echo ok" 2>/dev/null; then
             echo ""
             log "SSH connected!"
             return 0
@@ -191,12 +295,12 @@ print(data.get('new_contract', data.get('id', '')))
     CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
     if [ "$CREATE_RETRIES" -ge 3 ]; then
         err "SSH failed on 3 instances. Giving up."
-        vastai destroy instance "$INSTANCE_ID" 2>/dev/null || true
+        dump_and_destroy "$INSTANCE_ID"
         rm -f "$STATE_FILE"
         exit 1
     fi
-    err "SSH not available after 10 minutes. Destroying instance and retrying ($CREATE_RETRIES/3)..."
-    vastai destroy instance "$INSTANCE_ID" 2>/dev/null || true
+    err "SSH not available after 5 minutes. Destroying instance and retrying ($CREATE_RETRIES/3)..."
+    dump_and_destroy "$INSTANCE_ID"
     rm -f "$STATE_FILE"
     export CREATE_RETRIES
     create_instance
@@ -272,7 +376,7 @@ start_training() {
         --save-every $SAVE_EVERY \
         --render-every $RENDER_EVERY \
         --pretrain-epochs 5 \
-        --loss-weights '{\"canvas_mse\": 1.0, \"sinuosity\": 0.5, \"exist_decay\": 0.0}' \
+        --loss-weights '{\"canvas_mse\": 1.0, \"merge\": 1.0, \"stroke_length\": 0.001}' \
         $RESUME_FLAG \
         > ${REMOTE_DIR}/train.log 2>&1 &
     echo \$! > ${REMOTE_DIR}/train.pid

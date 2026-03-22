@@ -183,7 +183,7 @@ class StrokePredictor(nn.Module):
         # Output heads (single stroke)
         self.existence_head = nn.Linear(feature_dim, 1)
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
-        self.width_head = nn.Linear(feature_dim, 1)
+        self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
@@ -237,14 +237,14 @@ class StrokePredictor(nn.Module):
             existence = torch.sigmoid(self.existence_head(stroke_feat).squeeze(-1))  # (B,)
             points_raw = self.points_head(stroke_feat)  # (B, 80)
             points = torch.sigmoid(points_raw.reshape(B, MAX_POINTS, 2))  # (B, 40, 2)
-            width = F.softplus(self.width_head(stroke_feat).squeeze(-1)) + 1.0  # (B,)
+            widths = F.softplus(self.width_head(stroke_feat)) + 1.0  # (B, 40) per-point
             pc_logits = self.point_count_head(stroke_feat)  # (B, 40)
             n_pts = pc_logits.argmax(dim=-1) + 1  # (B,)
             n_pts = n_pts.clamp(min=2, max=MAX_POINTS)
 
             # Render this stroke: (B, R, R), 1=bg, 0=ink
             stroke_render = render_single_stroke_triton(
-                points, width, n_pts, CANVAS_SIZE, R,
+                points, widths, n_pts, CANVAS_SIZE, R,
             )
 
             # Composite with existence masking (differentiable multiply-blend)
@@ -256,7 +256,7 @@ class StrokePredictor(nn.Module):
 
             all_existence.append(existence)
             all_points.append(points)
-            all_widths.append(width)
+            all_widths.append(widths)
             all_point_counts.append(pc_logits)
 
         return {
@@ -307,7 +307,9 @@ class StrokePredictor(nn.Module):
             stroke = [[round(float(p[0]), 1), round(float(p[1]), 1)]
                       for p in stroke_pts]
             strokes.append(stroke)
-            stroke_widths.append(float(widths[i].item()))
+            # Per-point widths for this stroke
+            stroke_w = [float(widths[i, j].item()) for j in range(n_points)]
+            stroke_widths.append(stroke_w)
 
         return strokes, stroke_widths
 

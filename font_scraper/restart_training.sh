@@ -2,7 +2,8 @@
 # restart_training.sh — Stop training and start fresh or resume from checkpoint.
 #
 # Usage:
-#   ./restart_training.sh              # Fresh start from epoch 0 (with pretrain)
+#   ./restart_training.sh              # Start from saved pretrain checkpoint (default)
+#   ./restart_training.sh --pretrain   # Force fresh pretraining from scratch
 #   ./restart_training.sh --resume     # Pick a checkpoint to resume from
 #   ./restart_training.sh --dry-run    # Show what would happen without doing it
 
@@ -17,12 +18,15 @@ SNAPSHOT_SCRIPT="$SCRIPT_DIR/snapshot_experiment.sh"
 DRY_RUN=false
 RESUME_MODE=false
 RESUME_CKPT=""
+FORCE_PRETRAIN=false
+SAVED_PRETRAIN="$CKPT_DIR/saved/pretrain_complete.pt"
 
 # Parse arguments
 for arg in "$@"; do
     case "$arg" in
-        --dry-run) DRY_RUN=true; echo "[dry-run] Would perform the following:" ;;
-        --resume)  RESUME_MODE=true ;;
+        --dry-run)    DRY_RUN=true; echo "[dry-run] Would perform the following:" ;;
+        --resume)     RESUME_MODE=true ;;
+        --pretrain)   FORCE_PRETRAIN=true ;;
     esac
 done
 
@@ -154,26 +158,38 @@ if [ -x "$SNAPSHOT_SCRIPT" ]; then
     fi
 fi
 
-# 5. Build resume flag
+# 5. Build resume flag and pretrain flag
 RESUME_FLAG=""
+PRETRAIN_FLAG=""
+
 if $RESUME_MODE && [ -n "$RESUME_CKPT" ]; then
-    # Map host path to container path
+    # Resuming from user-selected checkpoint
     CKPT_BASENAME=$(basename "$RESUME_CKPT")
     RESUME_FLAG="--resume /app/checkpoints/$CKPT_BASENAME"
     echo "Resume flag: $RESUME_FLAG"
-fi
-
-# 6. Build pretrain flag (skip pretrain if resuming)
-PRETRAIN_FLAG=""
-if ! $RESUME_MODE; then
+elif $FORCE_PRETRAIN; then
+    # Forced pretrain from scratch
+    PRETRAIN_FLAG="--pretrain-epochs 5"
+    echo "Running fresh pretraining (5 epochs)..."
+elif [ -f "$SAVED_PRETRAIN" ]; then
+    # Default: use saved pretrain checkpoint
+    echo "Using saved pretrain checkpoint: pretrain_complete.pt"
+    # Copy to top-level so Docker can see it
+    run "cp '$SAVED_PRETRAIN' '$CKPT_DIR/pretrain_resume.pt'"
+    RESUME_FLAG="--resume /app/checkpoints/pretrain_resume.pt"
+else
+    # No saved pretrain, run it
+    echo "No saved pretrain found. Running pretraining (5 epochs)..."
     PRETRAIN_FLAG="--pretrain-epochs 5"
 fi
 
-# 7. Launch training
+# 6. Launch training
 if $RESUME_MODE; then
     echo "Resuming training from $RESUME_NAME..."
+elif $FORCE_PRETRAIN; then
+    echo "Launching pretraining + training from scratch..."
 else
-    echo "Launching fresh training from epoch 0..."
+    echo "Launching training from pretrain checkpoint..."
 fi
 
 run "docker run -d --gpus all --name $CONTAINER_NAME \
@@ -203,7 +219,7 @@ run "docker run -d --gpus all --name $CONTAINER_NAME \
     --augment \
     $PRETRAIN_FLAG \
     $RESUME_FLAG \
-    --loss-weights '{\"canvas_mse\": 1.0, \"sinuosity\": 0.5, \"exist_decay\": 0.0}'"
+    --loss-weights '{\"canvas_mse\": 1.0, \"merge\": 1.0, \"stroke_length\": 0.001}'"
 
 if ! $DRY_RUN; then
     echo ""

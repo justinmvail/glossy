@@ -568,7 +568,60 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     active = (existence > 0.3).float()
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
-    # 4. Existence decay: later strokes cost more to activate
+    # 4. Merge penalty: penalize stroke pairs that could be merged
+    # Soft version: smooth gradients tell the model how to fix it
+    merge_penalty = torch.tensor(0.0, device=device)
+    merge_threshold = 15.0  # pixels — proximity scale
+
+    for i in range(S):
+        for j in range(S):
+            if i == j:
+                continue
+            both_active = existence[:, i] * existence[:, j]  # soft, (B,)
+
+            # Last valid point of stroke i
+            last_i_idx = (n_points[:, i] - 1).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
+            last_i = pts_scaled[:, i].gather(1, last_i_idx).squeeze(1)  # (B, 2)
+            # First point of stroke j
+            first_j = pts_scaled[:, j, 0]  # (B, 2)
+
+            # Soft proximity: sigmoid(threshold - gap)
+            endpoint_gap = (last_i - first_j).norm(dim=-1)  # (B,)
+            close_soft = torch.sigmoid((merge_threshold - endpoint_gap) * 0.5)  # (B,)
+
+            # Direction of stroke i at its end (last segment)
+            prev_i_idx = (n_points[:, i] - 2).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
+            prev_i = pts_scaled[:, i].gather(1, prev_i_idx).squeeze(1)
+            dir_i = last_i - prev_i  # (B, 2)
+            dir_i = dir_i / dir_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+            # Direction of stroke j at its start (first segment)
+            second_j = pts_scaled[:, j, 1]  # (B, 2)
+            dir_j = second_j - first_j  # (B, 2)
+            dir_j = dir_j / dir_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+            # Soft alignment: clamp cosine similarity above 0
+            cos_sim = (dir_i * dir_j).sum(dim=-1)  # (B,)
+            aligned_soft = cos_sim.clamp(min=0)  # (B,), 0-1
+
+            # Soft merge penalty: close × aligned × both active
+            merge_penalty = merge_penalty + (close_soft * aligned_soft * both_active).mean()
+
+    loss_merge = merge_penalty / (S * S)  # normalize
+
+    # 5. Point budget: penalize using more points than necessary
+    # Differentiable expected point count via softmax over point_count_logits
+    pc_probs = torch.softmax(pc_logits, dim=-1)  # (B, S, N)
+    point_indices = torch.arange(1, N + 1, device=device, dtype=torch.float32)  # [1, 2, ..., 40]
+    expected_n = (pc_probs * point_indices).sum(dim=-1)  # (B, S)
+    # Only penalize active strokes, normalize by MAX_POINTS
+    loss_points = (expected_n * active / N).sum(dim=1).mean()
+
+    # 6. Stroke length: total path length across all strokes
+    # With per-point width, zigzag is pure waste — widening is always shorter
+    loss_length = (path_length * active).sum(dim=1).mean() / canvas_size
+
+    # 7. Existence decay: later strokes cost more to activate
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
     loss_exist = (existence * step_weights.unsqueeze(0)).mean()
 
@@ -576,6 +629,9 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('smoothness', 0.0) * loss_smooth +
              weights.get('reversal', 0.0) * loss_reversal +
              weights.get('sinuosity', 0.0) * loss_sinuosity +
+             weights.get('merge', 0.0) * loss_merge +
+             weights.get('point_budget', 0.0) * loss_points +
+             weights.get('stroke_length', 0.0) * loss_length +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -584,6 +640,9 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'smoothness': loss_smooth.item(),
         'reversal': loss_reversal.item(),
         'sinuosity': loss_sinuosity.item(),
+        'merge': loss_merge.item(),
+        'point_budget': loss_points.item(),
+        'stroke_length': loss_length.item(),
         'exist_decay': loss_exist.item(),
     }
 
@@ -624,7 +683,7 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
 
     # 2. Stroke matching via greedy Chamfer distance
     pred_pts = model_output['points']       # (B, S, N, 2)
-    pred_widths = model_output['widths']    # (B, S)
+    pred_widths = model_output['widths']    # (B, S, N) per-point widths
     pred_exist = model_output['existence']  # (B, S)
     pred_pc = model_output['point_count_logits']
     pred_n = pred_pc.argmax(dim=-1).clamp(min=1, max=pred_pts.shape[2])  # (B, S)
@@ -690,7 +749,8 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
             used_pred.add(best_i)
             used_gt.add(best_j)
             loss_chamfer = loss_chamfer + chamfer_matrix[b, best_i, best_j]
-            loss_width = loss_width + (pred_widths[b, best_i] - gt_widths[b, best_j]).abs()
+            # Per-point widths: compare mean predicted width to GT width
+            loss_width = loss_width + (pred_widths[b, best_i].mean() - gt_widths[b, best_j]).abs()
             n_matched += 1
 
         # Existence BCE: matched preds should exist, unmatched should not

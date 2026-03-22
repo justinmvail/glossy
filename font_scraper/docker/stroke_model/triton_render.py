@@ -16,7 +16,7 @@ from model import CANVAS_SIZE, MAX_STROKES, MAX_POINTS
 def _distance_field_kernel(
     # Inputs (all flattened)
     points_ptr,       # (B, S, N, 2) normalized coords
-    widths_ptr,       # (B, S)
+    widths_ptr,       # (B, S, N) per-point widths
     existence_ptr,    # (B, S)
     n_points_ptr,     # (B, S) int32
     # Outputs
@@ -52,11 +52,11 @@ def _distance_field_kernel(
     for s in tl.static_range(S):
         exist_val = tl.load(existence_ptr + batch_idx * S + s)
         if exist_val >= exist_thresh:
-            width = tl.load(widths_ptr + batch_idx * S + s)
             n_pts = tl.load(n_points_ptr + batch_idx * S + s)
 
-            # Base pointer for this stroke's points: (batch_idx, s, 0, 0)
+            # Base pointers for this stroke
             pts_base = (batch_idx * S * N + s * N) * 2
+            widths_base = batch_idx * S * N + s * N
 
             for seg in tl.static_range(N - 1):
                 # Use mask instead of break
@@ -89,7 +89,11 @@ def _distance_field_kernel(
                     dx = px - proj_x
                     dy = py - proj_y
                     dist = tl.sqrt(dx * dx + dy * dy + 1e-6)
-                    dist = dist - width * 0.5
+                    # Interpolate width between segment endpoints
+                    w_a = tl.load(widths_ptr + widths_base + seg)
+                    w_b = tl.load(widths_ptr + widths_base + seg + 1)
+                    width_interp = w_a * (1.0 - t) + w_b * t
+                    dist = dist - width_interp * 0.5
 
                     if dist < best_dist:
                         best_dist = dist
@@ -249,16 +253,27 @@ class DistanceFieldRender(torch.autograd.Function):
             grad_b_flat, accumulate=True,
         )
 
-        # Width gradient: d(min_dist)/d(width) = -0.5
-        grad_widths = torch.zeros_like(widths)  # (B, S)
-        width_grad_per_pixel = grad_min_dist * (-0.5)  # (B, P)
-        # Scatter to the closest stroke
-        grad_widths.scatter_add_(1, cs, width_grad_per_pixel)
+        # Width gradient: d(min_dist)/d(width_interp) = -0.5
+        # width_interp = w_a * (1-t) + w_b * t
+        # d(min_dist)/d(w_a) = -0.5 * (1-t)
+        # d(min_dist)/d(w_b) = -0.5 * t
+        grad_widths = torch.zeros_like(widths)  # (B, S, N)
+        grad_w_a = grad_min_dist * (-0.5) * (1 - t)  # (B, P)
+        grad_w_b = grad_min_dist * (-0.5) * t          # (B, P)
+
+        # Scatter to per-point widths: (B, S, N) indexed by (batch, stroke, point)
+        # Flatten to (B, S*N) for scatter_add_
+        grad_widths_flat = grad_widths.reshape(B, -1)  # (B, S*N)
+        scatter_idx_a = (cs * N + cseg).clamp(max=S * N - 1)          # (B, P)
+        scatter_idx_b = (cs * N + cseg_b).clamp(max=S * N - 1)        # (B, P)
+        grad_widths_flat.scatter_add_(1, scatter_idx_a, grad_w_a)
+        grad_widths_flat.scatter_add_(1, scatter_idx_b, grad_w_b)
+        grad_widths = grad_widths_flat.reshape(B, S, N)
 
         return grad_points, grad_widths, None, None, None, None, None, None
 
 
-def render_single_stroke_triton(points, width, n_points, canvas_size=CANVAS_SIZE,
+def render_single_stroke_triton(points, widths, n_points, canvas_size=CANVAS_SIZE,
                                 render_size=56, sharpness=4.0):
     """Render a single stroke per batch item using the Triton kernel.
 
@@ -267,7 +282,7 @@ def render_single_stroke_triton(points, width, n_points, canvas_size=CANVAS_SIZE
 
     Args:
         points: (B, N, 2) normalized coordinates for one stroke.
-        width: (B,) stroke widths in pixels.
+        widths: (B, N) per-point widths in pixels.
         n_points: (B,) valid point counts.
         canvas_size: int.
         render_size: int.
@@ -279,14 +294,14 @@ def render_single_stroke_triton(points, width, n_points, canvas_size=CANVAS_SIZE
     B = points.shape[0]
     device = points.device
 
-    # Reshape to (B, 1, N, 2) / (B, 1) for the kernel
-    points_4d = points.unsqueeze(1)
-    widths_2d = width.unsqueeze(1)
+    # Reshape to (B, 1, N, 2) / (B, 1, N) for the kernel
+    points_4d = points.unsqueeze(1)          # (B, 1, N, 2)
+    widths_3d = widths.unsqueeze(1)          # (B, 1, N)
     existence = torch.ones(B, 1, device=device)
     n_pts_2d = n_points.unsqueeze(1) if n_points.dim() == 1 else n_points
 
     return DistanceFieldRender.apply(
-        points_4d, widths_2d, existence, n_pts_2d,
+        points_4d, widths_3d, existence, n_pts_2d,
         canvas_size, render_size, sharpness, 0.0,  # exist_thresh=0, always render
     )
 
