@@ -219,7 +219,7 @@ run "docker run -d --gpus all --name $CONTAINER_NAME \
     --augment \
     $PRETRAIN_FLAG \
     $RESUME_FLAG \
-    --loss-weights '{\"canvas_mse\": 1.0, \"merge\": 1.0, \"stroke_length\": 0.001}'"
+    --loss-weights '{\"canvas_mse\": 1.0, \"merge\": 1.0, \"stroke_length\": 0.001, \"width_smooth\": 0.01}'"
 
 if ! $DRY_RUN; then
     echo ""

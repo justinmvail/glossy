@@ -604,8 +604,16 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
             cos_sim = (dir_i * dir_j).sum(dim=-1)  # (B,)
             aligned_soft = cos_sim.clamp(min=0)  # (B,), 0-1
 
-            # Soft merge penalty: close × aligned × both active
-            merge_penalty = merge_penalty + (close_soft * aligned_soft * both_active).mean()
+            # Width compatibility: similar widths at junction = more mergeable
+            stroke_widths = model_output['widths']  # (B, S, N)
+            last_w_idx = (n_points[:, i] - 1).clamp(min=0)
+            w_end_i = stroke_widths[:, i].gather(1, last_w_idx.unsqueeze(-1)).squeeze(-1)  # (B,)
+            w_start_j = stroke_widths[:, j, 0]  # (B,)
+            width_diff = (w_end_i - w_start_j).abs()
+            width_compat = torch.sigmoid((5.0 - width_diff) * 0.5)  # 1.0 when similar, 0.0 when different
+
+            # Soft merge penalty: close × aligned × width compatible × both active
+            merge_penalty = merge_penalty + (close_soft * aligned_soft * width_compat * both_active).mean()
 
     loss_merge = merge_penalty / (S * S)  # normalize
 
@@ -617,7 +625,17 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     # Only penalize active strokes, normalize by MAX_POINTS
     loss_points = (expected_n * active / N).sum(dim=1).mean()
 
-    # 6. Stroke length: total path length across all strokes
+    # 6. Width smoothness: penalize rapid width changes between adjacent points
+    stroke_widths = model_output['widths']  # (B, S, N)
+    w_diff = stroke_widths[:, :, 1:] - stroke_widths[:, :, :-1]  # (B, S, N-1)
+    w_diff_sq = w_diff ** 2
+    # Mask invalid points and inactive strokes
+    valid_w = torch.arange(N - 1, device=device) < (n_points - 1).unsqueeze(-1)  # (B, S, N-1)
+    w_smooth = (w_diff_sq * valid_w.float() * active.unsqueeze(-1)).sum(dim=2)  # (B, S)
+    per_stroke_w = w_smooth / valid_w.float().sum(dim=2).clamp(min=1)  # mean per stroke
+    loss_width_smooth = (per_stroke_w * active).sum(dim=1).mean()
+
+    # 7. Stroke length: total path length across all strokes
     # With per-point width, zigzag is pure waste — widening is always shorter
     loss_length = (path_length * active).sum(dim=1).mean() / canvas_size
 
@@ -632,6 +650,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('merge', 0.0) * loss_merge +
              weights.get('point_budget', 0.0) * loss_points +
              weights.get('stroke_length', 0.0) * loss_length +
+             weights.get('width_smooth', 0.0) * loss_width_smooth +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -643,6 +662,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'merge': loss_merge.item(),
         'point_budget': loss_points.item(),
         'stroke_length': loss_length.item(),
+        'width_smooth': loss_width_smooth.item(),
         'exist_decay': loss_exist.item(),
     }
 

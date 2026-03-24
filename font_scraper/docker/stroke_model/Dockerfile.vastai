@@ -1,24 +1,26 @@
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+# Base: Vast.ai's PyTorch image with CUDA 12.8 (pre-cached on Vast.ai hosts)
+# This eliminates the Docker Hub pull failures that affect 50%+ of hosts
+FROM vastai/pytorch:cuda-12.8.1-auto
 
-# System packages
-RUN apt-get update -qq && \
-    apt-get install -y -qq --no-install-recommends \
-    python3 python3-pip python3-dev \
-    cmake build-essential git \
-    libgl1-mesa-glx libglib2.0-0 \
-    fonts-dejavu-core rsync && \
-    rm -rf /var/lib/apt/lists/*
+# Install into the base image's venv (where PyTorch lives)
+ENV PATH="/venv/main/bin:$PATH"
 
-# PyTorch + torchvision from nightly cu128 (RTX 5090 sm_120 support)
-# Must install together from same index to avoid version mismatch
-RUN pip3 install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+# Dependencies split into small layers to limit peak memory during build
+RUN pip3 install --no-cache-dir "numpy<2" scipy
+RUN pip3 install --no-cache-dir pillow scikit-image
+RUN pip3 install --no-cache-dir triton
+RUN pip3 install --no-cache-dir tensorboard cssutils matplotlib
+RUN pip3 install --no-cache-dir --no-deps timm
+RUN pip3 install --no-cache-dir safetensors huggingface_hub pyyaml gdown
 
-# Python dependencies (--no-deps on timm to prevent it pulling torch from PyPI)
-RUN pip3 install --no-cache-dir \
-    "numpy<2" scipy pillow scikit-image \
-    tensorboard cssutils matplotlib triton && \
-    pip3 install --no-cache-dir --no-deps timm && \
-    pip3 install --no-cache-dir safetensors huggingface_hub pyyaml
+# Fix SSH: Vast.ai injects authorized_keys at runtime with wrong permissions
+# StrictModes no tells sshd to skip ownership/permission checks
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
+    echo "StrictModes no" >> /etc/ssh/sshd_config 2>/dev/null; \
+    echo "StrictModes no" >> /etc/ssh/sshd_config.d/vastai.conf 2>/dev/null; \
+    true
 
-WORKDIR /workspace/stroke_model
+# Code only — fonts/db downloaded from Google Drive at boot via onstart script
+COPY *.py /app/
+
+WORKDIR /app

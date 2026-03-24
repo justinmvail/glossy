@@ -1,6 +1,8 @@
 checkpoints/
+checkpoints_vastai/
 glyph_cache/
 experiments/
 logs/
 __pycache__/
 *.pyc
+.last_build_tag

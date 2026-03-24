@@ -118,3 +118,7 @@ font_scraper/prefilter_samples/
 font_scraper/characters/
 font_scraper/inksight_progress*.txt
 fonts.db
+font_scraper/docker/stroke_model/checkpoints_vastai/
+font_scraper/docker/stroke_model/.build_staging/
+font_scraper/docker/stroke_model/.last_build_tag
+font_scraper/docker/stroke_model/.vastai_instance

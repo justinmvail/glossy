@@ -2,12 +2,15 @@
 # vastai_deploy.sh — One-click deployment of stroke model training to Vast.ai
 #
 # Usage:
-#   ./vastai_deploy.sh              # Find GPU, create instance, upload, train
+#   ./vastai_deploy.sh              # Find GPU, create instance, start training
 #   ./vastai_deploy.sh --status     # Check training status on remote
 #   ./vastai_deploy.sh --sync       # Download latest checkpoints and tracking
 #   ./vastai_deploy.sh --stop       # Stop and destroy the instance
 #   ./vastai_deploy.sh --resume     # Resume training on existing instance
 #   ./vastai_deploy.sh --tail       # Follow remote training log
+#
+# The Docker image (built by docker/stroke_model/build_vastai.sh) contains
+# everything: code, fonts, and fonts.db. No upload step needed.
 #
 # Prerequisites:
 #   pipx install vastai
@@ -18,16 +21,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STROKE_DIR="$SCRIPT_DIR/docker/stroke_model"
-STATE_FILE="$SCRIPT_DIR/.vastai_instance"
-REMOTE_DIR="/workspace/stroke_model"
+STATE_FILE="$STROKE_DIR/.vastai_instance"
+TAG_FILE="$STROKE_DIR/.last_build_tag"
+REMOTE_DIR="/workspace"  # Outputs go here (not baked into image)
+DATA_DIR="/data"         # Fonts + db downloaded here at boot
+GDRIVE_FILE_ID="1MWPIwbt5aFwSGpnX0VaH-1KgCUZ5R8o0"  # training_data.tar.gz on Google Drive
 
 # Training config
 EPOCHS=100
 BATCH_SIZE=512
 LR="4e-4"
-RENDER_EVERY=1   # Triton renderer is fast enough for every step
+RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 1.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01}'
 
 # Colors
 RED='\033[0;31m'
@@ -42,11 +49,9 @@ err() { echo -e "${RED}[vastai]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[vastai]${NC} $*"; }
 
 dump_and_destroy() {
-    # Dump all available logs before destroying an instance
     local iid="$1"
     warn "═══ Dumping logs for instance $iid before destroy ═══"
 
-    # Instance status
     warn "── Instance Status ──"
     vastai show instance "$iid" --raw 2>/dev/null | python3 -c "
 import json, sys
@@ -58,7 +63,6 @@ try:
 except: pass
 " 2>/dev/null || echo "  (could not read instance status)"
 
-    # Container logs from Vast.ai
     warn "── Container Logs (last 50 lines) ──"
     vastai logs "$iid" 2>/dev/null | tail -50 || echo "  (no logs available)"
 
@@ -80,17 +84,14 @@ check_deps() {
     log "API key verified."
 }
 
-# Get SSH connection details from state file
 _load_ssh() {
     if [ ! -f "$STATE_FILE" ]; then
         err "No active instance. Run without flags to deploy."
         exit 1
     fi
     INSTANCE_ID=$(head -1 "$STATE_FILE")
-    # Read SSH URL from state file (line 2), saved during create_instance
     SSH_URL=$(sed -n '2p' "$STATE_FILE" 2>/dev/null || true)
     if [ -z "$SSH_URL" ]; then
-        # Fall back to vastai ssh-url
         SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
     fi
     if [ -z "$SSH_URL" ]; then
@@ -103,14 +104,57 @@ _load_ssh() {
     RSYNC_CMD="rsync -avz --progress -e 'ssh -o StrictHostKeyChecking=no -p $SSH_PORT'"
 }
 
+_get_image_tag() {
+    if [ ! -f "$TAG_FILE" ]; then
+        err "No image tag found. Run build_vastai.sh first:"
+        err "  $STROKE_DIR/build_vastai.sh"
+        exit 1
+    fi
+    IMAGE_TAG=$(cat "$TAG_FILE")
+    log "Using image: $IMAGE_TAG"
+}
+
+_build_onstart_cmd() {
+    # Downloads training data from Google Drive, then starts training
+    # Outputs go to /workspace/ which is not baked into the image
+    cat <<ONSTART
+echo "=== Downloading training data from Google Drive ===" && \
+mkdir -p ${DATA_DIR} ${REMOTE_DIR}/checkpoints ${REMOTE_DIR}/cache && \
+if [ ! -f ${DATA_DIR}/fonts.db ]; then
+    gdown ${GDRIVE_FILE_ID} -O /tmp/training_data.tar.gz && \
+    tar xzf /tmp/training_data.tar.gz -C ${DATA_DIR} && \
+    rm /tmp/training_data.tar.gz && \
+    echo "=== Data downloaded: \$(find ${DATA_DIR}/fonts -type f | wc -l) fonts ==="
+else
+    echo "=== Data already present, skipping download ==="
+fi && \
+cd /app && \
+RESUME_FLAG="" && \
+if [ -f ${REMOTE_DIR}/checkpoints/best_model.pt ]; then RESUME_FLAG="--resume ${REMOTE_DIR}/checkpoints/best_model.pt"; fi && \
+nohup python3 -u train.py \
+    --db /data/fonts.db \
+    --font-dir /data \
+    --output-dir ${REMOTE_DIR}/checkpoints \
+    --cache-dir ${REMOTE_DIR}/cache \
+    --epochs $EPOCHS \
+    --batch-size $BATCH_SIZE \
+    --lr $LR \
+    --augment \
+    --num-workers $NUM_WORKERS \
+    --log-every 50 \
+    --save-every $SAVE_EVERY \
+    --render-every $RENDER_EVERY \
+    --pretrain-epochs 5 \
+    --loss-weights '$(echo "$LOSS_WEIGHTS" | sed "s/'/\\\\'/g")' \
+    \$RESUME_FLAG \
+    > ${REMOTE_DIR}/train.log 2>&1 &
+echo \$! > ${REMOTE_DIR}/train.pid
+ONSTART
+}
+
 create_instance() {
-    # Common filters for fast deployment:
-    #   inet_down>=500   — fast package installs (apt/pip)
-    #   inet_up>=200     — fast checkpoint sync back
-    #   disk_bw>=500     — fast dataset I/O
-    #   direct_port_count>=1 — SSH works without relay (faster connect)
-    #   reliability>=0.98 — fewer flaky hosts
-    #   datacenter=true  — dedicated infra, faster boot times
+    _get_image_tag
+
     COMMON_FILTERS='num_gpus=1 disk_space>=80 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
 
     log "Searching for RTX 5090 instances..."
@@ -148,8 +192,7 @@ print(f'  Best: \${o[\"dph_total\"]:.3f}/hr, {o.get(\"gpu_name\",\"?\")}, {o.get
 import json, sys
 offers = json.load(sys.stdin)
 if not offers: sys.exit(1)
-o = offers[0]
-print(o['id'])
+print(offers[0]['id'])
 " 2>/dev/null) || true
 
         if [ -z "$OFFER_ID" ]; then
@@ -167,11 +210,14 @@ print(offers[0]['id'])
         fi
     fi
 
+    ONSTART_CMD=$(_build_onstart_cmd)
+
     log "Creating instance from offer $OFFER_ID..."
     INSTANCE_ID=$(vastai create instance "$OFFER_ID" \
-        --image "justinmvail/stroke-model:latest" \
+        --image "$IMAGE_TAG" \
         --disk 80 \
         --ssh --direct \
+        --onstart-cmd "$ONSTART_CMD" \
         --raw 2>/dev/null | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -186,18 +232,36 @@ print(data.get('new_contract', data.get('id', '')))
     echo "$INSTANCE_ID" > "$STATE_FILE"
     log "Instance $INSTANCE_ID created."
 
-    # Wait for instance to be running, tailing logs as they appear
-    info "Waiting for instance to start (tailing logs)..."
+    # Wait for instance to be running
+    info "Waiting for instance to start (20 min timeout, tailing logs)..."
     LAST_LOG_COUNT=0
-    for i in $(seq 1 120); do
-        STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | \
-            python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
+    for i in $(seq 1 240); do
+        INSTANCE_RAW=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null || true)
+        STATUS=$(echo "$INSTANCE_RAW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
+        STATUS_MSG=$(echo "$INSTANCE_RAW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status_msg',''))" 2>/dev/null || true)
+
         if [ "$STATUS" = "running" ]; then
             echo ""
             log "Instance running."
             break
         fi
-        # Stream new log lines every 10 seconds
+
+        if echo "$STATUS_MSG" | grep -qi "deadline exceeded\|unauthorized\|manifest unknown\|denied\|error"; then
+            echo ""
+            err "Docker pull failed: $STATUS_MSG"
+            dump_and_destroy "$INSTANCE_ID"
+            rm -f "$STATE_FILE"
+            CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+            if [ "$CREATE_RETRIES" -ge 5 ]; then
+                err "Failed on 5 instances. Giving up."
+                exit 1
+            fi
+            warn "Retrying on a different host ($CREATE_RETRIES/5)..."
+            export CREATE_RETRIES
+            create_instance
+            return
+        fi
+
         if [ $((i % 2)) -eq 0 ]; then
             ALL_LOGS=$(vastai logs "$INSTANCE_ID" 2>/dev/null || true)
             if [ -n "$ALL_LOGS" ]; then
@@ -212,20 +276,46 @@ print(data.get('new_contract', data.get('id', '')))
     done
 
     if [ "$STATUS" != "running" ]; then
-        err "Instance not running after 10 minutes."
-        dump_and_destroy "$INSTANCE_ID"
-        rm -f "$STATE_FILE"
-        CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
-        if [ "$CREATE_RETRIES" -ge 3 ]; then
-            err "Failed on 3 instances. Giving up."
-            exit 1
+        if [ "$STATUS" = "loading" ]; then
+            warn "Still loading after 20 min (image pull in progress). Continuing to wait..."
+            while true; do
+                STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | \
+                    python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
+                if [ "$STATUS" = "running" ]; then
+                    log "Instance running!"
+                    break
+                elif [ "$STATUS" != "loading" ]; then
+                    err "Instance status changed to: $STATUS"
+                    dump_and_destroy "$INSTANCE_ID"
+                    rm -f "$STATE_FILE"
+                    CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+                    if [ "$CREATE_RETRIES" -ge 3 ]; then
+                        err "Failed on 3 instances. Giving up."
+                        exit 1
+                    fi
+                    export CREATE_RETRIES
+                    create_instance
+                    return
+                fi
+                printf "."
+                sleep 10
+            done
+        else
+            err "Instance status: $STATUS (not loading or running)."
+            dump_and_destroy "$INSTANCE_ID"
+            rm -f "$STATE_FILE"
+            CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+            if [ "$CREATE_RETRIES" -ge 3 ]; then
+                err "Failed on 3 instances. Giving up."
+                exit 1
+            fi
+            export CREATE_RETRIES
+            create_instance
+            return
         fi
-        export CREATE_RETRIES
-        create_instance
-        return
     fi
 
-    # Get direct SSH connection info (bypass relay)
+    # Get direct SSH connection info
     SSH_HOST=""
     SSH_PORT=""
     for i in $(seq 1 12); do
@@ -234,7 +324,6 @@ print(data.get('new_contract', data.get('id', '')))
             SSH_HOST=$(echo "$INSTANCE_JSON" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-# Try direct IP + mapped port first
 ip = d.get('public_ipaddr', '')
 ports = d.get('ports', {})
 ssh_port = ''
@@ -243,7 +332,6 @@ if '22/tcp' in ports:
 if ip and ssh_port:
     print(ip)
 else:
-    # Fall back to ssh-url style
     print(d.get('ssh_host', ''))
 " 2>/dev/null || true)
             SSH_PORT=$(echo "$INSTANCE_JSON" | python3 -c "
@@ -263,7 +351,6 @@ else:
     done
 
     if [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
-        # Fall back to vastai ssh-url
         warn "Direct connection info not available, trying ssh-url..."
         SSH_URL=$(vastai ssh-url "$INSTANCE_ID" 2>/dev/null || true)
         if [ -n "$SSH_URL" ]; then
@@ -280,108 +367,140 @@ else:
     echo "ssh://root@${SSH_HOST}:${SSH_PORT}" >> "$STATE_FILE"
     info "SSH target: $SSH_HOST:$SSH_PORT"
 
-    # Wait for SSH to accept connections
+    # Wait for SSH — try direct port first, fall back to proxy
     info "Waiting for SSH connection (5 min timeout)..."
+
+    # Also extract proxy SSH info as fallback
+    PROXY_HOST=$(echo "$INSTANCE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ssh_host',''))" 2>/dev/null || true)
+    PROXY_PORT=$(echo "$INSTANCE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ssh_port',''))" 2>/dev/null || true)
+
+    SSH_CONNECTED=false
     for i in $(seq 1 60); do
         if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$SSH_PORT" "root@$SSH_HOST" "echo ok" 2>/dev/null; then
             echo ""
-            log "SSH connected!"
-            return 0
+            log "SSH connected (direct)!"
+            SSH_CONNECTED=true
+            break
+        fi
+        # Try proxy fallback every 10 attempts
+        if [ $((i % 10)) -eq 0 ] && [ -n "$PROXY_HOST" ] && [ -n "$PROXY_PORT" ]; then
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p "$PROXY_PORT" "root@$PROXY_HOST" "echo ok" 2>/dev/null; then
+                echo ""
+                log "SSH connected (proxy: $PROXY_HOST:$PROXY_PORT)!"
+                SSH_HOST="$PROXY_HOST"
+                SSH_PORT="$PROXY_PORT"
+                # Update state file with working SSH info
+                echo "$INSTANCE_ID" > "$STATE_FILE"
+                echo "ssh://root@${SSH_HOST}:${SSH_PORT}" >> "$STATE_FILE"
+                SSH_CONNECTED=true
+                break
+            fi
         fi
         printf "."
         sleep 5
     done
-    echo ""
-    CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
-    if [ "$CREATE_RETRIES" -ge 3 ]; then
-        err "SSH failed on 3 instances. Giving up."
+
+    if ! $SSH_CONNECTED; then
+        CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+        if [ "$CREATE_RETRIES" -ge 3 ]; then
+            err "SSH failed on 3 instances. Giving up."
+            dump_and_destroy "$INSTANCE_ID"
+            rm -f "$STATE_FILE"
+            exit 1
+        fi
+        err "SSH not available after 5 minutes. Retrying ($CREATE_RETRIES/3)..."
         dump_and_destroy "$INSTANCE_ID"
         rm -f "$STATE_FILE"
-        exit 1
+        export CREATE_RETRIES
+        create_instance
+        return
     fi
-    err "SSH not available after 5 minutes. Destroying instance and retrying ($CREATE_RETRIES/3)..."
+}
+
+verify_training() {
+    _load_ssh
+    info "Verifying training started (waiting up to 3 min)..."
+
+    # Poll every 15s for up to 3 minutes — onstart needs time to download data + start
+    for i in $(seq 1 12); do
+        sleep 15
+        RESULT=$($SSH_CMD -T "
+            # Check 1: is a python3 train.py process running?
+            if pgrep -f 'python3.*train.py' >/dev/null 2>&1; then
+                echo 'running'
+            # Check 2: does train.log exist and have recent content?
+            elif [ -f ${REMOTE_DIR}/train.log ] && [ \$(wc -l < ${REMOTE_DIR}/train.log) -gt 2 ]; then
+                echo 'log_exists'
+            # Check 3: is data still downloading?
+            elif pgrep -f 'gdown' >/dev/null 2>&1; then
+                echo 'downloading'
+            else
+                echo 'not_started'
+            fi
+        " 2>/dev/null || echo "ssh_error")
+
+        case "$RESULT" in
+            running)
+                log "Training verified running!"
+                $SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true
+                return 0
+                ;;
+            log_exists)
+                log "Training log found, process may have just started."
+                $SSH_CMD -T "tail -3 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true
+                return 0
+                ;;
+            downloading)
+                info "  Still downloading training data..."
+                ;;
+            not_started)
+                info "  Waiting for onstart to complete..."
+                ;;
+            ssh_error)
+                warn "  SSH check failed, retrying..."
+                ;;
+        esac
+    done
+
+    # Final check — don't destroy if there's any sign of life
+    FINAL=$($SSH_CMD -T "
+        if [ -f ${REMOTE_DIR}/train.log ]; then
+            echo 'has_log'
+            tail -5 ${REMOTE_DIR}/train.log
+        else
+            echo 'no_log'
+        fi
+    " 2>/dev/null || echo "ssh_failed")
+
+    if echo "$FINAL" | grep -q "has_log"; then
+        warn "Training process not detected but log exists. NOT destroying — check manually:"
+        warn "  $0 --status"
+        return 0
+    fi
+
+    err "Training failed to start after 3 minutes. No log file found."
+    err "Destroying instance..."
+    INSTANCE_ID=$(head -1 "$STATE_FILE")
     dump_and_destroy "$INSTANCE_ID"
     rm -f "$STATE_FILE"
-    export CREATE_RETRIES
-    create_instance
-}
-
-setup_remote() {
-    _load_ssh
-    log "Verifying remote environment..."
-    $SSH_CMD "python3 -c \"import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}, GPU: {torch.cuda.get_device_name(0)}')\"" 2>/dev/null
-    $SSH_CMD "mkdir -p /workspace/stroke_model/checkpoints /workspace/stroke_model/cache" 2>/dev/null
-    log "Environment ready."
-}
-
-upload_data() {
-    _load_ssh
-    log "Uploading training data..."
-
-    # Upload code (including triton_render.py)
-    info "Uploading model code..."
-    eval $RSYNC_CMD "$STROKE_DIR/"*.py "${SSH_HOST}:${REMOTE_DIR}/"
-
-    # Upload fonts database
-    info "Uploading fonts.db (50MB)..."
-    eval $RSYNC_CMD "$SCRIPT_DIR/fonts.db" "${SSH_HOST}:${REMOTE_DIR}/"
-
-    # Generate list of fonts actually used in training (6.5K out of 87K)
-    info "Generating training font list..."
-    python3 -c "
-import sqlite3
-conn = sqlite3.connect('$SCRIPT_DIR/fonts.db')
-rows = conn.execute('''
-    SELECT f.file_path FROM fonts f
-    LEFT JOIN font_checks fc ON f.id = fc.font_id
-    LEFT JOIN font_removals fr ON f.id = fr.font_id
-    WHERE fr.font_id IS NULL
-    AND (fc.prefilter_passed = 1 OR fc.prefilter_passed IS NULL)
-    AND (fc.is_cursive = 0 OR fc.is_cursive IS NULL)
-''').fetchall()
-conn.close()
-for r in rows:
-    print(r[0])
-" > /tmp/training_fonts.txt
-    FONT_COUNT=$(wc -l < /tmp/training_fonts.txt)
-    info "Uploading $FONT_COUNT training fonts (~572MB, not all 87K)..."
-    eval $RSYNC_CMD --files-from=/tmp/training_fonts.txt "$SCRIPT_DIR/" "${SSH_HOST}:${REMOTE_DIR}/"
-
-    # Always start fresh — never upload local checkpoints
-
-    log "Upload complete."
+    exit 1
 }
 
 start_training() {
+    # For --resume: manually start training on an existing instance
     _load_ssh
     log "Starting training..."
 
-    RESUME_FLAG=""
-    if $SSH_CMD "test -f ${REMOTE_DIR}/checkpoints/best_model.pt" 2>/dev/null; then
-        RESUME_FLAG="--resume ${REMOTE_DIR}/checkpoints/best_model.pt"
-        info "Resuming from best_model.pt"
-    fi
-
-    $SSH_CMD -T "cd ${REMOTE_DIR} && nohup python3 -u train.py \
-        --db ${REMOTE_DIR}/fonts.db \
-        --font-dir ${REMOTE_DIR} \
-        --output-dir ${REMOTE_DIR}/checkpoints \
-        --cache-dir ${REMOTE_DIR}/cache \
-        --epochs $EPOCHS \
-        --batch-size $BATCH_SIZE \
-        --lr $LR \
-        --augment \
-        --num-workers $NUM_WORKERS \
-        --log-every 50 \
-        --save-every $SAVE_EVERY \
-        --render-every $RENDER_EVERY \
-        --pretrain-epochs 5 \
-        --loss-weights '{\"canvas_mse\": 1.0, \"merge\": 1.0, \"stroke_length\": 0.001}' \
-        $RESUME_FLAG \
-        > ${REMOTE_DIR}/train.log 2>&1 &
-    echo \$! > ${REMOTE_DIR}/train.pid
-    echo 'Training started (PID: '\$(cat ${REMOTE_DIR}/train.pid)')'
-    "
+    ONSTART_CMD=$(_build_onstart_cmd)
+    $SSH_CMD -T "$ONSTART_CMD" 2>/dev/null
+    sleep 5
+    $SSH_CMD -T "
+        if [ -f ${REMOTE_DIR}/train.pid ] && kill -0 \$(cat ${REMOTE_DIR}/train.pid) 2>/dev/null; then
+            echo 'Training started (PID '\$(cat ${REMOTE_DIR}/train.pid)')'
+        else
+            echo 'WARNING: Training may not have started. Check --status'
+        fi
+    " 2>/dev/null
     log "Training launched. Use --tail to follow logs."
 }
 
@@ -392,8 +511,9 @@ show_status() {
         echo '  VAST.AI TRAINING STATUS  '\$(date '+%Y-%m-%d %H:%M:%S')
         echo '═══════════════════════════════════════════════════════'
         echo ''
-        if [ -f ${REMOTE_DIR}/train.pid ] && kill -0 \$(cat ${REMOTE_DIR}/train.pid) 2>/dev/null; then
-            echo '  Training: RUNNING (PID '\$(cat ${REMOTE_DIR}/train.pid)')'
+        TRAIN_PID=\$(pgrep -f 'python3.*train.py' 2>/dev/null || true)
+        if [ -n \"\$TRAIN_PID\" ]; then
+            echo \"  Training: RUNNING (PID \$TRAIN_PID)\"
         else
             echo '  Training: STOPPED'
         fi
@@ -423,9 +543,8 @@ tail_log() {
     trap 'echo ""; warn "Detached. Instance still running."; warn "Use: $0 --status | --sync | --stop"; exit 0' INT
 
     while true; do
-        # Check if training is still running
         RUNNING=$($SSH_CMD -T "
-            if [ -f ${REMOTE_DIR}/train.pid ] && kill -0 \$(cat ${REMOTE_DIR}/train.pid) 2>/dev/null; then
+            if pgrep -f 'python3.*train.py' >/dev/null 2>&1; then
                 echo 'yes'
             else
                 echo 'no'
@@ -446,11 +565,10 @@ tail_log() {
             INSTANCE_ID=$(head -1 "$STATE_FILE")
             vastai destroy instance "$INSTANCE_ID" 2>/dev/null
             rm -f "$STATE_FILE"
-            log "Done! Checkpoints at: $STROKE_DIR/checkpoints/"
+            log "Done! Checkpoints at: $STROKE_DIR/checkpoints_vastai/"
             return 0
         fi
 
-        # Show latest log line
         $SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true
         sleep 30
     done
@@ -460,89 +578,14 @@ sync_results() {
     _load_ssh
     log "Syncing checkpoints and tracking images..."
 
-    mkdir -p "$STROKE_DIR/checkpoints/tracking"
+    VAST_SYNC_DIR="$STROKE_DIR/checkpoints_vastai"
+    mkdir -p "$VAST_SYNC_DIR/tracking"
 
-    eval $RSYNC_CMD "${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$STROKE_DIR/checkpoints/" 2>/dev/null || true
-    eval $RSYNC_CMD "${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$STROKE_DIR/checkpoints/tracking/" 2>/dev/null || true
-    eval $RSYNC_CMD "${SSH_HOST}:${REMOTE_DIR}/train.log" "$STROKE_DIR/logs/train_vastai.log" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$VAST_SYNC_DIR/" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$VAST_SYNC_DIR/tracking/" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/train.log" "$STROKE_DIR/logs/train_vastai.log" 2>/dev/null || true
 
-    log "Sync complete."
-}
-
-monitor_until_done() {
-    _load_ssh
-    LAST_EPOCH=""
-    SYNC_INTERVAL=300  # sync every 5 minutes
-    LAST_SYNC=$(date +%s)
-
-    trap 'echo ""; warn "Detached. Instance still running."; warn "Use: $0 --status | --sync | --stop"; exit 0' INT
-
-    while true; do
-        # Check if training is still running
-        RUNNING=$($SSH_CMD -T "
-            if [ -f ${REMOTE_DIR}/train.pid ] && kill -0 \$(cat ${REMOTE_DIR}/train.pid) 2>/dev/null; then
-                echo 'yes'
-            else
-                echo 'no'
-            fi
-        " 2>/dev/null || echo "unknown")
-
-        if [ "$RUNNING" = "no" ]; then
-            echo ""
-            log "Training finished!"
-            # Check if it completed or crashed
-            FINAL_LINE=$($SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" || true)
-            if echo "$FINAL_LINE" | grep -q "Training complete"; then
-                log "Training completed successfully."
-            else
-                warn "Training may have crashed. Last log line:"
-                warn "  $FINAL_LINE"
-            fi
-            echo ""
-            log "Downloading final results..."
-            sync_results
-            echo ""
-            log "Destroying instance..."
-            INSTANCE_ID=$(head -1 "$STATE_FILE")
-            vastai destroy instance "$INSTANCE_ID" 2>/dev/null
-            rm -f "$STATE_FILE"
-            log "Done! Checkpoints saved to: $STROKE_DIR/checkpoints/"
-            return 0
-        fi
-
-        # Show latest log line
-        LATEST=$($SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true)
-        if [ -n "$LATEST" ]; then
-            # Extract epoch info
-            EPOCH=$(echo "$LATEST" | grep -oP 'Epoch \K[0-9]+' || true)
-            STEP=$(echo "$LATEST" | grep -oP 'Step \K[0-9]+/[0-9]+' || true)
-            LOSS=$(echo "$LATEST" | grep -oP 'Loss: \K[0-9.]+' || true)
-
-            if [ -n "$EPOCH" ]; then
-                printf "\r  Epoch %s Step %s | Loss: %s    " "$EPOCH" "$STEP" "$LOSS"
-
-                # Sync when epoch changes
-                if [ "$EPOCH" != "$LAST_EPOCH" ] && [ -n "$LAST_EPOCH" ]; then
-                    echo ""
-                    info "Epoch $EPOCH started. Syncing checkpoints..."
-                    sync_results 2>/dev/null
-                    info "Sync done."
-                fi
-                LAST_EPOCH="$EPOCH"
-            fi
-        fi
-
-        # Periodic sync
-        NOW=$(date +%s)
-        if [ $((NOW - LAST_SYNC)) -ge $SYNC_INTERVAL ]; then
-            echo ""
-            info "Periodic sync..."
-            sync_results 2>/dev/null
-            LAST_SYNC=$NOW
-        fi
-
-        sleep 10
-    done
+    log "Sync complete. Results at: $VAST_SYNC_DIR/"
 }
 
 stop_instance() {
@@ -571,12 +614,15 @@ case "${1:-}" in
     --help)
         echo "Usage: $0 [--status|--sync|--stop|--resume|--tail|--help]"
         echo ""
-        echo "  (no args)  Full deploy: find GPU, create instance, upload, train"
+        echo "  (no args)  Full deploy: find GPU, create instance, start training"
         echo "  --status   Check training status on remote instance"
         echo "  --tail     Follow remote training log live"
         echo "  --sync     Download checkpoints and tracking images"
         echo "  --stop     Sync results, then destroy the instance"
         echo "  --resume   Restart training on existing instance"
+        echo ""
+        echo "Before deploying, build the image:"
+        echo "  $STROKE_DIR/build_vastai.sh"
         ;;
     *)
         check_deps
@@ -597,11 +643,7 @@ case "${1:-}" in
             create_instance
         fi
         echo ""
-        setup_remote
-        echo ""
-        upload_data
-        echo ""
-        start_training
+        verify_training
         echo ""
         xdg-open "https://cloud.vast.ai/instances/" 2>/dev/null &
         echo ""
