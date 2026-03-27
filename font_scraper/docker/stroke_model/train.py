@@ -283,6 +283,15 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
                 else:
                     w = max(1, int(sw))
                 draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
+            # Round caps at each control point to fill junction gaps
+            # (matches Triton kernel's implicit round caps from t-clamping)
+            for i, (px, py) in enumerate(stroke):
+                if isinstance(sw, list) and len(sw) > i:
+                    r = max(1, int(sw[i])) // 2
+                else:
+                    r = max(1, int(sw[0] if isinstance(sw, list) else sw)) // 2
+                if r > 0:
+                    draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=color)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
 
@@ -335,7 +344,7 @@ def main():
     best_loss = float('inf')
     if args.resume and os.path.exists(args.resume):
         checkpoint = torch.load(args.resume, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         # Don't restore best_loss — loss functions may differ between runs

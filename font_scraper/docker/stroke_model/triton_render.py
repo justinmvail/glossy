@@ -323,7 +323,7 @@ def render_strokes_triton(model_output, glyph_masks, canvas_size=CANVAS_SIZE,
         all_stroke_pts: List of lists of point tensors (for overlap/smoothness).
     """
     points = model_output['points']                # (B, S, N, 2)
-    widths = model_output['widths']                 # (B, S)
+    widths = model_output['widths']                 # (B, S, N)
     existence = model_output['existence']           # (B, S)
     pc_logits = model_output['point_count_logits']  # (B, S, N)
 
@@ -336,7 +336,7 @@ def render_strokes_triton(model_output, glyph_masks, canvas_size=CANVAS_SIZE,
 
     # Triton forward
     rendered_small = DistanceFieldRender.apply(
-        points, widths, existence, n_points,
+        render_pts, render_w, existence, render_n,
         canvas_size, render_size, sharpness, exist_thresh,
     )
 

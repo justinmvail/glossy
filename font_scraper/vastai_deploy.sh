@@ -118,6 +118,10 @@ _build_onstart_cmd() {
     # Downloads training data from Google Drive, then starts training
     # Outputs go to /workspace/ which is not baked into the image
     cat <<ONSTART
+echo "=== Fixing SSH permissions ===" && \
+sed -i 's/^#*StrictModes.*/StrictModes no/' /etc/ssh/sshd_config 2>/dev/null; \
+echo "StrictModes no" >> /etc/ssh/sshd_config 2>/dev/null; \
+chmod 600 /root/.ssh/authorized_keys 2>/dev/null; \
 echo "=== Downloading training data from Google Drive ===" && \
 mkdir -p ${DATA_DIR} ${REMOTE_DIR}/checkpoints ${REMOTE_DIR}/cache && \
 if [ ! -f ${DATA_DIR}/fonts.db ]; then
@@ -155,7 +159,7 @@ ONSTART
 create_instance() {
     _get_image_tag
 
-    COMMON_FILTERS='num_gpus=1 disk_space>=80 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
+    COMMON_FILTERS='num_gpus=1 disk_space>=100 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
 
     log "Searching for RTX 5090 instances..."
     OFFER_JSON=$(vastai search offers \
@@ -198,7 +202,7 @@ print(offers[0]['id'])
         if [ -z "$OFFER_ID" ]; then
             warn "No offers with strict filters. Relaxing network requirements..."
             OFFER_ID=$(vastai search offers \
-                'gpu_ram>=24 num_gpus=1 disk_space>=80 inet_down>=200 reliability>=0.95' \
+                'gpu_ram>=24 num_gpus=1 disk_space>=100 inet_down>=200 reliability>=0.95' \
                 -o 'dph+' \
                 --raw 2>/dev/null | python3 -c "
 import json, sys
@@ -215,7 +219,7 @@ print(offers[0]['id'])
     log "Creating instance from offer $OFFER_ID..."
     INSTANCE_ID=$(vastai create instance "$OFFER_ID" \
         --image "$IMAGE_TAG" \
-        --disk 80 \
+        --disk 100 \
         --ssh --direct \
         --onstart-cmd "$ONSTART_CMD" \
         --raw 2>/dev/null | python3 -c "

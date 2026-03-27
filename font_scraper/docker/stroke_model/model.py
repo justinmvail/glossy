@@ -24,6 +24,7 @@ NUM_CHARS = 62  # A-Z + a-z + 0-9
 CHAR_EMBED_DIM = 32
 CANVAS_SIZE = 224
 RENDER_SIZE = 56
+SUBDIVISIONS = 4  # Catmull-Rom spline subdivisions per segment
 
 
 class StrokeEncoder(nn.Module):
@@ -184,7 +185,12 @@ class StrokePredictor(nn.Module):
         self.existence_head = nn.Linear(feature_dim, 1)
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
+        self.sharpness_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point spline sharpness
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
+
+        # Initialize sharpness bias so sigmoid outputs ~0.9 (near-sharp),
+        # preserving current polyline behavior at training start
+        nn.init.constant_(self.sharpness_head.bias, 2.2)
 
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
@@ -262,7 +268,7 @@ class StrokePredictor(nn.Module):
         return {
             'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES)
             'points': torch.stack(all_points, dim=1),               # (B, MAX_STROKES, 40, 2)
-            'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES)
+            'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES, 40)
             'point_count_logits': torch.stack(all_point_counts, dim=1),
             'canvas_inv': canvas_inv,                               # (B, R, R)
             'target': target,                                        # (B, R, R)
@@ -298,17 +304,25 @@ class StrokePredictor(nn.Module):
         stroke_widths = []
         for i in range(MAX_STROKES):
             if existence[i].item() < existence_threshold:
-                break  # autoregressive: stop at first non-existent stroke
+                break
 
-            n_points = torch.argmax(point_count_logits[i]).item() + 1
-            n_points = max(2, min(n_points, MAX_POINTS))
+            n_pts = torch.argmax(point_count_logits[i]).item() + 1
+            n_pts = max(2, min(n_pts, MAX_POINTS))
 
-            stroke_pts = points[i, :n_points] * canvas_size
+            stroke_pts = points[i, :n_pts] * canvas_size  # (n, 2)
+
+            # Smooth control points: 2-pass moving average on interior points
+            # Removes barbs/spikes without introducing wobbles
+            for _ in range(2):
+                if stroke_pts.shape[0] > 2:
+                    smoothed = stroke_pts.clone()
+                    smoothed[1:-1] = (stroke_pts[:-2] + stroke_pts[1:-1] + stroke_pts[2:]) / 3
+                    stroke_pts = smoothed
+
             stroke = [[round(float(p[0]), 1), round(float(p[1]), 1)]
                       for p in stroke_pts]
             strokes.append(stroke)
-            # Per-point widths for this stroke
-            stroke_w = [float(widths[i, j].item()) for j in range(n_points)]
+            stroke_w = [float(widths[i, j].item()) for j in range(n_pts)]
             stroke_widths.append(stroke_w)
 
         return strokes, stroke_widths
