@@ -185,12 +185,7 @@ class StrokePredictor(nn.Module):
         self.existence_head = nn.Linear(feature_dim, 1)
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
-        self.sharpness_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point spline sharpness
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
-
-        # Initialize sharpness bias so sigmoid outputs ~0.9 (near-sharp),
-        # preserving current polyline behavior at training start
-        nn.init.constant_(self.sharpness_head.bias, 2.2)
 
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:

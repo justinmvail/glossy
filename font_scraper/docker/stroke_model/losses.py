@@ -531,12 +531,10 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     target = model_output['target']          # (B, R, R), 1=glyph, 0=bg
     device = canvas_inv.device
 
-    # 1. Canvas MSE: ink vs glyph target, weighted heavier on glyph pixels
-    # Glyph pixels (target=1) weighted 3x more than background (target=0)
-    # to incentivize full coverage over avoiding overshoot
+    # 1. Canvas MSE: ink vs glyph target
     ink = 1.0 - canvas_inv  # 1=ink, 0=blank
     sq_err = (ink - target) ** 2
-    weight_map = target * 30.0 + (1.0 - target) * 10.0
+    weight_map = target * 10.0 + (1.0 - target) * 10.0
     loss_canvas = (sq_err * weight_map).mean()
 
     # 2. Smoothness and reversal on predicted strokes
@@ -746,7 +744,6 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
     # Greedy matching per sample (8x8 is tiny, loop is fine)
     loss_chamfer = torch.tensor(0.0, device=device)
     loss_width = torch.tensor(0.0, device=device)
-    loss_endpoint = torch.tensor(0.0, device=device)
     loss_exist_bce = torch.tensor(0.0, device=device)
     n_matched = 0
 
@@ -774,14 +771,6 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
             loss_chamfer = loss_chamfer + chamfer_matrix[b, best_i, best_j]
             # Per-point widths: compare mean predicted width to GT width
             loss_width = loss_width + (pred_widths[b, best_i].mean() - gt_widths[b, best_j]).abs()
-            # Endpoint L2: predicted start/end should match GT start/end
-            pred_start = pred_scaled[b, best_i, 0]  # (2,)
-            gt_start = gt_scaled[b, best_j, 0]      # (2,)
-            pred_n_pts = pred_n[b, best_i].clamp(min=1, max=N-1)
-            gt_n_pts = gt_n[b, best_j].clamp(min=1, max=N-1)
-            pred_end = pred_scaled[b, best_i, pred_n_pts]  # (2,)
-            gt_end = gt_scaled[b, best_j, gt_n_pts]        # (2,)
-            loss_endpoint = loss_endpoint + (pred_start - gt_start).norm() + (pred_end - gt_end).norm()
             n_matched += 1
 
         # Existence BCE: matched preds should exist, unmatched should not
@@ -793,7 +782,6 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
 
     loss_chamfer = loss_chamfer / max(n_matched, 1)
     loss_width = loss_width / max(n_matched, 1)
-    loss_endpoint = loss_endpoint / max(n_matched, 1)
     loss_exist_bce = loss_exist_bce / B
 
     # 3. Sinuosity on predicted strokes
@@ -814,7 +802,6 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
     total = (weights.get('canvas_mse', 1.0) * loss_canvas +
              weights.get('chamfer', 5.0) * loss_chamfer +
              weights.get('width', 1.0) * loss_width +
-             weights.get('endpoint', 2.0) * loss_endpoint +
              weights.get('existence', 1.0) * loss_exist_bce +
              weights.get('sinuosity', 0.5) * loss_sinuosity)
 
@@ -823,7 +810,6 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
         'canvas_mse': loss_canvas.item(),
         'chamfer': loss_chamfer.item(),
         'width_l1': loss_width.item(),
-        'endpoint': loss_endpoint.item(),
         'exist_bce': loss_exist_bce.item(),
         'sinuosity': loss_sinuosity.item(),
     }
