@@ -14,13 +14,13 @@ Loss components:
 import torch
 import torch.nn.functional as F
 
-from model import MAX_STROKES, MAX_POINTS, CANVAS_SIZE
+from model import MAX_STROKES, MAX_POINTS, CANVAS_SIZE, HIRES_RENDER_SIZE
 try:
     from render_utils import render_strokes, model_output_to_render_inputs
 except ImportError:
     render_strokes = None
     model_output_to_render_inputs = None
-from triton_render import render_strokes_triton
+from triton_render import render_strokes_triton, DistanceFieldRender
 
 
 def coverage_loss(rendered: torch.Tensor, glyph_mask: torch.Tensor,
@@ -639,7 +639,39 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     # With per-point width, zigzag is pure waste — widening is always shorter
     loss_length = (path_length * active).sum(dim=1).mean() / canvas_size
 
-    # 7. Existence decay: later strokes cost more to activate
+    # 8. Overlap penalty: penalize multiple strokes covering the same pixel
+    if weights.get('overlap', 0) > 0 and 'stroke_renders' in model_output:
+        stroke_renders = model_output['stroke_renders']  # (B, S, R, R), 1=bg, 0=ink
+        per_stroke_ink = (1.0 - stroke_renders) * existence[:, :, None, None]  # (B, S, R, R)
+        total_coverage = per_stroke_ink.sum(dim=1)  # (B, R, R)
+        excess = (total_coverage - 1.0).clamp(min=0) ** 2
+        loss_overlap = (excess * target).mean()  # only on glyph pixels
+    else:
+        loss_overlap = torch.tensor(0.0, device=device)
+
+    # 9. High-res canvas MSE: re-render all strokes at 2x resolution for fine detail
+    hires_weight = weights.get('hires_mse', 0)
+    if hires_weight > 0 and 'glyph_mask' in model_output:
+        HR = HIRES_RENDER_SIZE
+        hires_target = F.interpolate(
+            model_output['glyph_mask'].unsqueeze(1), size=(HR, HR),
+            mode='bilinear', align_corners=False,
+        ).squeeze(1)  # (B, HR, HR)
+
+        # Render all strokes in one kernel call at high resolution
+        hires_canvas_inv = DistanceFieldRender.apply(
+            points, model_output['widths'], existence,
+            n_points, canvas_size, HR, 4.0, 0.3,
+        )  # (B, HR, HR), 1=blank, 0=ink
+
+        hires_ink = 1.0 - hires_canvas_inv
+        hires_sq_err = (hires_ink - hires_target) ** 2
+        hires_wmap = hires_target * 10.0 + (1.0 - hires_target) * 10.0
+        loss_hires = (hires_sq_err * hires_wmap).mean()
+    else:
+        loss_hires = torch.tensor(0.0, device=device)
+
+    # 9. Existence decay: later strokes cost more to activate
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
     loss_exist = (existence * step_weights.unsqueeze(0)).mean()
 
@@ -651,6 +683,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('point_budget', 0.0) * loss_points +
              weights.get('stroke_length', 0.0) * loss_length +
              weights.get('width_smooth', 0.0) * loss_width_smooth +
+             weights.get('hires_mse', 0.0) * loss_hires +
+             weights.get('overlap', 0.0) * loss_overlap +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -663,6 +697,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'point_budget': loss_points.item(),
         'stroke_length': loss_length.item(),
         'width_smooth': loss_width_smooth.item(),
+        'hires_mse': loss_hires.item(),
+        'overlap': loss_overlap.item(),
         'exist_decay': loss_exist.item(),
     }
 

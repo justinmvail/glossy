@@ -24,6 +24,7 @@ NUM_CHARS = 62  # A-Z + a-z + 0-9
 CHAR_EMBED_DIM = 32
 CANVAS_SIZE = 224
 RENDER_SIZE = 56
+HIRES_RENDER_SIZE = 224  # full-res for high-res loss
 SUBDIVISIONS = 4  # Catmull-Rom spline subdivisions per segment
 
 
@@ -187,6 +188,9 @@ class StrokePredictor(nn.Module):
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
+        # Annealed by training loop: 1.0 (always shuffle) → 0.0 (canonical order)
+        self.shuffle_prob = 0.0
+
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
         """Predict strokes autoregressively.
@@ -221,8 +225,17 @@ class StrokePredictor(nn.Module):
         all_points = []
         all_widths = []
         all_point_counts = []
+        all_stroke_renders = []
 
-        for step in range(MAX_STROKES):
+        # Shuffle stroke prediction order during training to break path dependence.
+        # shuffle_prob is annealed from 1.0 → 0.0 over training by the training loop.
+        if self.training and torch.rand(1).item() < self.shuffle_prob:
+            perm = torch.randperm(MAX_STROKES)
+        else:
+            perm = torch.arange(MAX_STROKES)
+
+        for i in range(MAX_STROKES):
+            step = perm[i].item()
             # Current ink and residual
             ink = 1.0 - canvas_inv  # 1=inked, 0=blank
             residual = (target - ink).clamp(0, 1)  # what still needs covering
@@ -259,14 +272,17 @@ class StrokePredictor(nn.Module):
             all_points.append(points)
             all_widths.append(widths)
             all_point_counts.append(pc_logits)
+            all_stroke_renders.append(stroke_render)
 
         return {
             'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES)
             'points': torch.stack(all_points, dim=1),               # (B, MAX_STROKES, 40, 2)
             'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES, 40)
             'point_count_logits': torch.stack(all_point_counts, dim=1),
+            'stroke_renders': torch.stack(all_stroke_renders, dim=1),  # (B, MAX_STROKES, R, R)
             'canvas_inv': canvas_inv,                               # (B, R, R)
             'target': target,                                        # (B, R, R)
+            'glyph_mask': glyph_mask,                               # (B, H, W) full-res
         }
 
     def predict_strokes(self, image: torch.Tensor, char_idx: torch.Tensor,
