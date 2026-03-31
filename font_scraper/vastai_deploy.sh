@@ -34,7 +34,7 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 4.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_decay": 0.05}'
 
 # Colors
 RED='\033[0;31m'
