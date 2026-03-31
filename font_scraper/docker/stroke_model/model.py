@@ -188,9 +188,6 @@ class StrokePredictor(nn.Module):
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
-        # Annealed by training loop: 1.0 (always shuffle) → 0.0 (canonical order)
-        self.shuffle_prob = 0.0
-
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
         """Predict strokes autoregressively.
@@ -227,15 +224,7 @@ class StrokePredictor(nn.Module):
         all_point_counts = []
         all_stroke_renders = []
 
-        # Shuffle stroke prediction order during training to break path dependence.
-        # shuffle_prob is annealed from 1.0 → 0.0 over training by the training loop.
-        if self.training and torch.rand(1).item() < self.shuffle_prob:
-            perm = torch.randperm(MAX_STROKES)
-        else:
-            perm = torch.arange(MAX_STROKES)
-
-        for i in range(MAX_STROKES):
-            step = perm[i].item()
+        for step in range(MAX_STROKES):
             # Current ink and residual
             ink = 1.0 - canvas_inv  # 1=inked, 0=blank
             residual = (target - ink).clamp(0, 1)  # what still needs covering

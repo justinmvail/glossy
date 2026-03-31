@@ -440,8 +440,6 @@ def main():
                 args.epochs, len(dataset), args.batch_size)
 
     for epoch in range(start_epoch, args.epochs):
-        # Anneal stroke order shuffling: 1.0 (always shuffle) → 0.0 (canonical order)
-        model.shuffle_prob = max(0.0, 1.0 - epoch / args.epochs)
         t0 = time.time()
 
         avg_loss, avg_losses = train_epoch(

@@ -34,7 +34,7 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0}'
 
 # Colors
 RED='\033[0;31m'
@@ -541,10 +541,13 @@ tail_log() {
     _load_ssh
     log "Following remote training log..."
     log "(Will auto-sync and shut down when training completes)"
-    log "(Ctrl+C to detach — instance keeps running)"
+    log "(Ctrl+C to detach — background monitor keeps running)"
     echo ""
 
-    trap 'echo ""; warn "Detached. Instance still running."; warn "Use: $0 --status | --sync | --stop"; exit 0' INT
+    # Start background monitor that survives terminal disconnects
+    _start_bg_monitor
+
+    trap 'echo ""; warn "Detached. Background monitor still watching."; warn "Use: $0 --status | --sync | --stop"; exit 0' INT
 
     while true; do
         RUNNING=$($SSH_CMD -T "
@@ -563,19 +566,86 @@ tail_log() {
             else
                 warn "Training stopped. Last line: $FINAL_LINE"
             fi
-            log "Downloading results..."
-            sync_results
-            log "Destroying instance..."
-            INSTANCE_ID=$(head -1 "$STATE_FILE")
-            vastai destroy instance "$INSTANCE_ID" 2>/dev/null
-            rm -f "$STATE_FILE"
-            log "Done! Checkpoints at: $STROKE_DIR/checkpoints_vastai/"
+            _cleanup_on_complete
             return 0
         fi
 
         $SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true
         sleep 30
     done
+}
+
+_cleanup_on_complete() {
+    # Sync results and destroy instance
+    log "Downloading results..."
+    sync_results
+    log "Destroying instance..."
+    INSTANCE_ID=$(head -1 "$STATE_FILE")
+    vastai destroy instance "$INSTANCE_ID" 2>/dev/null
+    rm -f "$STATE_FILE"
+    _kill_bg_monitor
+    log "Done! Checkpoints at: $STROKE_DIR/checkpoints_vastai/"
+}
+
+_start_bg_monitor() {
+    # Background process that polls every 5 min and auto-syncs/destroys on completion.
+    # Survives terminal disconnects. Writes PID to file for cleanup.
+    local MONITOR_PID_FILE="$STROKE_DIR/.monitor.pid"
+    local SCRIPT_PATH="$(readlink -f "$0")"
+
+    # Kill any existing monitor
+    _kill_bg_monitor
+
+    (
+        while true; do
+            sleep 300  # Check every 5 minutes
+
+            # Reload SSH config in case state file changed
+            if [ ! -f "$STATE_FILE" ]; then
+                exit 0  # Instance already destroyed
+            fi
+
+            INSTANCE_ID=$(head -1 "$STATE_FILE")
+            STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get('actual_status', 'unknown'))
+except: print('unknown')
+" 2>/dev/null || echo "unknown")
+
+            # If instance is gone, exit
+            if [ "$STATUS" = "unknown" ] || [ "$STATUS" = "exited" ]; then
+                echo "[monitor] Instance gone. Running final sync..."
+                "$SCRIPT_PATH" --sync 2>/dev/null || true
+                rm -f "$STATE_FILE"
+                rm -f "$MONITOR_PID_FILE"
+                exit 0
+            fi
+
+            # Check if training finished via Vast.ai API (no SSH needed)
+            LOG_TAIL=$(vastai logs "$INSTANCE_ID" --tail 5 2>/dev/null || true)
+            if echo "$LOG_TAIL" | grep -q "Training complete"; then
+                echo "[monitor] Training complete! Syncing and destroying..."
+                "$SCRIPT_PATH" --sync 2>/dev/null || true
+                vastai destroy instance "$INSTANCE_ID" 2>/dev/null
+                rm -f "$STATE_FILE"
+                rm -f "$MONITOR_PID_FILE"
+                exit 0
+            fi
+        done
+    ) &
+    echo $! > "$MONITOR_PID_FILE"
+    log "Background monitor started (PID $!, checks every 5 min)"
+}
+
+_kill_bg_monitor() {
+    local MONITOR_PID_FILE="$STROKE_DIR/.monitor.pid"
+    if [ -f "$MONITOR_PID_FILE" ]; then
+        local PID=$(cat "$MONITOR_PID_FILE")
+        kill "$PID" 2>/dev/null || true
+        rm -f "$MONITOR_PID_FILE"
+    fi
 }
 
 sync_results() {
@@ -605,6 +675,7 @@ stop_instance() {
     warn "Destroying instance $INSTANCE_ID..."
     vastai destroy instance "$INSTANCE_ID"
     rm -f "$STATE_FILE"
+    _kill_bg_monitor
     log "Instance destroyed."
 }
 

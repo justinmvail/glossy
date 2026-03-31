@@ -343,6 +343,83 @@ def self_overlap_penalty_batched(points, existence, n_points, canvas_size,
     return per_sample.mean()
 
 
+def parallel_penalty_batched(points, existence, n_points, canvas_size,
+                             proximity_threshold=12.0):
+    """Penalize strokes that run parallel and close together along their middles.
+
+    Uses tangent-weighted directional Chamfer: for each point on stroke i near
+    stroke j, penalty = proximity × |cos(tangent_i, tangent_j)|². Crossings
+    (perpendicular tangents) get near-zero penalty; parallel running gets full.
+
+    Args:
+        points: (B, S, N, 2) normalized coordinates.
+        existence: (B, S) existence probabilities.
+        n_points: (B, S) valid point counts.
+        canvas_size: int.
+        proximity_threshold: distance in pixels below which strokes interact.
+
+    Returns:
+        Scalar loss tensor averaged over batch.
+    """
+    B, S, N, _ = points.shape
+    device = points.device
+    pts = points * canvas_size  # (B, S, N, 2)
+
+    # Precompute unit tangent vectors at each control point
+    tangents = pts[:, :, 1:] - pts[:, :, :-1]  # (B, S, N-1, 2)
+    tangents = torch.cat([tangents, tangents[:, :, -1:]], dim=2)  # (B, S, N, 2)
+    tangents = tangents / tangents.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+    # Valid point masks
+    valid = torch.arange(N, device=device) < n_points.unsqueeze(-1)  # (B, S, N)
+
+    penalty = torch.zeros(B, device=device)
+
+    for i in range(S):
+        for j in range(i + 1, S):
+            both_exist = existence[:, i] * existence[:, j]  # soft, (B,)
+
+            # Pairwise distances between points on stroke i and stroke j
+            dists = torch.cdist(pts[:, i], pts[:, j])  # (B, N, N)
+
+            # Mask invalid points
+            dists = dists.masked_fill(~valid[:, i].unsqueeze(2), 1e6)
+            dists = dists.masked_fill(~valid[:, j].unsqueeze(1), 1e6)
+
+            # For each point on i, nearest point on j
+            min_dists_i, nearest_j = dists.min(dim=2)  # (B, N)
+            prox_i = torch.sigmoid((proximity_threshold - min_dists_i) * 0.5)
+
+            # Tangent alignment at nearest pairs
+            tang_i = tangents[:, i]  # (B, N, 2)
+            tang_j_near = tangents[:, j].gather(1, nearest_j.unsqueeze(-1).expand(-1, -1, 2))
+            cos_sq = (tang_i * tang_j_near).sum(dim=-1).square()  # (B, N)
+
+            # Combined: close AND parallel, fraction of stroke i
+            point_pen_i = (prox_i * cos_sq * valid[:, i].float()).sum(dim=1)
+            frac_i = point_pen_i / n_points[:, i].float().clamp(min=1)
+
+            # Symmetric: each point on j, nearest on i
+            min_dists_j, nearest_i = dists.min(dim=1)  # (B, N)
+            prox_j = torch.sigmoid((proximity_threshold - min_dists_j) * 0.5)
+
+            tang_j = tangents[:, j]
+            tang_i_near = tangents[:, i].gather(1, nearest_i.unsqueeze(-1).expand(-1, -1, 2))
+            cos_sq_j = (tang_j * tang_i_near).sum(dim=-1).square()
+
+            point_pen_j = (prox_j * cos_sq_j * valid[:, j].float()).sum(dim=1)
+            frac_j = point_pen_j / n_points[:, j].float().clamp(min=1)
+
+            # Max fraction (if either stroke largely parallels the other)
+            parallel_frac = torch.max(frac_i, frac_j)
+
+            # Quadratic with threshold — allow small incidental proximity
+            excess = (parallel_frac - 0.2).clamp(min=0)
+            penalty = penalty + excess.square() * both_exist
+
+    return penalty.mean()
+
+
 def smoothness_penalty_batched(points, existence, n_points, canvas_size):
     """Batched smoothness penalty. Fully vectorized, no loops.
 
@@ -649,7 +726,13 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     else:
         loss_overlap = torch.tensor(0.0, device=device)
 
-    # 9. High-res canvas MSE: re-render all strokes at 2x resolution for fine detail
+    # 9. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
+    if weights.get('parallel', 0) > 0:
+        loss_parallel = parallel_penalty_batched(points, existence, n_points, canvas_size)
+    else:
+        loss_parallel = torch.tensor(0.0, device=device)
+
+    # 10. High-res canvas MSE: re-render all strokes at 2x resolution for fine detail
     hires_weight = weights.get('hires_mse', 0)
     if hires_weight > 0 and 'glyph_mask' in model_output:
         HR = HIRES_RENDER_SIZE
@@ -685,6 +768,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('width_smooth', 0.0) * loss_width_smooth +
              weights.get('hires_mse', 0.0) * loss_hires +
              weights.get('overlap', 0.0) * loss_overlap +
+             weights.get('parallel', 0.0) * loss_parallel +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -699,6 +783,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'width_smooth': loss_width_smooth.item(),
         'hires_mse': loss_hires.item(),
         'overlap': loss_overlap.item(),
+        'parallel': loss_parallel.item(),
         'exist_decay': loss_exist.item(),
     }
 
