@@ -581,7 +581,8 @@ def total_loss(model_output: dict, glyph_mask: torch.Tensor,
 
 
 def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
-                        weights: dict = None) -> tuple:
+                        weights: dict = None, epoch: int = 0,
+                        total_epochs: int = 100) -> tuple:
     """Loss for autoregressive stroke prediction.
 
     Much simpler than parallel loss: just compare the final canvas to the target.
@@ -592,6 +593,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
             canvas_inv (B, R, R), target (B, R, R), plus per-step params.
         canvas_size: Canvas size in pixels.
         weights: Dict of loss weights.
+        epoch: Current epoch (for curriculum weight ramping).
+        total_epochs: Total training epochs.
 
     Returns:
         Tuple of (total_loss_tensor, loss_dict).
@@ -607,6 +610,15 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     canvas_inv = model_output['canvas_inv']  # (B, R, R), 1=blank, 0=ink
     target = model_output['target']          # (B, R, R), 1=glyph, 0=bg
     device = canvas_inv.device
+
+    # Curriculum: consolidation losses (merge, min_coverage) ramp from 0→1
+    # over epochs 20→50, giving the model time to learn coverage first.
+    if epoch < 20:
+        curriculum = 0.0
+    elif epoch < 50:
+        curriculum = (epoch - 20) / 30.0
+    else:
+        curriculum = 1.0
 
     # 1. Canvas MSE: ink vs glyph target
     ink = 1.0 - canvas_inv  # 1=ink, 0=blank
@@ -646,53 +658,63 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
     # 4. Merge penalty: penalize stroke pairs that could be merged
-    # Soft version: smooth gradients tell the model how to fix it
+    # Checks all 4 endpoint combos: end→start, end→end, start→start, start→end
     merge_penalty = torch.tensor(0.0, device=device)
     merge_threshold = 15.0  # pixels — proximity scale
+    stroke_widths = model_output['widths']  # (B, S, N)
 
     for i in range(S):
-        for j in range(S):
-            if i == j:
-                continue
+        for j in range(i + 1, S):  # unique pairs only
             both_active = existence[:, i] * existence[:, j]  # soft, (B,)
 
-            # Last valid point of stroke i
-            last_i_idx = (n_points[:, i] - 1).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
-            last_i = pts_scaled[:, i].gather(1, last_i_idx).squeeze(1)  # (B, 2)
-            # First point of stroke j
-            first_j = pts_scaled[:, j, 0]  # (B, 2)
+            # Gather endpoints and tangent directions for stroke i
+            last_i_idx = (n_points[:, i] - 1).clamp(min=0)
+            last_i = pts_scaled[:, i].gather(1, last_i_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+            first_i = pts_scaled[:, i, 0]  # (B, 2)
+            prev_i_idx = (n_points[:, i] - 2).clamp(min=0)
+            prev_i = pts_scaled[:, i].gather(1, prev_i_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+            dir_end_i = last_i - prev_i
+            dir_end_i = dir_end_i / dir_end_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            dir_start_i = pts_scaled[:, i, 1] - first_i
+            dir_start_i = dir_start_i / dir_start_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 
-            # Soft proximity: sigmoid(threshold - gap)
-            endpoint_gap = (last_i - first_j).norm(dim=-1)  # (B,)
-            close_soft = torch.sigmoid((merge_threshold - endpoint_gap) * 0.5)  # (B,)
+            # Gather endpoints and tangent directions for stroke j
+            last_j_idx = (n_points[:, j] - 1).clamp(min=0)
+            last_j = pts_scaled[:, j].gather(1, last_j_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+            first_j = pts_scaled[:, j, 0]
+            prev_j_idx = (n_points[:, j] - 2).clamp(min=0)
+            prev_j = pts_scaled[:, j].gather(1, prev_j_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+            dir_end_j = last_j - prev_j
+            dir_end_j = dir_end_j / dir_end_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            dir_start_j = pts_scaled[:, j, 1] - first_j
+            dir_start_j = dir_start_j / dir_start_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 
-            # Direction of stroke i at its end (last segment)
-            prev_i_idx = (n_points[:, i] - 2).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
-            prev_i = pts_scaled[:, i].gather(1, prev_i_idx).squeeze(1)
-            dir_i = last_i - prev_i  # (B, 2)
-            dir_i = dir_i / dir_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            # Widths at each endpoint
+            w_end_i = stroke_widths[:, i].gather(1, last_i_idx.unsqueeze(-1)).squeeze(-1)
+            w_start_i = stroke_widths[:, i, 0]
+            w_end_j = stroke_widths[:, j].gather(1, last_j_idx.unsqueeze(-1)).squeeze(-1)
+            w_start_j = stroke_widths[:, j, 0]
 
-            # Direction of stroke j at its start (first segment)
-            second_j = pts_scaled[:, j, 1]  # (B, 2)
-            dir_j = second_j - first_j  # (B, 2)
-            dir_j = dir_j / dir_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            # Check all 4 endpoint combos, keep the best (most mergeable)
+            combos = [
+                (last_i, first_j, dir_end_i, dir_start_j, w_end_i, w_start_j),      # end→start
+                (first_i, last_j, -dir_start_i, -dir_end_j, w_start_i, w_end_j),     # start→end (reversed)
+                (last_i, last_j, dir_end_i, -dir_end_j, w_end_i, w_end_j),           # end→end
+                (first_i, first_j, -dir_start_i, dir_start_j, w_start_i, w_start_j), # start→start
+            ]
 
-            # Soft alignment: clamp cosine similarity above 0
-            cos_sim = (dir_i * dir_j).sum(dim=-1)  # (B,)
-            aligned_soft = cos_sim.clamp(min=0)  # (B,), 0-1
+            best_merge = torch.zeros(B, device=device)
+            for pt_a, pt_b, d_a, d_b, w_a, w_b in combos:
+                gap = (pt_a - pt_b).norm(dim=-1)
+                close = torch.sigmoid((merge_threshold - gap) * 0.5)
+                aligned = (d_a * d_b).sum(dim=-1).clamp(min=0)
+                w_compat = torch.sigmoid((5.0 - (w_a - w_b).abs()) * 0.5)
+                score = close * aligned * w_compat
+                best_merge = torch.max(best_merge, score)
 
-            # Width compatibility: similar widths at junction = more mergeable
-            stroke_widths = model_output['widths']  # (B, S, N)
-            last_w_idx = (n_points[:, i] - 1).clamp(min=0)
-            w_end_i = stroke_widths[:, i].gather(1, last_w_idx.unsqueeze(-1)).squeeze(-1)  # (B,)
-            w_start_j = stroke_widths[:, j, 0]  # (B,)
-            width_diff = (w_end_i - w_start_j).abs()
-            width_compat = torch.sigmoid((5.0 - width_diff) * 0.5)  # 1.0 when similar, 0.0 when different
+            merge_penalty = merge_penalty + (best_merge * both_active).mean()
 
-            # Soft merge penalty: close × aligned × width compatible × both active
-            merge_penalty = merge_penalty + (close_soft * aligned_soft * width_compat * both_active).mean()
-
-    loss_merge = merge_penalty / (S * S)  # normalize
+    loss_merge = merge_penalty / max(S * (S - 1) // 2, 1)  # normalize by unique pairs
 
     # 5. Point budget: penalize using more points than necessary
     # Differentiable expected point count via softmax over point_count_logits
@@ -726,7 +748,21 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     else:
         loss_overlap = torch.tensor(0.0, device=device)
 
-    # 9. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
+    # 9. Min coverage: penalize active strokes that cover very little unique area
+    if weights.get('min_coverage', 0) > 0 and 'stroke_renders' in model_output:
+        sr = model_output['stroke_renders']  # (B, S, R, R)
+        psi = (1.0 - sr) * existence[:, :, None, None]  # per-stroke ink
+        total_ink = psi.sum(dim=1, keepdim=True)  # (B, 1, R, R)
+        other_ink = (total_ink - psi).clamp(0, 1)
+        unique_cov = (psi * (1.0 - other_ink) * target.unsqueeze(1)).sum(dim=(2, 3))  # (B, S)
+        glyph_area = target.sum(dim=(1, 2)).unsqueeze(1).clamp(min=1)  # (B, 1)
+        frac = unique_cov / glyph_area  # (B, S)
+        low_cov = (0.05 - frac).clamp(min=0) * active  # penalize < 5% coverage
+        loss_min_cov = low_cov.sum(dim=1).mean()
+    else:
+        loss_min_cov = torch.tensor(0.0, device=device)
+
+    # 10. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
     if weights.get('parallel', 0) > 0:
         loss_parallel = parallel_penalty_batched(points, existence, n_points, canvas_size)
     else:
@@ -762,13 +798,14 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('smoothness', 0.0) * loss_smooth +
              weights.get('reversal', 0.0) * loss_reversal +
              weights.get('sinuosity', 0.0) * loss_sinuosity +
-             weights.get('merge', 0.0) * loss_merge +
+             weights.get('merge', 0.0) * curriculum * loss_merge +
              weights.get('point_budget', 0.0) * loss_points +
              weights.get('stroke_length', 0.0) * loss_length +
              weights.get('width_smooth', 0.0) * loss_width_smooth +
              weights.get('hires_mse', 0.0) * loss_hires +
              weights.get('overlap', 0.0) * loss_overlap +
              weights.get('parallel', 0.0) * loss_parallel +
+             weights.get('min_coverage', 0.0) * curriculum * loss_min_cov +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -783,6 +820,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'width_smooth': loss_width_smooth.item(),
         'hires_mse': loss_hires.item(),
         'overlap': loss_overlap.item(),
+        'min_coverage': loss_min_cov.item(),
         'parallel': loss_parallel.item(),
         'exist_decay': loss_exist.item(),
     }

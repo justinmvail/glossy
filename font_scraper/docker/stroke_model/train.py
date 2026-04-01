@@ -131,7 +131,9 @@ def train_epoch(model, dataloader, optimizer, device, epoch, args, writer=None,
 
         # Compute loss
         from losses import autoregressive_loss
-        loss, loss_dict = autoregressive_loss(output, weights=loss_weights)
+        loss, loss_dict = autoregressive_loss(
+            output, weights=loss_weights, epoch=epoch, total_epochs=args.epochs,
+        )
 
         loss.backward()
 
