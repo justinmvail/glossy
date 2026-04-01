@@ -442,6 +442,8 @@ def main():
                 args.epochs, len(dataset), args.batch_size)
 
     for epoch in range(start_epoch, args.epochs):
+        # Existence floor: 0.5→0.0 over first 50 epochs
+        model.exist_floor = max(0.0, 0.5 * (1.0 - epoch / 50.0))
         t0 = time.time()
 
         avg_loss, avg_losses = train_epoch(

@@ -188,6 +188,9 @@ class StrokePredictor(nn.Module):
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
+        # Existence floor: decays from 0.5→0.0 over training. Set by training loop.
+        self.exist_floor = 0.0
+
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
         """Predict strokes autoregressively.
@@ -238,6 +241,11 @@ class StrokePredictor(nn.Module):
 
             # Predict stroke parameters
             existence = torch.sigmoid(self.existence_head(stroke_feat).squeeze(-1))  # (B,)
+            # Existence floor: straight-through (forward clamps, backward passes through)
+            if self.training and self.exist_floor > 0:
+                floor = torch.tensor(self.exist_floor, device=device)
+                floored = torch.max(existence, floor)
+                existence = existence + (floored - existence).detach()
             points_raw = self.points_head(stroke_feat)  # (B, 80)
             points = torch.sigmoid(points_raw.reshape(B, MAX_POINTS, 2))  # (B, 40, 2)
             widths = F.softplus(self.width_head(stroke_feat)) + 1.0  # (B, 40) per-point

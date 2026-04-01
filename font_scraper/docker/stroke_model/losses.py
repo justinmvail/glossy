@@ -612,13 +612,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     device = canvas_inv.device
 
     # Curriculum: consolidation losses (merge, min_coverage) ramp from 0→1
-    # over epochs 20→50, giving the model time to learn coverage first.
-    if epoch < 20:
-        curriculum = 0.0
-    elif epoch < 50:
-        curriculum = (epoch - 20) / 30.0
-    else:
-        curriculum = 1.0
+    # over epochs 0→50.
+    curriculum = min(1.0, epoch / 50.0)
 
     # 1. Canvas MSE: ink vs glyph target
     ink = 1.0 - canvas_inv  # 1=ink, 0=blank
@@ -633,8 +628,10 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     n_points = pc_logits.argmax(dim=-1) + 1
     n_points = n_points.clamp(min=2, max=points.shape[2])
 
-    loss_smooth = smoothness_penalty_batched(points, existence, n_points, canvas_size)
-    loss_reversal = reversal_penalty_batched(points, existence, n_points, canvas_size)
+    # Detached existence for quality penalties — blocks gradient escape hatch
+    exist_det = existence.detach()
+    loss_smooth = smoothness_penalty_batched(points, exist_det, n_points, canvas_size)
+    loss_reversal = reversal_penalty_batched(points, exist_det, n_points, canvas_size)
 
     # 3. Sinuosity: path_length / endpoint_distance per stroke
     # Straight line: 1.0 (free). Zigzag: >> 1.0 (penalized).
@@ -654,7 +651,9 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
 
     sinuosity = path_length / endpoint_dist  # >= 1.0
     excess_sinuosity = (sinuosity - 1.0).clamp(min=0)
-    active = (existence > 0.3).float()
+    # Detach existence for quality penalties: gradients can only fix geometry,
+    # not kill strokes. Only canvas_mse and exist_decay keep live existence.
+    active = (existence.detach() > 0.3).float()
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
     # 4. Merge penalty: penalize stroke pairs that could be merged
@@ -665,7 +664,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
 
     for i in range(S):
         for j in range(i + 1, S):  # unique pairs only
-            both_active = existence[:, i] * existence[:, j]  # soft, (B,)
+            both_active = exist_det[:, i] * exist_det[:, j]  # soft, detached (B,)
 
             # Gather endpoints and tangent directions for stroke i
             last_i_idx = (n_points[:, i] - 1).clamp(min=0)
@@ -741,7 +740,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     # 8. Overlap penalty: penalize multiple strokes covering the same pixel
     if weights.get('overlap', 0) > 0 and 'stroke_renders' in model_output:
         stroke_renders = model_output['stroke_renders']  # (B, S, R, R), 1=bg, 0=ink
-        per_stroke_ink = (1.0 - stroke_renders) * existence[:, :, None, None]  # (B, S, R, R)
+        per_stroke_ink = (1.0 - stroke_renders) * exist_det[:, :, None, None]  # (B, S, R, R)
         total_coverage = per_stroke_ink.sum(dim=1)  # (B, R, R)
         excess = (total_coverage - 1.0).clamp(min=0) ** 2
         loss_overlap = (excess * target).mean()  # only on glyph pixels
@@ -751,7 +750,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     # 9. Min coverage: penalize active strokes that cover very little unique area
     if weights.get('min_coverage', 0) > 0 and 'stroke_renders' in model_output:
         sr = model_output['stroke_renders']  # (B, S, R, R)
-        psi = (1.0 - sr) * existence[:, :, None, None]  # per-stroke ink
+        psi = (1.0 - sr) * exist_det[:, :, None, None]  # per-stroke ink, detached
         total_ink = psi.sum(dim=1, keepdim=True)  # (B, 1, R, R)
         other_ink = (total_ink - psi).clamp(0, 1)
         unique_cov = (psi * (1.0 - other_ink) * target.unsqueeze(1)).sum(dim=(2, 3))  # (B, S)
@@ -764,7 +763,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
 
     # 10. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
     if weights.get('parallel', 0) > 0:
-        loss_parallel = parallel_penalty_batched(points, existence, n_points, canvas_size)
+        loss_parallel = parallel_penalty_batched(points, exist_det, n_points, canvas_size)
     else:
         loss_parallel = torch.tensor(0.0, device=device)
 
