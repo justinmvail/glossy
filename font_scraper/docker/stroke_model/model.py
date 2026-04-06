@@ -11,6 +11,8 @@ Each step:
     5. Repeat until MAX_STROKES or existence < threshold
 """
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -188,9 +190,6 @@ class StrokePredictor(nn.Module):
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
 
-        # Existence floor: decays from 0.5→0.0 over training. Set by training loop.
-        self.exist_floor = 0.0
-
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
         """Predict strokes autoregressively.
@@ -240,12 +239,8 @@ class StrokePredictor(nn.Module):
             stroke_feat = self.decoder(features, state_tokens, step)  # (B, 256)
 
             # Predict stroke parameters
-            existence = torch.sigmoid(self.existence_head(stroke_feat).squeeze(-1))  # (B,)
-            # Existence floor: straight-through (forward clamps, backward passes through)
-            if self.training and self.exist_floor > 0:
-                floor = torch.tensor(self.exist_floor, device=device)
-                floored = torch.max(existence, floor)
-                existence = existence + (floored - existence).detach()
+            exist_logit = self.existence_head(stroke_feat).squeeze(-1)  # (B,)
+            existence = torch.sigmoid(exist_logit)
             points_raw = self.points_head(stroke_feat)  # (B, 80)
             points = torch.sigmoid(points_raw.reshape(B, MAX_POINTS, 2))  # (B, 40, 2)
             widths = F.softplus(self.width_head(stroke_feat)) + 1.0  # (B, 40) per-point
@@ -294,7 +289,9 @@ class StrokePredictor(nn.Module):
             existence_threshold: Minimum existence probability.
 
         Returns:
-            Tuple of (strokes_list, avg_width).
+            Tuple of (strokes_list, stroke_widths, slot_indices).
+            slot_indices preserves original slot number for consistent coloring
+            (model may use non-contiguous slots, e.g. slots [0, 2, 5] for R).
         """
         self.eval()
         # Derive glyph mask from input image
@@ -310,9 +307,10 @@ class StrokePredictor(nn.Module):
 
         strokes = []
         stroke_widths = []
+        slot_indices = []
         for i in range(MAX_STROKES):
             if existence[i].item() < existence_threshold:
-                break
+                continue  # skip dead slots; model may use non-contiguous slots
 
             n_pts = torch.argmax(point_count_logits[i]).item() + 1
             n_pts = max(2, min(n_pts, MAX_POINTS))
@@ -332,8 +330,9 @@ class StrokePredictor(nn.Module):
             strokes.append(stroke)
             stroke_w = [float(widths[i, j].item()) for j in range(n_pts)]
             stroke_widths.append(stroke_w)
+            slot_indices.append(i)
 
-        return strokes, stroke_widths
+        return strokes, stroke_widths, slot_indices
 
 
 CHARS_LIST = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')

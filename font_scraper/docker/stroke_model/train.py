@@ -259,7 +259,7 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
         char_t = sample['char_idx'].to(device)
 
         with torch.no_grad():
-            strokes, stroke_widths = model.predict_strokes(
+            strokes, stroke_widths, slot_indices = model.predict_strokes(
                 img_t, char_t, CANVAS_SIZE, existence_threshold=0.3,
             )
 
@@ -272,28 +272,39 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
 
         draw = ImageDraw.Draw(img)
         for si, stroke in enumerate(strokes):
-            color = colors[si % len(colors)]
+            # Color by original slot index (preserves colors even for non-contiguous slots)
+            slot = slot_indices[si]
+            color = colors[slot % len(colors)]
+            # Lighter fill color for the stroke body
+            fill_color = tuple(min(255, c + 120) for c in color)
             sw = stroke_widths[si] if si < len(stroke_widths) else [2]
+            # Pass 1: draw filled stroke with width (lighter color)
             for i in range(len(stroke) - 1):
                 x1, y1 = stroke[i]
                 x2, y2 = stroke[i + 1]
-                # Per-segment width: average of endpoint widths
                 if isinstance(sw, list) and len(sw) > i + 1:
                     w = max(1, int((sw[i] + sw[i + 1]) / 2))
                 elif isinstance(sw, list) and len(sw) > 0:
                     w = max(1, int(sw[0]))
                 else:
                     w = max(1, int(sw))
-                draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
-            # Round caps at each control point to fill junction gaps
-            # (matches Triton kernel's implicit round caps from t-clamping)
+                draw.line([(x1, y1), (x2, y2)], fill=fill_color, width=w)
+            # Round caps (lighter color)
             for i, (px, py) in enumerate(stroke):
                 if isinstance(sw, list) and len(sw) > i:
                     r = max(1, int(sw[i])) // 2
                 else:
                     r = max(1, int(sw[0] if isinstance(sw, list) else sw)) // 2
                 if r > 0:
-                    draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=color)
+                    draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=fill_color)
+            # Pass 2: draw centerline on top (full color, thin)
+            for i in range(len(stroke) - 1):
+                x1, y1 = stroke[i]
+                x2, y2 = stroke[i + 1]
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+            # Control point dots
+            for px, py in stroke:
+                draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=color)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
 
@@ -340,6 +351,14 @@ def main():
 
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    # LR scheduler: halve LR when loss plateaus for 8 epochs.
+    # Adaptive — handles varying knee positions across runs (seen 20-53 in history).
+    # Threshold 0.01 is above typical epoch-to-epoch noise (~0.008).
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=8,
+        threshold=0.01, threshold_mode='rel', min_lr=1e-6,
+    )
 
     # Resume from checkpoint
     start_epoch = 0
@@ -442,8 +461,6 @@ def main():
                 args.epochs, len(dataset), args.batch_size)
 
     for epoch in range(start_epoch, args.epochs):
-        # Existence floor: 0.5→0.0 over first 50 epochs
-        model.exist_floor = max(0.0, 0.5 * (1.0 - epoch / 50.0))
         t0 = time.time()
 
         avg_loss, avg_losses = train_epoch(
@@ -452,9 +469,11 @@ def main():
         )
 
         elapsed = time.time() - t0
+        scheduler.step(avg_loss)
+        current_lr = optimizer.param_groups[0]['lr']
         logger.info(
-            "Epoch %d/%d complete | Loss: %.4f | Time: %.1fs | %s",
-            epoch, args.epochs, avg_loss, elapsed,
+            "Epoch %d/%d complete | Loss: %.4f | LR: %.2e | Time: %.1fs | %s",
+            epoch, args.epochs, avg_loss, current_lr, elapsed,
             ' '.join(f"{k}={v:.4f}" for k, v in avg_losses.items() if k != 'total'),
         )
 

@@ -65,6 +65,7 @@ Example:
 import os
 
 import stroke_routes_batch  # noqa: F401 - registers batch routes with app
+import stroke_routes_compare  # noqa: F401 - registers training run comparison route
 import stroke_routes_core  # noqa: F401 - registers core routes with app
 import stroke_routes_stream  # noqa: F401 - registers SSE streaming routes with app
 from stroke_flask import app

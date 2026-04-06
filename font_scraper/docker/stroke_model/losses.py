@@ -11,6 +11,8 @@ Loss components:
     5. Existence loss: BCE on existence flags (learn stroke count)
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -611,10 +613,6 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     target = model_output['target']          # (B, R, R), 1=glyph, 0=bg
     device = canvas_inv.device
 
-    # Curriculum: consolidation losses (merge, min_coverage) ramp from 0→1
-    # over epochs 0→50.
-    curriculum = min(1.0, epoch / 50.0)
-
     # 1. Canvas MSE: ink vs glyph target
     ink = 1.0 - canvas_inv  # 1=ink, 0=blank
     sq_err = (ink - target) ** 2
@@ -628,10 +626,10 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     n_points = pc_logits.argmax(dim=-1) + 1
     n_points = n_points.clamp(min=2, max=points.shape[2])
 
-    # Detached existence for quality penalties — blocks gradient escape hatch
-    exist_det = existence.detach()
-    loss_smooth = smoothness_penalty_batched(points, exist_det, n_points, canvas_size)
-    loss_reversal = reversal_penalty_batched(points, exist_det, n_points, canvas_size)
+    # Live existence in quality penalties — creates natural selection where
+    # ugly strokes (high sinuosity, overlapping) get gradient to reduce existence.
+    loss_smooth = smoothness_penalty_batched(points, existence, n_points, canvas_size)
+    loss_reversal = reversal_penalty_batched(points, existence, n_points, canvas_size)
 
     # 3. Sinuosity: path_length / endpoint_distance per stroke
     # Straight line: 1.0 (free). Zigzag: >> 1.0 (penalized).
@@ -651,9 +649,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
 
     sinuosity = path_length / endpoint_dist  # >= 1.0
     excess_sinuosity = (sinuosity - 1.0).clamp(min=0)
-    # Detach existence for quality penalties: gradients can only fix geometry,
-    # not kill strokes. Only canvas_mse and exist_decay keep live existence.
-    active = (existence.detach() > 0.3).float()
+    active = (existence > 0.3).float()
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
     # 4. Merge penalty: penalize stroke pairs that could be merged
@@ -664,7 +660,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
 
     for i in range(S):
         for j in range(i + 1, S):  # unique pairs only
-            both_active = exist_det[:, i] * exist_det[:, j]  # soft, detached (B,)
+            both_active = existence[:, i] * existence[:, j]  # soft, live gradients (B,)
 
             # Gather endpoints and tangent directions for stroke i
             last_i_idx = (n_points[:, i] - 1).clamp(min=0)
@@ -734,36 +730,21 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     loss_width_smooth = (per_stroke_w * active).sum(dim=1).mean()
 
     # 7. Stroke length: total path length across all strokes
-    # With per-point width, zigzag is pure waste — widening is always shorter
     loss_length = (path_length * active).sum(dim=1).mean() / canvas_size
 
     # 8. Overlap penalty: penalize multiple strokes covering the same pixel
     if weights.get('overlap', 0) > 0 and 'stroke_renders' in model_output:
         stroke_renders = model_output['stroke_renders']  # (B, S, R, R), 1=bg, 0=ink
-        per_stroke_ink = (1.0 - stroke_renders) * exist_det[:, :, None, None]  # (B, S, R, R)
+        per_stroke_ink = (1.0 - stroke_renders) * existence[:, :, None, None]  # (B, S, R, R)
         total_coverage = per_stroke_ink.sum(dim=1)  # (B, R, R)
         excess = (total_coverage - 1.0).clamp(min=0) ** 2
         loss_overlap = (excess * target).mean()  # only on glyph pixels
     else:
         loss_overlap = torch.tensor(0.0, device=device)
 
-    # 9. Min coverage: penalize active strokes that cover very little unique area
-    if weights.get('min_coverage', 0) > 0 and 'stroke_renders' in model_output:
-        sr = model_output['stroke_renders']  # (B, S, R, R)
-        psi = (1.0 - sr) * exist_det[:, :, None, None]  # per-stroke ink, detached
-        total_ink = psi.sum(dim=1, keepdim=True)  # (B, 1, R, R)
-        other_ink = (total_ink - psi).clamp(0, 1)
-        unique_cov = (psi * (1.0 - other_ink) * target.unsqueeze(1)).sum(dim=(2, 3))  # (B, S)
-        glyph_area = target.sum(dim=(1, 2)).unsqueeze(1).clamp(min=1)  # (B, 1)
-        frac = unique_cov / glyph_area  # (B, S)
-        low_cov = (0.05 - frac).clamp(min=0) * active  # penalize < 5% coverage
-        loss_min_cov = low_cov.sum(dim=1).mean()
-    else:
-        loss_min_cov = torch.tensor(0.0, device=device)
-
-    # 10. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
+    # 9. Parallel penalty: penalize strokes running side-by-side (tangent-weighted)
     if weights.get('parallel', 0) > 0:
-        loss_parallel = parallel_penalty_batched(points, exist_det, n_points, canvas_size)
+        loss_parallel = parallel_penalty_batched(points, existence, n_points, canvas_size)
     else:
         loss_parallel = torch.tensor(0.0, device=device)
 
@@ -789,7 +770,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     else:
         loss_hires = torch.tensor(0.0, device=device)
 
-    # 9. Existence decay: later strokes cost more to activate
+    # 11. Existence decay: later strokes cost more to activate
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
     loss_exist = (existence * step_weights.unsqueeze(0)).mean()
 
@@ -797,14 +778,13 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('smoothness', 0.0) * loss_smooth +
              weights.get('reversal', 0.0) * loss_reversal +
              weights.get('sinuosity', 0.0) * loss_sinuosity +
-             weights.get('merge', 0.0) * curriculum * loss_merge +
+             weights.get('merge', 0.0) * loss_merge +
              weights.get('point_budget', 0.0) * loss_points +
              weights.get('stroke_length', 0.0) * loss_length +
              weights.get('width_smooth', 0.0) * loss_width_smooth +
              weights.get('hires_mse', 0.0) * loss_hires +
              weights.get('overlap', 0.0) * loss_overlap +
              weights.get('parallel', 0.0) * loss_parallel +
-             weights.get('min_coverage', 0.0) * curriculum * loss_min_cov +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -819,7 +799,6 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'width_smooth': loss_width_smooth.item(),
         'hires_mse': loss_hires.item(),
         'overlap': loss_overlap.item(),
-        'min_coverage': loss_min_cov.item(),
         'parallel': loss_parallel.item(),
         'exist_decay': loss_exist.item(),
     }

@@ -23,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STROKE_DIR="$SCRIPT_DIR/docker/stroke_model"
 STATE_FILE="$STROKE_DIR/.vastai_instance"
 TAG_FILE="$STROKE_DIR/.last_build_tag"
+BLACKLIST_FILE="$STROKE_DIR/.host_blacklist"
 REMOTE_DIR="/workspace"  # Outputs go here (not baked into image)
 DATA_DIR="/data"         # Fonts + db downloaded here at boot
 GDRIVE_FILE_ID="1MWPIwbt5aFwSGpnX0VaH-1KgCUZ5R8o0"  # training_data.tar.gz on Google Drive
@@ -34,7 +35,7 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "min_coverage": 1.0, "exist_decay": 0.05}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_decay": 0.05}'
 
 # Colors
 RED='\033[0;31m'
@@ -48,8 +49,38 @@ warn() { echo -e "${YELLOW}[vastai]${NC} $*"; }
 err() { echo -e "${RED}[vastai]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[vastai]${NC} $*"; }
 
+_blacklist_host() {
+    local machine_id="$1"
+    local reason="$2"
+    if [ -n "$machine_id" ] && ! grep -q "^${machine_id}$" "$BLACKLIST_FILE" 2>/dev/null; then
+        echo "$machine_id" >> "$BLACKLIST_FILE"
+        warn "Blacklisted machine $machine_id ($reason)"
+    fi
+}
+
+_filter_blacklisted() {
+    # Reads JSON offer list from stdin, removes blacklisted machine_ids, outputs filtered JSON
+    if [ ! -f "$BLACKLIST_FILE" ]; then
+        cat  # no blacklist, pass through
+        return
+    fi
+    python3 -c "
+import json, sys
+bl = set(open('$BLACKLIST_FILE').read().split())
+offers = json.load(sys.stdin)
+filtered = [o for o in offers if str(o.get('machine_id','')) not in bl]
+json.dump(filtered, sys.stdout)
+" 2>/dev/null
+}
+
 dump_and_destroy() {
     local iid="$1"
+    local reason="${2:-unknown}"
+    # Blacklist the machine if we have its ID
+    local mid=$(sed -n '3p' "$STATE_FILE" 2>/dev/null || true)
+    if [ -n "$mid" ]; then
+        _blacklist_host "$mid" "$reason"
+    fi
     warn "═══ Dumping logs for instance $iid before destroy ═══"
 
     warn "── Instance Status ──"
@@ -70,6 +101,22 @@ except: pass
     echo ""
 
     vastai destroy instance "$iid" 2>/dev/null || true
+
+    # Verify instance is actually dead before returning — Vast.ai destroy is async
+    for _try in $(seq 1 12); do
+        sleep 5
+        _status=$(vastai show instance "$iid" --raw 2>/dev/null | \
+            python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || echo "gone")
+        _status=${_status:-gone}
+        if [ "$_status" = "gone" ] || [ "$_status" = "exited" ] || [ "$_status" = "" ]; then
+            log "Instance $iid confirmed destroyed."
+            return
+        fi
+        # Retry destroy if still alive
+        vastai destroy instance "$iid" 2>/dev/null || true
+        printf "."
+    done
+    warn "Instance $iid may still be lingering after 60s — check manually."
 }
 
 check_deps() {
@@ -161,27 +208,32 @@ create_instance() {
 
     COMMON_FILTERS='num_gpus=1 disk_space>=100 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
 
+    # Show blacklist if any
+    if [ -f "$BLACKLIST_FILE" ] && [ -s "$BLACKLIST_FILE" ]; then
+        info "Blacklisted machines: $(tr '\n' ' ' < "$BLACKLIST_FILE")"
+    fi
+
     log "Searching for RTX 5090 instances..."
     OFFER_JSON=$(vastai search offers \
         "gpu_name=RTX_5090 $COMMON_FILTERS" \
         -o 'dph+' \
-        --raw 2>/dev/null) || true
+        --raw 2>/dev/null | _filter_blacklisted) || true
 
     OFFER_ID=""
+    MACHINE_ID=""
     if [ -n "$OFFER_JSON" ]; then
-        OFFER_ID=$(echo "$OFFER_JSON" | python3 -c "
+        read -r OFFER_ID MACHINE_ID < <(echo "$OFFER_JSON" | python3 -c "
 import json, sys
 offers = json.load(sys.stdin)
-if not offers:
-    sys.exit(1)
+if not offers: sys.exit(1)
 o = offers[0]
-print(o['id'])
+print(o['id'], o.get('machine_id',''))
 " 2>/dev/null) || true
         if [ -n "$OFFER_ID" ]; then
             echo "$OFFER_JSON" | python3 -c "
 import json, sys
 o = json.load(sys.stdin)[0]
-print(f'  Best: \${o[\"dph_total\"]:.3f}/hr, {o.get(\"gpu_name\",\"?\")}, {o.get(\"inet_down\",0):.0f}/{o.get(\"inet_up\",0):.0f} Mbps, disk_bw={o.get(\"disk_bw\",0):.0f} MB/s, reliability={o.get(\"reliability\",0):.2f}')
+print(f'  Best: \${o[\"dph_total\"]:.3f}/hr, {o.get(\"gpu_name\",\"?\")}, {o.get(\"inet_down\",0):.0f}/{o.get(\"inet_up\",0):.0f} Mbps, disk_bw={o.get(\"disk_bw\",0):.0f} MB/s, reliability={o.get(\"reliability\",0):.2f}, machine={o.get(\"machine_id\",\"?\")}')
 " 2>/dev/null || true
         fi
     fi
@@ -191,24 +243,26 @@ print(f'  Best: \${o[\"dph_total\"]:.3f}/hr, {o.get(\"gpu_name\",\"?\")}, {o.get
         OFFER_JSON=$(vastai search offers \
             "gpu_ram>=24 $COMMON_FILTERS" \
             -o 'dph+' \
-            --raw 2>/dev/null) || true
-        OFFER_ID=$(echo "$OFFER_JSON" | python3 -c "
+            --raw 2>/dev/null | _filter_blacklisted) || true
+        read -r OFFER_ID MACHINE_ID < <(echo "$OFFER_JSON" | python3 -c "
 import json, sys
 offers = json.load(sys.stdin)
 if not offers: sys.exit(1)
-print(offers[0]['id'])
+o = offers[0]
+print(o['id'], o.get('machine_id',''))
 " 2>/dev/null) || true
 
         if [ -z "$OFFER_ID" ]; then
             warn "No offers with strict filters. Relaxing network requirements..."
-            OFFER_ID=$(vastai search offers \
+            read -r OFFER_ID MACHINE_ID < <(vastai search offers \
                 'gpu_ram>=24 num_gpus=1 disk_space>=100 inet_down>=200 reliability>=0.95' \
                 -o 'dph+' \
-                --raw 2>/dev/null | python3 -c "
+                --raw 2>/dev/null | _filter_blacklisted | python3 -c "
 import json, sys
 offers = json.load(sys.stdin)
 if not offers: sys.exit(1)
-print(offers[0]['id'])
+o = offers[0]
+print(o['id'], o.get('machine_id',''))
 " 2>/dev/null) || { err "No suitable GPU found."; exit 1; }
             warn "Using relaxed filters — deployment may be slower."
         fi
@@ -234,7 +288,9 @@ print(data.get('new_contract', data.get('id', '')))
     fi
 
     echo "$INSTANCE_ID" > "$STATE_FILE"
-    log "Instance $INSTANCE_ID created."
+    echo "" >> "$STATE_FILE"  # placeholder for SSH URL (line 2)
+    echo "$MACHINE_ID" >> "$STATE_FILE"  # machine_id (line 3)
+    log "Instance $INSTANCE_ID created (machine $MACHINE_ID)."
 
     # Wait for instance to be running
     info "Waiting for instance to start (20 min timeout, tailing logs)..."
@@ -253,7 +309,7 @@ print(data.get('new_contract', data.get('id', '')))
         if echo "$STATUS_MSG" | grep -qi "deadline exceeded\|unauthorized\|manifest unknown\|denied\|error"; then
             echo ""
             err "Docker pull failed: $STATUS_MSG"
-            dump_and_destroy "$INSTANCE_ID"
+            dump_and_destroy "$INSTANCE_ID" "docker pull failed"
             rm -f "$STATE_FILE"
             CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
             if [ "$CREATE_RETRIES" -ge 5 ]; then
@@ -281,8 +337,10 @@ print(data.get('new_contract', data.get('id', '')))
 
     if [ "$STATUS" != "running" ]; then
         if [ "$STATUS" = "loading" ]; then
-            warn "Still loading after 20 min (image pull in progress). Continuing to wait..."
-            while true; do
+            warn "Still loading after 20 min (image pull in progress). Max 15 more min..."
+            LOAD_POLLS=0
+            LOAD_MAX=90  # 90 × 10s = 15 min
+            while [ "$LOAD_POLLS" -lt "$LOAD_MAX" ]; do
                 STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | \
                     python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
                 if [ "$STATUS" = "running" ]; then
@@ -290,7 +348,7 @@ print(data.get('new_contract', data.get('id', '')))
                     break
                 elif [ "$STATUS" != "loading" ]; then
                     err "Instance status changed to: $STATUS"
-                    dump_and_destroy "$INSTANCE_ID"
+                    dump_and_destroy "$INSTANCE_ID" "status changed to $STATUS during pull"
                     rm -f "$STATE_FILE"
                     CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
                     if [ "$CREATE_RETRIES" -ge 3 ]; then
@@ -302,11 +360,26 @@ print(data.get('new_contract', data.get('id', '')))
                     return
                 fi
                 printf "."
+                LOAD_POLLS=$((LOAD_POLLS + 1))
                 sleep 10
             done
+            if [ "$STATUS" != "running" ]; then
+                err "Image pull stuck after 35 min total. Host is broken."
+                dump_and_destroy "$INSTANCE_ID" "image pull timeout"
+                rm -f "$STATE_FILE"
+                CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+                if [ "$CREATE_RETRIES" -ge 5 ]; then
+                    err "Failed on 5 instances. Giving up."
+                    exit 1
+                fi
+                warn "Retrying on a different host ($CREATE_RETRIES/5)..."
+                export CREATE_RETRIES
+                create_instance
+                return
+            fi
         else
             err "Instance status: $STATUS (not loading or running)."
-            dump_and_destroy "$INSTANCE_ID"
+            dump_and_destroy "$INSTANCE_ID" "bad status: $STATUS"
             rm -f "$STATE_FILE"
             CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
             if [ "$CREATE_RETRIES" -ge 3 ]; then
@@ -368,7 +441,7 @@ else:
         exit 1
     fi
 
-    echo "ssh://root@${SSH_HOST}:${SSH_PORT}" >> "$STATE_FILE"
+    sed -i "2s|.*|ssh://root@${SSH_HOST}:${SSH_PORT}|" "$STATE_FILE"
     info "SSH target: $SSH_HOST:$SSH_PORT"
 
     # Wait for SSH — try direct port first, fall back to proxy
@@ -394,8 +467,7 @@ else:
                 SSH_HOST="$PROXY_HOST"
                 SSH_PORT="$PROXY_PORT"
                 # Update state file with working SSH info
-                echo "$INSTANCE_ID" > "$STATE_FILE"
-                echo "ssh://root@${SSH_HOST}:${SSH_PORT}" >> "$STATE_FILE"
+                sed -i "2s|.*|ssh://root@${SSH_HOST}:${SSH_PORT}|" "$STATE_FILE"
                 SSH_CONNECTED=true
                 break
             fi
@@ -408,12 +480,12 @@ else:
         CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
         if [ "$CREATE_RETRIES" -ge 3 ]; then
             err "SSH failed on 3 instances. Giving up."
-            dump_and_destroy "$INSTANCE_ID"
+            dump_and_destroy "$INSTANCE_ID" "SSH unreachable"
             rm -f "$STATE_FILE"
             exit 1
         fi
         err "SSH not available after 5 minutes. Retrying ($CREATE_RETRIES/3)..."
-        dump_and_destroy "$INSTANCE_ID"
+        dump_and_destroy "$INSTANCE_ID" "SSH unreachable"
         rm -f "$STATE_FILE"
         export CREATE_RETRIES
         create_instance
@@ -485,7 +557,7 @@ verify_training() {
     err "Training failed to start after 3 minutes. No log file found."
     err "Destroying instance..."
     INSTANCE_ID=$(head -1 "$STATE_FILE")
-    dump_and_destroy "$INSTANCE_ID"
+    dump_and_destroy "$INSTANCE_ID" "training failed to start"
     rm -f "$STATE_FILE"
     exit 1
 }
@@ -570,7 +642,15 @@ tail_log() {
             return 0
         fi
 
-        $SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true
+        LAST_LINE=$($SSH_CMD -T "tail -1 ${REMOTE_DIR}/train.log 2>/dev/null" 2>/dev/null || true)
+        echo "$LAST_LINE"
+        # Check for disk full error
+        if echo "$LAST_LINE" | grep -qi "No space left on device"; then
+            echo ""
+            err "DISK FULL detected! Syncing what we have and destroying instance..."
+            _cleanup_on_complete
+            return 0
+        fi
         sleep 30
     done
 }
@@ -584,7 +664,7 @@ _cleanup_on_complete() {
     vastai destroy instance "$INSTANCE_ID" 2>/dev/null
     rm -f "$STATE_FILE"
     _kill_bg_monitor
-    log "Done! Checkpoints at: $STROKE_DIR/checkpoints_vastai/"
+    log "Done! Results at: $STROKE_DIR/history/latest/"
 }
 
 _start_bg_monitor() {
@@ -623,10 +703,18 @@ except: print('unknown')
                 exit 0
             fi
 
-            # Check if training finished via Vast.ai API (no SSH needed)
+            # Check if training finished or disk full via Vast.ai API (no SSH needed)
             LOG_TAIL=$(vastai logs "$INSTANCE_ID" --tail 5 2>/dev/null || true)
             if echo "$LOG_TAIL" | grep -q "Training complete"; then
                 echo "[monitor] Training complete! Syncing and destroying..."
+                "$SCRIPT_PATH" --sync 2>/dev/null || true
+                vastai destroy instance "$INSTANCE_ID" 2>/dev/null
+                rm -f "$STATE_FILE"
+                rm -f "$MONITOR_PID_FILE"
+                exit 0
+            fi
+            if echo "$LOG_TAIL" | grep -qi "No space left on device"; then
+                echo "[monitor] DISK FULL! Syncing what we have and destroying..."
                 "$SCRIPT_PATH" --sync 2>/dev/null || true
                 vastai destroy instance "$INSTANCE_ID" 2>/dev/null
                 rm -f "$STATE_FILE"
@@ -650,16 +738,23 @@ _kill_bg_monitor() {
 
 sync_results() {
     _load_ssh
-    log "Syncing checkpoints and tracking images..."
+    INSTANCE_ID=$(head -1 "$STATE_FILE")
 
-    VAST_SYNC_DIR="$STROKE_DIR/checkpoints_vastai"
-    mkdir -p "$VAST_SYNC_DIR/tracking"
+    # Each run syncs to a unique folder: history/<date>_<instance>_<commit>/
+    COMMIT=$(git -C "$SCRIPT_DIR/.." log --oneline -1 2>/dev/null | cut -c1-7 || echo "unknown")
+    RUN_DIR="$STROKE_DIR/history/$(date +%Y%m%d)_i${INSTANCE_ID}_${COMMIT}"
+    mkdir -p "$RUN_DIR/tracking"
 
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$VAST_SYNC_DIR/" 2>/dev/null || true
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$VAST_SYNC_DIR/tracking/" 2>/dev/null || true
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/train.log" "$STROKE_DIR/logs/train_vastai.log" 2>/dev/null || true
+    # Update "latest" symlink
+    ln -sfn "$RUN_DIR" "$STROKE_DIR/history/latest"
 
-    log "Sync complete. Results at: $VAST_SYNC_DIR/"
+    log "Syncing to $RUN_DIR ..."
+
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$RUN_DIR/tracking/" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/train.log" "$RUN_DIR/train.log" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$RUN_DIR/" 2>/dev/null || true
+
+    log "Sync complete. Results at: $RUN_DIR/"
 }
 
 stop_instance() {
@@ -703,15 +798,17 @@ case "${1:-}" in
         check_deps
         log "Starting full deployment..."
         echo ""
-        # Reuse existing instance if one is running
+        # Reuse existing instance if one is running, clean up stale state
         if [ -f "$STATE_FILE" ]; then
             INSTANCE_ID=$(head -1 "$STATE_FILE")
-            STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
-            if [ "$STATUS" = "running" ]; then
-                log "Reusing existing instance $INSTANCE_ID (running)"
+            STATUS=$(timeout 10 vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || echo "dead")
+            STATUS=${STATUS:-dead}  # empty = dead
+            if [ "$STATUS" = "running" ] || [ "$STATUS" = "loading" ]; then
+                log "Reusing existing instance $INSTANCE_ID ($STATUS)"
             else
-                log "Instance $INSTANCE_ID is $STATUS. Creating new one..."
+                log "Instance $INSTANCE_ID is gone ($STATUS). Cleaning up..."
                 rm -f "$STATE_FILE"
+                _kill_bg_monitor
                 create_instance
             fi
         else
