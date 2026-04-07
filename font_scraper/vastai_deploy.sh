@@ -35,6 +35,8 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
+FLAT_CAPS=true    # flat stroke endpoints (no round cap coverage past endpoints)
+SERIFS=true       # enable serif prediction head at stroke endpoints
 LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_decay": 0.05}'
 
 # Colors
@@ -182,6 +184,9 @@ fi && \
 cd /app && \
 RESUME_FLAG="" && \
 if [ -f ${REMOTE_DIR}/checkpoints/best_model.pt ]; then RESUME_FLAG="--resume ${REMOTE_DIR}/checkpoints/best_model.pt"; fi && \
+EXTRA_FLAGS="" && \
+if [ "$FLAT_CAPS" = "true" ]; then EXTRA_FLAGS="\$EXTRA_FLAGS --flat-caps"; fi && \
+if [ "$SERIFS" = "true" ]; then EXTRA_FLAGS="\$EXTRA_FLAGS --serifs"; fi && \
 nohup python3 -u train.py \
     --db /data/fonts.db \
     --font-dir /data \
@@ -197,7 +202,7 @@ nohup python3 -u train.py \
     --render-every $RENDER_EVERY \
     --pretrain-epochs 5 \
     --loss-weights '$(echo "$LOSS_WEIGHTS" | sed "s/'/\\\\'/g")' \
-    \$RESUME_FLAG \
+    \$RESUME_FLAG \$EXTRA_FLAGS \
     > ${REMOTE_DIR}/train.log 2>&1 &
 echo \$! > ${REMOTE_DIR}/train.pid
 ONSTART

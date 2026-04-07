@@ -11,8 +11,6 @@ Loss components:
     5. Existence loss: BCE on existence flags (learn stroke count)
 """
 
-import math
-
 import torch
 import torch.nn.functional as F
 
@@ -22,7 +20,7 @@ try:
 except ImportError:
     render_strokes = None
     model_output_to_render_inputs = None
-from triton_render import render_strokes_triton, DistanceFieldRender
+from triton_render import render_strokes_triton, render_single_stroke_triton, DistanceFieldRender
 
 
 def coverage_loss(rendered: torch.Tensor, glyph_mask: torch.Tensor,
@@ -758,10 +756,53 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         ).squeeze(1)  # (B, HR, HR)
 
         # Render all strokes in one kernel call at high resolution
+        # Use same cap style as the autoregressive loop for consistency
+        flat_caps = model_output.get('flat_caps', False)
         hires_canvas_inv = DistanceFieldRender.apply(
             points, model_output['widths'], existence,
             n_points, canvas_size, HR, 4.0, 0.3,
+            flat_caps,
         )  # (B, HR, HR), 1=blank, 0=ink
+
+        # Render serifs at hires resolution for consistency with canvas_mse
+        if 'serif_params' in model_output:
+            serif_params = model_output['serif_params']  # (B, S, 2, 3)
+            for s in range(S):
+                s_exist = existence[:, s]
+                for ep_idx in range(2):
+                    se = torch.sigmoid(serif_params[:, s, ep_idx, 0]) * s_exist  # (B,)
+                    sl = (F.softplus(serif_params[:, s, ep_idx, 1]) + 1.0).clamp(max=20.0)  # (B,)
+                    sw_s = (F.softplus(serif_params[:, s, ep_idx, 2]) + 1.0).clamp(max=10.0)  # (B,)
+                    # Get endpoint and tangent
+                    if ep_idx == 0:
+                        ep_pos = points[:, s, 0]  # (B, 2)
+                        tangent = points[:, s, 1] - points[:, s, 0]
+                    else:
+                        last = (n_points[:, s] - 1).clamp(min=1)
+                        ep_pos = points[:, s].gather(1, last.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+                        prev = (n_points[:, s] - 2).clamp(min=0)
+                        prev_pos = points[:, s].gather(1, prev.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+                        tangent = ep_pos - prev_pos
+                    perp = torch.stack([-tangent[:, 1], tangent[:, 0]], dim=-1)
+                    perp = perp / perp.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                    half_len = sl / canvas_size / 2
+                    p1 = ep_pos - perp * half_len.unsqueeze(-1)
+                    p2 = ep_pos + perp * half_len.unsqueeze(-1)
+                    # Render serif segment at hires
+                    serif_pts_2 = torch.stack([p1, p2], dim=1)  # (B, 2, 2)
+                    pad_pts = torch.zeros(B, MAX_POINTS - 2, 2, device=device)
+                    serif_pts = torch.cat([serif_pts_2, pad_pts], dim=1)
+                    serif_w_2 = torch.stack([sw_s, sw_s], dim=1)  # (B, 2)
+                    pad_w = torch.zeros(B, MAX_POINTS - 2, device=device)
+                    serif_w = torch.cat([serif_w_2, pad_w], dim=1)
+                    serif_n = torch.full((B,), 2, dtype=torch.long, device=device)
+                    serif_render = render_single_stroke_triton(
+                        serif_pts, serif_w, serif_n, canvas_size, HR, 4.0,
+                        flat_caps=False,
+                    )
+                    serif_blend = serif_render * se.unsqueeze(-1).unsqueeze(-1) + \
+                                  1.0 * (1.0 - se.unsqueeze(-1).unsqueeze(-1))
+                    hires_canvas_inv = hires_canvas_inv * serif_blend
 
         hires_ink = 1.0 - hires_canvas_inv
         hires_sq_err = (hires_ink - hires_target) ** 2

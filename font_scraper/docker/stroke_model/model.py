@@ -11,8 +11,6 @@ Each step:
     5. Repeat until MAX_STROKES or existence < threshold
 """
 
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -176,19 +174,31 @@ class StrokePredictor(nn.Module):
     the residual (what's left to cover) to inform the next stroke.
     """
 
-    def __init__(self, feature_dim: int = 256, state_dim: int = 64):
+    def __init__(self, feature_dim: int = 256, state_dim: int = 64,
+                 flat_caps: bool = False, serifs: bool = False):
         super().__init__()
         self.encoder = StrokeEncoder(feature_dim=feature_dim)
         self.residual_encoder = ResidualEncoder(state_dim=state_dim)
         self.decoder = StrokeDecoderStep(
             feature_dim=feature_dim, state_dim=state_dim,
         )
+        self.flat_caps = flat_caps
+        self.serifs_enabled = serifs
 
         # Output heads (single stroke)
         self.existence_head = nn.Linear(feature_dim, 1)
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
+
+        # Serif head: per-stroke, predicts serif at start and end endpoints
+        # Each endpoint: (existence, length, width) = 3 params × 2 endpoints = 6
+        # Serifs are always perpendicular to the stroke tangent (enforced, no angle param).
+        # Length/width capped to prevent abuse as extra strokes.
+        if serifs:
+            self.serif_head = nn.Linear(feature_dim, 6)
+            self.serif_warmup_epoch = 20  # serifs dormant until strokes stabilize
+            self.current_epoch = 0        # set by training loop
 
     def forward(self, image: torch.Tensor, char_idx: torch.Tensor,
                 glyph_mask: torch.Tensor) -> dict:
@@ -225,6 +235,7 @@ class StrokePredictor(nn.Module):
         all_widths = []
         all_point_counts = []
         all_stroke_renders = []
+        all_serif_params = []
 
         for step in range(MAX_STROKES):
             # Current ink and residual
@@ -251,14 +262,70 @@ class StrokePredictor(nn.Module):
             # Render this stroke: (B, R, R), 1=bg, 0=ink
             stroke_render = render_single_stroke_triton(
                 points, widths, n_pts, CANVAS_SIZE, R,
+                flat_caps=self.flat_caps,
             )
 
             # Composite with existence masking (differentiable multiply-blend)
-            # If existence=1: canvas_inv *= stroke_render (add ink)
-            # If existence=0: canvas_inv *= 1.0 (no change)
             blend = stroke_render * existence.unsqueeze(-1).unsqueeze(-1) + \
                     1.0 * (1.0 - existence.unsqueeze(-1).unsqueeze(-1))
             canvas_inv = canvas_inv * blend
+
+            # Serif prediction (always runs when enabled, for consistent output shape)
+            if self.serifs_enabled:
+                serif_raw = self.serif_head(stroke_feat)  # (B, 6)
+                serif_params = serif_raw.reshape(B, 2, 3)  # (B, 2, 3) = [start/end, exist/length/width]
+                all_serif_params.append(serif_params)
+
+                # Serif rendering (dormant until serif_warmup_epoch — strokes need to stabilize first)
+                serifs_active = not self.training or self.current_epoch >= self.serif_warmup_epoch
+                if serifs_active:
+                    serif_exist = torch.sigmoid(serif_params[:, :, 0])     # (B, 2)
+                    serif_length = (F.softplus(serif_params[:, :, 1]) + 1.0).clamp(max=20.0)  # max 20px
+                    serif_width = (F.softplus(serif_params[:, :, 2]) + 1.0).clamp(max=10.0)   # max 10px
+
+                    # Render serifs as short perpendicular segments at endpoints
+                    for ep_idx in range(2):  # 0=start, 1=end
+                        se = serif_exist[:, ep_idx] * existence  # (B,) gate by stroke existence
+
+                        # Get endpoint position and tangent direction
+                        if ep_idx == 0:
+                            ep_pos = points[:, 0]     # (B, 2) normalized
+                            tangent = points[:, 1] - points[:, 0]
+                        else:
+                            last_idx = (n_pts - 1).clamp(min=1)
+                            ep_pos = points.gather(1, last_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+                            prev_idx = (n_pts - 2).clamp(min=0)
+                            prev_pos = points.gather(1, prev_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
+                            tangent = ep_pos - prev_pos
+
+                        # Perpendicular direction (rotate 90°)
+                        perp = torch.stack([-tangent[:, 1], tangent[:, 0]], dim=-1)  # (B, 2)
+                        perp_norm = perp / perp.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+                        # Serif as 2-point segment: center ± half_length along perpendicular
+                        half_len = serif_length[:, ep_idx] / CANVAS_SIZE / 2  # normalized
+                        p1 = ep_pos - perp_norm * half_len.unsqueeze(-1)  # (B, 2)
+                        p2 = ep_pos + perp_norm * half_len.unsqueeze(-1)  # (B, 2)
+
+                        # Pad to MAX_POINTS for kernel (differentiable via cat, not in-place)
+                        serif_pts = torch.stack([p1, p2], dim=1)  # (B, 2, 2)
+                        pad_pts = torch.zeros(B, MAX_POINTS - 2, 2, device=device)
+                        serif_pts_padded = torch.cat([serif_pts, pad_pts], dim=1)
+                        sw_ep = serif_width[:, ep_idx]
+                        serif_w = torch.stack([sw_ep, sw_ep], dim=1)  # (B, 2)
+                        pad_w = torch.zeros(B, MAX_POINTS - 2, device=device)
+                        serif_w_padded = torch.cat([serif_w, pad_w], dim=1)
+                        serif_n = torch.full((B,), 2, dtype=torch.long, device=device)
+
+                        serif_render = render_single_stroke_triton(
+                            serif_pts_padded, serif_w_padded, serif_n,
+                            CANVAS_SIZE, R, flat_caps=False,  # serifs always use round caps
+                        )
+
+                        # Composite serif onto canvas (gated by serif existence)
+                        serif_blend = serif_render * se.unsqueeze(-1).unsqueeze(-1) + \
+                                      1.0 * (1.0 - se.unsqueeze(-1).unsqueeze(-1))
+                        canvas_inv = canvas_inv * serif_blend
 
             all_existence.append(existence)
             all_points.append(points)
@@ -266,7 +333,7 @@ class StrokePredictor(nn.Module):
             all_point_counts.append(pc_logits)
             all_stroke_renders.append(stroke_render)
 
-        return {
+        result = {
             'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES)
             'points': torch.stack(all_points, dim=1),               # (B, MAX_STROKES, 40, 2)
             'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES, 40)
@@ -275,7 +342,15 @@ class StrokePredictor(nn.Module):
             'canvas_inv': canvas_inv,                               # (B, R, R)
             'target': target,                                        # (B, R, R)
             'glyph_mask': glyph_mask,                               # (B, H, W) full-res
+            'flat_caps': self.flat_caps,                             # for hires render consistency
         }
+        if self.serifs_enabled:
+            result['serif_params_raw'] = torch.stack(all_serif_params, dim=1)  # (B, MAX_STROKES, 2, 3)
+            # Only expose for rendering/loss when serifs are active (past warmup)
+            serifs_active = not self.training or self.current_epoch >= self.serif_warmup_epoch
+            if serifs_active:
+                result['serif_params'] = result['serif_params_raw']
+        return result
 
     def predict_strokes(self, image: torch.Tensor, char_idx: torch.Tensor,
                         canvas_size: int = CANVAS_SIZE,
@@ -308,6 +383,7 @@ class StrokePredictor(nn.Module):
         strokes = []
         stroke_widths = []
         slot_indices = []
+        stroke_serifs = []  # per-stroke serif info for visualization
         for i in range(MAX_STROKES):
             if existence[i].item() < existence_threshold:
                 continue  # skip dead slots; model may use non-contiguous slots
@@ -332,7 +408,20 @@ class StrokePredictor(nn.Module):
             stroke_widths.append(stroke_w)
             slot_indices.append(i)
 
-        return strokes, stroke_widths, slot_indices
+            # Extract serif info if available
+            if self.serifs_enabled and 'serif_params' in out:
+                sp = out['serif_params'][0, i]  # (2, 3)
+                serif_info = []
+                for ep in range(2):
+                    se = torch.sigmoid(sp[ep, 0]).item()
+                    sl = (F.softplus(sp[ep, 1]) + 1.0).item()
+                    sw = (F.softplus(sp[ep, 2]) + 1.0).item()
+                    serif_info.append({'exist': se, 'length': sl, 'width': sw})
+                stroke_serifs.append(serif_info)
+            else:
+                stroke_serifs.append(None)
+
+        return strokes, stroke_widths, slot_indices, stroke_serifs
 
 
 CHARS_LIST = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')

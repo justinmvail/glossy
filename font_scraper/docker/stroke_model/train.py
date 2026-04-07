@@ -49,6 +49,8 @@ def parse_args():
     parser.add_argument('--loss-weights', type=str, default=None, help='JSON string of loss weights')
     parser.add_argument('--pretrain-epochs', type=int, default=0, help='Synthetic pretraining epochs before real data')
     parser.add_argument('--pretrain-samples', type=int, default=100000, help='Number of synthetic samples per pretrain epoch')
+    parser.add_argument('--flat-caps', action='store_true', help='Use flat caps instead of round caps at stroke endpoints')
+    parser.add_argument('--serifs', action='store_true', help='Enable serif prediction head at stroke endpoints')
     return parser.parse_args()
 
 
@@ -259,7 +261,7 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
         char_t = sample['char_idx'].to(device)
 
         with torch.no_grad():
-            strokes, stroke_widths, slot_indices = model.predict_strokes(
+            strokes, stroke_widths, slot_indices, stroke_serifs = model.predict_strokes(
                 img_t, char_t, CANVAS_SIZE, existence_threshold=0.3,
             )
 
@@ -289,8 +291,12 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
                 else:
                     w = max(1, int(sw))
                 draw.line([(x1, y1), (x2, y2)], fill=fill_color, width=w)
-            # Round caps (lighter color)
+            # Round caps at interior points (lighter color)
+            # Skip first/last point when flat_caps — matches training renderer
+            flat = getattr(model, 'flat_caps', False)
             for i, (px, py) in enumerate(stroke):
+                if flat and (i == 0 or i == len(stroke) - 1):
+                    continue  # flat cap: no round fill at endpoints
                 if isinstance(sw, list) and len(sw) > i:
                     r = max(1, int(sw[i])) // 2
                 else:
@@ -305,6 +311,36 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
             # Control point dots
             for px, py in stroke:
                 draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=color)
+
+            # Draw serifs if present (white outline + stroke color fill for visibility)
+            serif_info = stroke_serifs[si] if si < len(stroke_serifs) else None
+            if serif_info:
+                for ep_idx, ep_info in enumerate(serif_info):
+                    if ep_info['exist'] < 0.3:
+                        continue
+                    # Get endpoint and tangent
+                    if ep_idx == 0:
+                        ex, ey = stroke[0]
+                        tx, ty = stroke[1][0] - stroke[0][0], stroke[1][1] - stroke[0][1]
+                    else:
+                        ex, ey = stroke[-1]
+                        tx, ty = stroke[-1][0] - stroke[-2][0], stroke[-1][1] - stroke[-2][1]
+                    # Perpendicular
+                    tlen = max(1e-6, (tx*tx + ty*ty) ** 0.5)
+                    px_dir, py_dir = -ty / tlen, tx / tlen
+                    half_len = ep_info['length'] / 2
+                    sx1 = ex - px_dir * half_len
+                    sy1 = ey - py_dir * half_len
+                    sx2 = ex + px_dir * half_len
+                    sy2 = ey + py_dir * half_len
+                    sw_serif = max(1, int(ep_info['width']))
+                    # Black outline then colored fill — makes serifs pop
+                    draw.line([(sx1, sy1), (sx2, sy2)], fill=(0, 0, 0), width=sw_serif + 4)
+                    draw.line([(sx1, sy1), (sx2, sy2)], fill=color, width=sw_serif)
+                    # Diamond markers at serif endpoints
+                    for mx, my in [(sx1, sy1), (sx2, sy2)]:
+                        d = 3
+                        draw.polygon([(mx, my-d), (mx+d, my), (mx, my+d), (mx-d, my)], fill=color)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
 
@@ -345,9 +381,14 @@ def main():
 
     # Create model
     from model import StrokePredictor
-    model = StrokePredictor(feature_dim=args.feature_dim).to(device)
+    model = StrokePredictor(
+        feature_dim=args.feature_dim,
+        flat_caps=args.flat_caps,
+        serifs=args.serifs,
+    ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    logger.info("Model parameters: %.1fM", n_params / 1e6)
+    logger.info("Model parameters: %.1fM (flat_caps=%s, serifs=%s)",
+                n_params / 1e6, args.flat_caps, args.serifs)
 
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -461,6 +502,8 @@ def main():
                 args.epochs, len(dataset), args.batch_size)
 
     for epoch in range(start_epoch, args.epochs):
+        if hasattr(model, 'current_epoch'):
+            model.current_epoch = epoch
         t0 = time.time()
 
         avg_loss, avg_losses = train_epoch(

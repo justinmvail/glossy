@@ -33,6 +33,7 @@ def _distance_field_kernel(
     canvas_size_float,
     sharpness,
     exist_thresh,
+    flat_caps,        # bool: 1=flat caps (no coverage past endpoints), 0=round caps
 ):
     pid = tl.program_id(0)
     if pid >= total_pixels:
@@ -80,8 +81,8 @@ def _distance_field_kernel(
                     apy = py - ay
 
                     ab_dot = abx * abx + aby * aby
-                    t = (apx * abx + apy * aby) / tl.maximum(ab_dot, 1e-8)
-                    t = tl.minimum(tl.maximum(t, 0.0), 1.0)
+                    t_raw = (apx * abx + apy * aby) / tl.maximum(ab_dot, 1e-8)
+                    t = tl.minimum(tl.maximum(t_raw, 0.0), 1.0)
 
                     proj_x = ax + t * abx
                     proj_y = ay + t * aby
@@ -94,6 +95,12 @@ def _distance_field_kernel(
                     w_b = tl.load(widths_ptr + widths_base + seg + 1)
                     width_interp = w_a * (1.0 - t) + w_b * t
                     dist = dist - width_interp * 0.5
+
+                    # Flat caps: reject pixels past first/last segment endpoints
+                    if flat_caps:
+                        past_start = (seg == 0) & (t_raw < 0.0)
+                        past_end = (seg == n_pts - 2) & (t_raw > 1.0)
+                        dist = tl.where(past_start | past_end, 1e6, dist)
 
                     if dist < best_dist:
                         best_dist = dist
@@ -116,7 +123,8 @@ class DistanceFieldRender(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, points, widths, existence, n_points,
-                canvas_size, render_size, sharpness, exist_thresh):
+                canvas_size, render_size, sharpness, exist_thresh,
+                flat_caps=False):
         """
         Args:
             points: (B, S, N, 2) normalized stroke coordinates.
@@ -127,6 +135,7 @@ class DistanceFieldRender(torch.autograd.Function):
             render_size: int, resolution to render at.
             sharpness: float, sigmoid sharpness.
             exist_thresh: float, existence threshold.
+            flat_caps: bool, if True use flat caps (no coverage past endpoints).
 
         Returns:
             rendered: (B, render_size, render_size) soft-rendered images.
@@ -154,6 +163,7 @@ class DistanceFieldRender(torch.autograd.Function):
             rendered, closest_stroke, closest_seg, min_dist,
             total_pixels, S, N, P, render_size,
             float(canvas_size), float(sharpness), float(exist_thresh),
+            1 if flat_caps else 0,
         )
 
         ctx.save_for_backward(points_c, widths_c, existence_c, n_points_c,
@@ -270,11 +280,11 @@ class DistanceFieldRender(torch.autograd.Function):
         grad_widths_flat.scatter_add_(1, scatter_idx_b, grad_w_b)
         grad_widths = grad_widths_flat.reshape(B, S, N)
 
-        return grad_points, grad_widths, None, None, None, None, None, None
+        return grad_points, grad_widths, None, None, None, None, None, None, None
 
 
 def render_single_stroke_triton(points, widths, n_points, canvas_size=CANVAS_SIZE,
-                                render_size=56, sharpness=4.0):
+                                render_size=56, sharpness=4.0, flat_caps=False):
     """Render a single stroke per batch item using the Triton kernel.
 
     Thin wrapper that reshapes single-stroke inputs to match the kernel's
@@ -287,6 +297,7 @@ def render_single_stroke_triton(points, widths, n_points, canvas_size=CANVAS_SIZ
         canvas_size: int.
         render_size: int.
         sharpness: float.
+        flat_caps: bool, if True use flat caps (no coverage past endpoints).
 
     Returns:
         rendered: (B, render_size, render_size) where 1=bg, 0=ink.
@@ -303,6 +314,7 @@ def render_single_stroke_triton(points, widths, n_points, canvas_size=CANVAS_SIZ
     return DistanceFieldRender.apply(
         points_4d, widths_3d, existence, n_pts_2d,
         canvas_size, render_size, sharpness, 0.0,  # exist_thresh=0, always render
+        flat_caps,
     )
 
 
@@ -338,6 +350,7 @@ def render_strokes_triton(model_output, glyph_masks, canvas_size=CANVAS_SIZE,
     rendered_small = DistanceFieldRender.apply(
         render_pts, render_w, existence, render_n,
         canvas_size, render_size, sharpness, exist_thresh,
+        False,  # flat_caps — default round caps for batch render
     )
 
     # Upsample to full canvas size
