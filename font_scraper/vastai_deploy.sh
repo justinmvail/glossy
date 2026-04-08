@@ -35,9 +35,9 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-FLAT_CAPS=true    # flat stroke endpoints (no round cap coverage past endpoints)
+FLAT_CAPS=false   # round caps (flat caps destabilize via merge penalty interaction)
 SERIFS=false      # serif head disabled until stroke quality stabilizes
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "boundary": 0.1, "self_overlap": 0.5, "exist_decay": 0.05}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_reward": 0.3, "exist_decay": 0.05}'
 
 # Colors
 RED='\033[0;31m'

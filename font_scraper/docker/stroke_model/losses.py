@@ -815,6 +815,35 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
     loss_exist = (existence * step_weights.unsqueeze(0)).mean()
 
+    # 11b. Coverage-based existence reward: direct upward gradient on existence.
+    #
+    # canvas_mse has ZERO gradient on existence due to the vanishing product
+    # gradient problem: d(canvas_inv)/d(e_s) = canvas_inv/blend_s * (sr_s - 1),
+    # but canvas_inv ≈ 0 for well-covered pixels, so the gradient vanishes.
+    # The only forces on existence are all downward (exist_decay, overlap, merge).
+    # This reward provides the missing upward force: strokes that cover glyph
+    # pixels are directly rewarded for existing.
+    #
+    # coverage_frac is detached so gradient flows only through existence,
+    # not back through stroke_renders (we don't want this loss moving points;
+    # that's canvas_mse's job). A stroke covering 30% of the glyph gets 10x
+    # stronger "stay alive" signal than one covering 3%. Useless strokes (0%
+    # coverage) get zero reward and still die from exist_decay.
+    if weights.get('exist_reward', 0) > 0 and 'stroke_renders' in model_output:
+        stroke_renders = model_output['stroke_renders']  # (B, S, R, R), 1=bg, 0=ink
+        per_stroke_ink = 1.0 - stroke_renders  # (B, S, R, R)
+        target_expanded = target.unsqueeze(1)  # (B, 1, R, R)
+        glyph_pixel_count = target.sum(dim=(1, 2)).clamp(min=1)  # (B,)
+
+        # Fraction of glyph pixels covered by each stroke
+        stroke_on_glyph = (per_stroke_ink * target_expanded).sum(dim=(2, 3))  # (B, S)
+        coverage_frac = stroke_on_glyph / glyph_pixel_count.unsqueeze(1)  # (B, S) in [0, 1]
+
+        # Negative loss = pushes existence UP for strokes that cover the glyph
+        loss_exist_reward = -(existence * coverage_frac.detach()).mean()
+    else:
+        loss_exist_reward = torch.tensor(0.0, device=device)
+
     # Valid point mask — used by boundary and self_overlap penalties
     valid_pt = torch.arange(N, device=device) < n_points.unsqueeze(-1)  # (B, S, N)
 
@@ -888,6 +917,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('parallel', 0.0) * loss_parallel +
              weights.get('boundary', 0.0) * loss_boundary +
              weights.get('self_overlap', 0.0) * loss_self_overlap +
+             weights.get('exist_reward', 0.0) * loss_exist_reward +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -905,6 +935,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'parallel': loss_parallel.item(),
         'boundary': loss_boundary.item(),
         'self_overlap': loss_self_overlap.item(),
+        'exist_reward': loss_exist_reward.item(),
         'exist_decay': loss_exist.item(),
     }
 

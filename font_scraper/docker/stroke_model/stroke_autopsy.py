@@ -164,12 +164,12 @@ def analyze_stroke(model, img_tensor, mask_tensor, char, device, canvas_size=224
         glyph_4d = glyph_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, 224, 224)
         on_glyph = F.grid_sample(glyph_4d, pts_grid, align_corners=False,
                                   mode='nearest', padding_mode='zeros')
-        on_glyph = on_glyph.squeeze().numpy()  # (n_pts,)
+        on_glyph = on_glyph.squeeze().cpu().numpy()  # (n_pts,)
         n_on_glyph = int(on_glyph.sum())
         n_off_glyph = n_pts - n_on_glyph
 
         # Width profile
-        width_values = ws.numpy().tolist()
+        width_values = ws.cpu().numpy().tolist()
         width_mean = float(ws.mean())
         width_std = float(ws.std())
         width_start = float(ws[0])
@@ -197,7 +197,7 @@ def analyze_stroke(model, img_tensor, mask_tensor, char, device, canvas_size=224
         # Self-overlap: check non-adjacent point distances
         if n_pts >= 5:
             dists = torch.cdist(pts_px.unsqueeze(0), pts_px.unsqueeze(0)).squeeze()
-            idx = torch.arange(n_pts)
+            idx = torch.arange(n_pts, device=pts_px.device)
             non_adj = (idx.unsqueeze(0) - idx.unsqueeze(1)).abs() > 2
             w_half_max = torch.max(ws.unsqueeze(0).expand(n_pts, -1),
                                     ws.unsqueeze(1).expand(-1, n_pts)) * 0.5
@@ -207,12 +207,12 @@ def analyze_stroke(model, img_tensor, mask_tensor, char, device, canvas_size=224
             n_self_overlap = 0
 
         # Inter-point spacing
-        spacings = seg_lengths.numpy().tolist()
+        spacings = seg_lengths.cpu().numpy().tolist()
         min_spacing = float(seg_lengths.min()) if len(seg_lengths) > 0 else 0
         max_spacing = float(seg_lengths.max()) if len(seg_lengths) > 0 else 0
 
         # Point coordinates
-        point_coords = pts_px.numpy().tolist()
+        point_coords = pts_px.cpu().numpy().tolist()
 
         results['strokes'].append({
             'slot': s,
@@ -280,7 +280,7 @@ def compute_existence_gradients(model, img_tensor, mask_tensor, char, device):
     loss_weights = {
         'canvas_mse': 1.0, 'merge': 2.0, 'sinuosity': 0.01, 'smoothness': 0.001,
         'width_smooth': 0.01, 'hires_mse': 1.0, 'overlap': 0.3, 'parallel': 1.0,
-        'boundary': 0.1, 'self_overlap': 0.5, 'exist_decay': 0.05,
+        'boundary': 0.1, 'self_overlap': 0.5, 'exist_reward': 0.3, 'exist_decay': 0.05,
     }
 
     # Loss terms that can affect existence (based on code analysis):
@@ -296,6 +296,7 @@ def compute_existence_gradients(model, img_tensor, mask_tensor, char, device):
         'canvas_mse': lambda: _compute_canvas_mse(out),
         'hires_mse': lambda: _compute_hires_mse(out, CANVAS_SIZE),
         'exist_decay': lambda: _compute_exist_decay(out),
+        'exist_reward': lambda: _compute_exist_reward(out),
         'merge': lambda: _compute_merge(out, CANVAS_SIZE),
         'overlap': lambda: _compute_overlap(out),
     }
@@ -370,6 +371,21 @@ def _compute_exist_decay(out):
     S = existence.shape[1]
     step_weights = torch.arange(S, device=existence.device, dtype=torch.float32)
     return (existence * step_weights.unsqueeze(0)).mean()
+
+
+def _compute_exist_reward(out):
+    """Coverage-based existence reward (the fix for zero canvas_mse gradient)."""
+    existence = out['existence']  # (B, S)
+    if 'stroke_renders' not in out:
+        return torch.tensor(0.0, device=existence.device)
+    stroke_renders = out['stroke_renders']  # (B, S, R, R)
+    target = out['target']  # (B, R, R)
+    per_stroke_ink = 1.0 - stroke_renders
+    target_expanded = target.unsqueeze(1)
+    glyph_pixel_count = target.sum(dim=(1, 2)).clamp(min=1)
+    stroke_on_glyph = (per_stroke_ink * target_expanded).sum(dim=(2, 3))
+    coverage_frac = stroke_on_glyph / glyph_pixel_count.unsqueeze(1)
+    return -(existence * coverage_frac.detach()).mean()
 
 
 def _compute_merge(out, canvas_size):
