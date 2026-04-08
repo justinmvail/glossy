@@ -98,6 +98,7 @@ def compare_runs():
 <head>
 <title>Training Run Comparison</title>
 <meta http-equiv="refresh" content="60">
+<script>window.onload = function() { window.scrollTo(0, document.body.scrollHeight); };</script>
 <style>
 body { font-family: monospace; background: #1a1a1a; color: #ddd; margin: 20px; }
 h1 { color: #fff; margin-bottom: 5px; }
