@@ -2,6 +2,7 @@ checkpoints/
 checkpoints_vastai/
 glyph_cache/
 experiments/
+history/
 logs/
 __pycache__/
 *.pyc

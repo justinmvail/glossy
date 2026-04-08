@@ -815,6 +815,66 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
     loss_exist = (existence * step_weights.unsqueeze(0)).mean()
 
+    # Valid point mask — used by boundary and self_overlap penalties
+    valid_pt = torch.arange(N, device=device) < n_points.unsqueeze(-1)  # (B, S, N)
+
+    # 12. Boundary penalty: penalize control points outside the glyph
+    # Samples a BLURRED glyph_mask at each point — the blur creates a gradient field
+    # that extends outward, so even far-away points get directional pull back toward
+    # the glyph. Without blur, grid_sample on binary mask gives zero spatial gradient
+    # in uniform background regions (points know they're off-glyph but not which way).
+    if weights.get('boundary', 0) > 0 and 'glyph_mask' in model_output:
+        glyph_mask = model_output['glyph_mask']  # (B, H, W) at 224x224
+        mask_4d = glyph_mask.unsqueeze(1)  # (B, 1, H, W)
+        # Gaussian-like blur via repeated average pooling (no extra deps).
+        # 10 iterations of 5x5 pool ≈ 25px effective radius — covers typical runaways.
+        blurred = mask_4d
+        for _ in range(10):
+            blurred = F.avg_pool2d(
+                F.pad(blurred, (2, 2, 2, 2), mode='replicate'),
+                kernel_size=5, stride=1, padding=0,
+            )
+        # points are (x, y) matching grid_sample's (width, height) convention
+        pts_grid = points * 2.0 - 1.0  # (B, S, N, 2) in [-1, 1]
+        pts_grid = pts_grid.reshape(B, S * N, 1, 2)  # (B, S*N, 1, 2)
+        on_glyph = F.grid_sample(blurred, pts_grid, align_corners=False,
+                                 mode='bilinear', padding_mode='zeros')
+        on_glyph = on_glyph.reshape(B, S, N)  # (B, S, N) values in [0, 1]
+        off_glyph = (1.0 - on_glyph) * valid_pt.float() * active.unsqueeze(-1)
+        loss_boundary = off_glyph.sum(dim=(1, 2)).mean() / N
+    else:
+        loss_boundary = torch.tensor(0.0, device=device)
+
+    # 13. Self-overlap penalty: penalize points inside their own stroke's infill
+    # For each point p_i, checks distance to all non-adjacent points p_j (|i-j|>2).
+    # If dist < avg_width/2, the point is backtracking into existing infill.
+    if weights.get('self_overlap', 0) > 0:
+        widths_full = model_output['widths'].detach()  # (B, S, N) detached: penalty moves points, not widths
+        pts_px = points * canvas_size  # (B, S, N, 2) in pixels
+        # Pairwise distances within each stroke: (B, S, N, N)
+        pts_flat = pts_px.reshape(B * S, N, 2)
+        dists = torch.cdist(pts_flat, pts_flat).reshape(B, S, N, N)  # (B, S, N, N)
+        # Average width at each pair
+        w_half = widths_full * 0.5  # (B, S, N) half-width
+        w_i = w_half.unsqueeze(-1).expand(-1, -1, -1, N)  # (B, S, N, N)
+        w_j = w_half.unsqueeze(-2).expand(-1, -1, N, -1)  # (B, S, N, N)
+        w_thresh = torch.max(w_i, w_j)  # use the larger half-width
+        # Non-adjacent mask: |i - j| > 2
+        idx = torch.arange(N, device=device)
+        non_adj = (idx.unsqueeze(0) - idx.unsqueeze(1)).abs() > 2  # (N, N)
+        # Valid pairs: both points must be valid
+        valid_i = valid_pt.unsqueeze(-1)  # (B, S, N, 1)
+        valid_j = valid_pt.unsqueeze(-2)  # (B, S, 1, N)
+        valid_pair = (valid_i & valid_j).float()  # (B, S, N, N)
+        # Penetration: how far inside the infill each point is
+        penetration = (w_thresh - dists).clamp(min=0)  # (B, S, N, N)
+        masked = penetration * non_adj.float() * valid_pair * active.unsqueeze(-1).unsqueeze(-1)
+        # Take max penetration per point (worst offender), sum over stroke
+        max_pen_per_point = masked.max(dim=-1).values  # (B, S, N)
+        loss_self_overlap = max_pen_per_point.sum(dim=(1, 2)).mean() / (N * canvas_size)
+    else:
+        loss_self_overlap = torch.tensor(0.0, device=device)
+
     total = (weights.get('canvas_mse', 1.0) * loss_canvas +
              weights.get('smoothness', 0.0) * loss_smooth +
              weights.get('reversal', 0.0) * loss_reversal +
@@ -826,6 +886,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('hires_mse', 0.0) * loss_hires +
              weights.get('overlap', 0.0) * loss_overlap +
              weights.get('parallel', 0.0) * loss_parallel +
+             weights.get('boundary', 0.0) * loss_boundary +
+             weights.get('self_overlap', 0.0) * loss_self_overlap +
              weights.get('exist_decay', 0.1) * loss_exist)
 
     loss_dict = {
@@ -841,6 +903,8 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'hires_mse': loss_hires.item(),
         'overlap': loss_overlap.item(),
         'parallel': loss_parallel.item(),
+        'boundary': loss_boundary.item(),
+        'self_overlap': loss_self_overlap.item(),
         'exist_decay': loss_exist.item(),
     }
 
