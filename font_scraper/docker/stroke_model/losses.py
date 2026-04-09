@@ -651,63 +651,55 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
     # 4. Merge penalty: penalize stroke pairs that could be merged
-    # Checks all 4 endpoint combos: end→start, end→end, start→start, start→end
+    # Soft merge penalty: checks end(i)→start(j) for all directed pairs.
+    # NOTE: This is a PENALTY — it pushes mergeable strokes APART or kills one.
+    # It does NOT cause strokes to merge (the architecture can't do that).
+    # Kept weak (run 19 level) so it doesn't dominate point position gradients.
     merge_penalty = torch.tensor(0.0, device=device)
     merge_threshold = 15.0  # pixels — proximity scale
     stroke_widths = model_output['widths']  # (B, S, N)
 
     for i in range(S):
-        for j in range(i + 1, S):  # unique pairs only
-            both_active = existence[:, i] * existence[:, j]  # soft, live gradients (B,)
+        for j in range(S):
+            if i == j:
+                continue
+            both_active = existence[:, i] * existence[:, j]  # soft, (B,)
 
-            # Gather endpoints and tangent directions for stroke i
-            last_i_idx = (n_points[:, i] - 1).clamp(min=0)
-            last_i = pts_scaled[:, i].gather(1, last_i_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
-            first_i = pts_scaled[:, i, 0]  # (B, 2)
-            prev_i_idx = (n_points[:, i] - 2).clamp(min=0)
-            prev_i = pts_scaled[:, i].gather(1, prev_i_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
-            dir_end_i = last_i - prev_i
-            dir_end_i = dir_end_i / dir_end_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-            dir_start_i = pts_scaled[:, i, 1] - first_i
-            dir_start_i = dir_start_i / dir_start_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            # Last valid point of stroke i
+            last_i_idx = (n_points[:, i] - 1).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
+            last_i = pts_scaled[:, i].gather(1, last_i_idx).squeeze(1)  # (B, 2)
+            # First point of stroke j
+            first_j = pts_scaled[:, j, 0]  # (B, 2)
 
-            # Gather endpoints and tangent directions for stroke j
-            last_j_idx = (n_points[:, j] - 1).clamp(min=0)
-            last_j = pts_scaled[:, j].gather(1, last_j_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
-            first_j = pts_scaled[:, j, 0]
-            prev_j_idx = (n_points[:, j] - 2).clamp(min=0)
-            prev_j = pts_scaled[:, j].gather(1, prev_j_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)).squeeze(1)
-            dir_end_j = last_j - prev_j
-            dir_end_j = dir_end_j / dir_end_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-            dir_start_j = pts_scaled[:, j, 1] - first_j
-            dir_start_j = dir_start_j / dir_start_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            # Soft proximity: sigmoid(threshold - gap)
+            endpoint_gap = (last_i - first_j).norm(dim=-1)  # (B,)
+            close_soft = torch.sigmoid((merge_threshold - endpoint_gap) * 0.5)  # (B,)
 
-            # Widths at each endpoint
-            w_end_i = stroke_widths[:, i].gather(1, last_i_idx.unsqueeze(-1)).squeeze(-1)
-            w_start_i = stroke_widths[:, i, 0]
-            w_end_j = stroke_widths[:, j].gather(1, last_j_idx.unsqueeze(-1)).squeeze(-1)
-            w_start_j = stroke_widths[:, j, 0]
+            # Direction of stroke i at its end (last segment)
+            prev_i_idx = (n_points[:, i] - 2).clamp(min=0).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2)
+            prev_i = pts_scaled[:, i].gather(1, prev_i_idx).squeeze(1)
+            dir_i = last_i - prev_i  # (B, 2)
+            dir_i = dir_i / dir_i.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 
-            # Check all 4 endpoint combos, keep the best (most mergeable)
-            combos = [
-                (last_i, first_j, dir_end_i, dir_start_j, w_end_i, w_start_j),      # end→start
-                (first_i, last_j, -dir_start_i, -dir_end_j, w_start_i, w_end_j),     # start→end (reversed)
-                (last_i, last_j, dir_end_i, -dir_end_j, w_end_i, w_end_j),           # end→end
-                (first_i, first_j, -dir_start_i, dir_start_j, w_start_i, w_start_j), # start→start
-            ]
+            # Direction of stroke j at its start (first segment)
+            second_j = pts_scaled[:, j, 1]  # (B, 2)
+            dir_j = second_j - first_j  # (B, 2)
+            dir_j = dir_j / dir_j.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 
-            best_merge = torch.zeros(B, device=device)
-            for pt_a, pt_b, d_a, d_b, w_a, w_b in combos:
-                gap = (pt_a - pt_b).norm(dim=-1)
-                close = torch.sigmoid((merge_threshold - gap) * 0.5)
-                aligned = (d_a * d_b).sum(dim=-1).clamp(min=0)
-                w_compat = torch.sigmoid((5.0 - (w_a - w_b).abs()) * 0.5)
-                score = close * aligned * w_compat
-                best_merge = torch.max(best_merge, score)
+            # Soft alignment: clamp cosine similarity above 0
+            cos_sim = (dir_i * dir_j).sum(dim=-1)  # (B,)
+            aligned_soft = cos_sim.clamp(min=0)  # (B,), 0-1
 
-            merge_penalty = merge_penalty + (best_merge * both_active).mean()
+            # Width compatibility: similar widths at junction
+            last_w_idx = (n_points[:, i] - 1).clamp(min=0)
+            w_end_i = stroke_widths[:, i].gather(1, last_w_idx.unsqueeze(-1)).squeeze(-1)  # (B,)
+            w_start_j = stroke_widths[:, j, 0]  # (B,)
+            width_diff = (w_end_i - w_start_j).abs()
+            width_compat = torch.sigmoid((5.0 - width_diff) * 0.5)
 
-    loss_merge = merge_penalty / max(S * (S - 1) // 2, 1)  # normalize by unique pairs
+            merge_penalty = merge_penalty + (close_soft * aligned_soft * width_compat * both_active).mean()
+
+    loss_merge = merge_penalty / (S * S)  # normalize
 
     # 5. Point budget: penalize using more points than necessary
     # Differentiable expected point count via softmax over point_count_logits
