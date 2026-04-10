@@ -584,7 +584,7 @@ _cleanup_on_complete() {
     vastai destroy instance "$INSTANCE_ID" 2>/dev/null
     rm -f "$STATE_FILE"
     _kill_bg_monitor
-    log "Done! Checkpoints at: $STROKE_DIR/checkpoints_vastai/"
+    log "Done! Results at: $STROKE_DIR/history/latest/"
 }
 
 _start_bg_monitor() {
@@ -650,16 +650,23 @@ _kill_bg_monitor() {
 
 sync_results() {
     _load_ssh
-    log "Syncing checkpoints and tracking images..."
+    INSTANCE_ID=$(head -1 "$STATE_FILE")
 
-    VAST_SYNC_DIR="$STROKE_DIR/checkpoints_vastai"
-    mkdir -p "$VAST_SYNC_DIR/tracking"
+    # Each run syncs to a unique folder: history/<date>_<instance>_<commit>/
+    COMMIT=$(git -C "$SCRIPT_DIR/.." log --oneline -1 2>/dev/null | cut -c1-7 || echo "unknown")
+    RUN_DIR="$STROKE_DIR/history/$(date +%Y%m%d)_i${INSTANCE_ID}_${COMMIT}"
+    mkdir -p "$RUN_DIR/tracking"
 
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$VAST_SYNC_DIR/" 2>/dev/null || true
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$VAST_SYNC_DIR/tracking/" 2>/dev/null || true
-    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/train.log" "$STROKE_DIR/logs/train_vastai.log" 2>/dev/null || true
+    # Update "latest" symlink
+    ln -sfn "$RUN_DIR" "$STROKE_DIR/history/latest"
 
-    log "Sync complete. Results at: $VAST_SYNC_DIR/"
+    log "Syncing to $RUN_DIR ..."
+
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/tracking/" "$RUN_DIR/tracking/" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/train.log" "$RUN_DIR/train.log" 2>/dev/null || true
+    eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$RUN_DIR/" 2>/dev/null || true
+
+    log "Sync complete. Results at: $RUN_DIR/"
 }
 
 stop_instance() {

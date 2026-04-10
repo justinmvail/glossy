@@ -271,27 +271,35 @@ def _render_tracking_samples(model, samples, device, output_dir, epoch, prefix='
         draw = ImageDraw.Draw(img)
         for si, stroke in enumerate(strokes):
             color = colors[si % len(colors)]
+            fill_color = tuple(min(255, c + 120) for c in color)
             sw = stroke_widths[si] if si < len(stroke_widths) else [2]
+            # Pass 1: lighter fill with width
             for i in range(len(stroke) - 1):
                 x1, y1 = stroke[i]
                 x2, y2 = stroke[i + 1]
-                # Per-segment width: average of endpoint widths
                 if isinstance(sw, list) and len(sw) > i + 1:
                     w = max(1, int((sw[i] + sw[i + 1]) / 2))
                 elif isinstance(sw, list) and len(sw) > 0:
                     w = max(1, int(sw[0]))
                 else:
                     w = max(1, int(sw))
-                draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
-            # Round caps at each control point to fill junction gaps
-            # (matches Triton kernel's implicit round caps from t-clamping)
+                draw.line([(x1, y1), (x2, y2)], fill=fill_color, width=w)
+            # Round caps (lighter)
             for i, (px, py) in enumerate(stroke):
                 if isinstance(sw, list) and len(sw) > i:
                     r = max(1, int(sw[i])) // 2
                 else:
                     r = max(1, int(sw[0] if isinstance(sw, list) else sw)) // 2
                 if r > 0:
-                    draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=color)
+                    draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=fill_color)
+            # Pass 2: centerline on top (full color, thin)
+            for i in range(len(stroke) - 1):
+                x1, y1 = stroke[i]
+                x2, y2 = stroke[i + 1]
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+            # Control point dots
+            for px, py in stroke:
+                draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=color)
 
         img.save(os.path.join(epoch_dir, f"{sample['label']}.png"))
 

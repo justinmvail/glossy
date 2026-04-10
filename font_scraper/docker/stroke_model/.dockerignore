@@ -6,3 +6,4 @@ logs/
 __pycache__/
 *.pyc
 .last_build_tag
+history/
