@@ -174,13 +174,15 @@ class StrokePredictor(nn.Module):
     the residual (what's left to cover) to inform the next stroke.
     """
 
-    def __init__(self, feature_dim: int = 256, state_dim: int = 64):
+    def __init__(self, feature_dim: int = 256, state_dim: int = 64,
+                 flat_caps: bool = False):
         super().__init__()
         self.encoder = StrokeEncoder(feature_dim=feature_dim)
         self.residual_encoder = ResidualEncoder(state_dim=state_dim)
         self.decoder = StrokeDecoderStep(
             feature_dim=feature_dim, state_dim=state_dim,
         )
+        self.flat_caps = flat_caps
 
         # Output heads (single stroke)
         self.existence_head = nn.Linear(feature_dim, 1)
@@ -248,6 +250,7 @@ class StrokePredictor(nn.Module):
             # Render this stroke: (B, R, R), 1=bg, 0=ink
             stroke_render = render_single_stroke_triton(
                 points, widths, n_pts, CANVAS_SIZE, R,
+                flat_caps=self.flat_caps,
             )
 
             # Composite with existence masking (differentiable multiply-blend)
@@ -272,6 +275,7 @@ class StrokePredictor(nn.Module):
             'canvas_inv': canvas_inv,                               # (B, R, R)
             'target': target,                                        # (B, R, R)
             'glyph_mask': glyph_mask,                               # (B, H, W) full-res
+            'flat_caps': self.flat_caps,
         }
 
     def predict_strokes(self, image: torch.Tensor, char_idx: torch.Tensor,

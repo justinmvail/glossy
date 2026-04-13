@@ -742,9 +742,11 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         ).squeeze(1)  # (B, HR, HR)
 
         # Render all strokes in one kernel call at high resolution
+        flat_caps = model_output.get('flat_caps', False)
         hires_canvas_inv = DistanceFieldRender.apply(
             points, model_output['widths'], existence,
             n_points, canvas_size, HR, 4.0, 0.3,
+            flat_caps,
         )  # (B, HR, HR), 1=blank, 0=ink
 
         hires_ink = 1.0 - hires_canvas_inv

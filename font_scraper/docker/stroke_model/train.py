@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--pretrain-epochs', type=int, default=0, help='Synthetic pretraining epochs before real data')
     parser.add_argument('--pretrain-samples', type=int, default=100000, help='Number of synthetic samples per pretrain epoch')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
+    parser.add_argument('--flat-caps', action='store_true', help='Use flat caps instead of round caps at stroke endpoints')
     return parser.parse_args()
 
 
@@ -343,8 +344,12 @@ def main():
     # Create model (BEFORE seeding — model init uses default torch randomness
     # so pretrained weight loading + layer init matches run 19's behavior)
     from model import StrokePredictor
-    model = StrokePredictor(feature_dim=args.feature_dim).to(device)
+    model = StrokePredictor(
+        feature_dim=args.feature_dim,
+        flat_caps=args.flat_caps,
+    ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
+    logger.info("Model parameters: %.1fM (flat_caps=%s)", n_params / 1e6, args.flat_caps)
 
     # Seed AFTER model creation — affects data ordering and training stochasticity
     # but not weight initialization, preserving run 19's init distribution.
@@ -353,7 +358,6 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     logger.info("Random seed: %d (post-init)", args.seed)
-    logger.info("Model parameters: %.1fM", n_params / 1e6)
 
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

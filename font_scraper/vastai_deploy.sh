@@ -149,6 +149,7 @@ nohup python3 -u train.py \
     --save-every $SAVE_EVERY \
     --render-every $RENDER_EVERY \
     --pretrain-epochs 5 \
+    --flat-caps \
     --loss-weights '$(echo "$LOSS_WEIGHTS" | sed "s/'/\\\\'/g")' \
     \$RESUME_FLAG \
     > ${REMOTE_DIR}/train.log 2>&1 &
@@ -159,7 +160,7 @@ ONSTART
 create_instance() {
     _get_image_tag
 
-    COMMON_FILTERS='num_gpus=1 disk_space>=100 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
+    COMMON_FILTERS='num_gpus=1 disk_space>=50 inet_down>=500 inet_up>=200 disk_bw>=500 direct_port_count>=1 reliability>=0.98 static_ip=true'
 
     log "Searching for RTX 5090 instances..."
     OFFER_JSON=$(vastai search offers \
@@ -202,7 +203,7 @@ print(offers[0]['id'])
         if [ -z "$OFFER_ID" ]; then
             warn "No offers with strict filters. Relaxing network requirements..."
             OFFER_ID=$(vastai search offers \
-                'gpu_ram>=24 num_gpus=1 disk_space>=100 inet_down>=200 reliability>=0.95' \
+                'gpu_ram>=24 num_gpus=1 disk_space>=50 inet_down>=200 reliability>=0.95' \
                 -o 'dph+' \
                 --raw 2>/dev/null | python3 -c "
 import json, sys
@@ -219,7 +220,7 @@ print(offers[0]['id'])
     log "Creating instance from offer $OFFER_ID..."
     INSTANCE_ID=$(vastai create instance "$OFFER_ID" \
         --image "$IMAGE_TAG" \
-        --disk 100 \
+        --disk 50 \
         --ssh --direct \
         --onstart-cmd "$ONSTART_CMD" \
         --raw 2>/dev/null | python3 -c "
