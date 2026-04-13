@@ -28,13 +28,13 @@ DATA_DIR="/data"         # Fonts + db downloaded here at boot
 GDRIVE_FILE_ID="1MWPIwbt5aFwSGpnX0VaH-1KgCUZ5R8o0"  # training_data.tar.gz on Google Drive
 
 # Training config
-EPOCHS=100
+EPOCHS=50
 BATCH_SIZE=512
 LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_decay": 0.1}'
 
 # Colors
 RED='\033[0;31m'
@@ -623,8 +623,8 @@ except: print('unknown')
                 exit 0
             fi
 
-            # Check if training finished via Vast.ai API (no SSH needed)
-            LOG_TAIL=$(vastai logs "$INSTANCE_ID" --tail 5 2>/dev/null || true)
+            # Check if training finished or crashed via Vast.ai API (no SSH needed)
+            LOG_TAIL=$(vastai logs "$INSTANCE_ID" --tail 20 2>/dev/null || true)
             if echo "$LOG_TAIL" | grep -q "Training complete"; then
                 echo "[monitor] Training complete! Syncing and destroying..."
                 "$SCRIPT_PATH" --sync 2>/dev/null || true
@@ -632,6 +632,16 @@ except: print('unknown')
                 rm -f "$STATE_FILE"
                 rm -f "$MONITOR_PID_FILE"
                 exit 0
+            fi
+
+            # Detect crashes: disk full, OOM, Python exceptions
+            if echo "$LOG_TAIL" | grep -qE "No space left on device|OSError|MemoryError|RuntimeError|Traceback|Killed|CUDA out of memory"; then
+                echo "[monitor] CRASH DETECTED in training! Syncing and destroying..."
+                "$SCRIPT_PATH" --sync 2>/dev/null || true
+                vastai destroy instance "$INSTANCE_ID" 2>/dev/null
+                rm -f "$STATE_FILE"
+                rm -f "$MONITOR_PID_FILE"
+                exit 1
             fi
         done
     ) &
@@ -667,6 +677,9 @@ sync_results() {
     eval $RSYNC_CMD "root@${SSH_HOST}:${REMOTE_DIR}/checkpoints/*.pt" "$RUN_DIR/" 2>/dev/null || true
 
     log "Sync complete. Results at: $RUN_DIR/"
+
+    # Regenerate comparison HTML and open in browser
+    python3 "$STROKE_DIR/compare_runs.py" 2>/dev/null || true
 }
 
 stop_instance() {

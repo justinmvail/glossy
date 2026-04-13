@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
 
@@ -49,6 +50,7 @@ def parse_args():
     parser.add_argument('--loss-weights', type=str, default=None, help='JSON string of loss weights')
     parser.add_argument('--pretrain-epochs', type=int, default=0, help='Synthetic pretraining epochs before real data')
     parser.add_argument('--pretrain-samples', type=int, default=100000, help='Number of synthetic samples per pretrain epoch')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     return parser.parse_args()
 
 
@@ -338,10 +340,19 @@ def main():
     except Exception:
         logger.warning("pydiffvg not available, using Triton renderer only")
 
-    # Create model
+    # Create model (BEFORE seeding — model init uses default torch randomness
+    # so pretrained weight loading + layer init matches run 19's behavior)
     from model import StrokePredictor
     model = StrokePredictor(feature_dim=args.feature_dim).to(device)
     n_params = sum(p.numel() for p in model.parameters())
+
+    # Seed AFTER model creation — affects data ordering and training stochasticity
+    # but not weight initialization, preserving run 19's init distribution.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    logger.info("Random seed: %d (post-init)", args.seed)
     logger.info("Model parameters: %.1fM", n_params / 1e6)
 
     # Optimizer
@@ -377,6 +388,7 @@ def main():
         collate_fn=collate_with_masks,
         pin_memory=(device.type == 'cuda'),
         drop_last=True,
+        generator=torch.Generator().manual_seed(args.seed),
     )
 
     # Output directory
@@ -412,6 +424,7 @@ def main():
             collate_fn=collate_synthetic,
             pin_memory=(device.type == 'cuda'),
             drop_last=True,
+            generator=torch.Generator().manual_seed(args.seed),
         )
 
         logger.info("Starting pretraining: %d epochs, %d synthetic samples",
@@ -441,9 +454,13 @@ def main():
                 )
 
         logger.info("Pretraining complete. Switching to real font training.")
-        best_loss = float('inf')  # reset for real training
 
     # Phase 2: Real font training
+    # Track best by canvas_mse, not total loss. Total loss includes exist_decay
+    # which rewards the model for killing strokes — selecting on total loss can
+    # pick a checkpoint with degraded topology over one with better coverage.
+    best_canvas_mse = float('inf')
+
     logger.info("Starting training: %d epochs, %d samples, batch_size=%d",
                 args.epochs, len(dataset), args.batch_size)
 
@@ -462,9 +479,10 @@ def main():
             ' '.join(f"{k}={v:.4f}" for k, v in avg_losses.items() if k != 'total'),
         )
 
-        # Save best model
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        # Save best model (by canvas_mse — the actual coverage metric)
+        canvas_mse = avg_losses.get('canvas_mse', float('inf'))
+        if canvas_mse < best_canvas_mse:
+            best_canvas_mse = canvas_mse
             save_checkpoint(
                 model, optimizer, epoch, avg_loss,
                 os.path.join(args.output_dir, 'best_model.pt'),
@@ -497,7 +515,7 @@ def main():
     if writer:
         writer.close()
 
-    logger.info("Training complete. Best loss: %.4f", best_loss)
+    logger.info("Training complete. Best canvas_mse: %.4f", best_canvas_mse)
 
 
 if __name__ == '__main__':

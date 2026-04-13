@@ -116,7 +116,7 @@ class GlyphDataset(Dataset):
             if os.path.exists(cache_path):
                 try:
                     arr = np.load(cache_path)
-                    img_tensor = torch.from_numpy(arr).float().unsqueeze(0)
+                    img_tensor = torch.from_numpy(arr.astype(np.float32)).unsqueeze(0)
                     return img_tensor, char_idx
                 except (EOFError, ValueError):
                     pass  # Corrupt cache file, fall through to render
@@ -137,10 +137,10 @@ class GlyphDataset(Dataset):
         if self.augment:
             img_tensor = self._augment(img_tensor)
 
-        # Cache to disk
+        # Cache to disk as uint8 (binary mask: 0 or 1) — 4x smaller than float32
         if self.cache_dir:
             try:
-                np.save(cache_path, img_arr)
+                np.save(cache_path, img_arr.astype(np.uint8))
             except OSError:
                 pass
 
