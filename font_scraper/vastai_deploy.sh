@@ -28,13 +28,13 @@ DATA_DIR="/data"         # Fonts + db downloaded here at boot
 GDRIVE_FILE_ID="1MWPIwbt5aFwSGpnX0VaH-1KgCUZ5R8o0"  # training_data.tar.gz on Google Drive
 
 # Training config
-EPOCHS=50
+EPOCHS=100
 BATCH_SIZE=512
 LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_decay": 0.1}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_bce": 0.1, "exist_target": 4}'
 
 # Colors
 RED='\033[0;31m'
@@ -149,7 +149,6 @@ nohup python3 -u train.py \
     --save-every $SAVE_EVERY \
     --render-every $RENDER_EVERY \
     --pretrain-epochs 5 \
-    --flat-caps \
     --loss-weights '$(echo "$LOSS_WEIGHTS" | sed "s/'/\\\\'/g")' \
     \$RESUME_FLAG \
     > ${REMOTE_DIR}/train.log 2>&1 &

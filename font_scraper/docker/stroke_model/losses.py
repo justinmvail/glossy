@@ -756,9 +756,19 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     else:
         loss_hires = torch.tensor(0.0, device=device)
 
-    # 9. Existence decay: later strokes cost more to activate
-    step_weights = torch.arange(existence.shape[1], device=device, dtype=torch.float32)
-    loss_exist = (existence * step_weights.unsqueeze(0)).mean()
+    # 9. Existence BCE: target stroke count via per-slot binary cross-entropy.
+    # Replaces exist_decay (which caused irreversible stroke collapse). With STE
+    # binary existence, strokes are hard 0/1 in forward pass — BCE on the logits
+    # lets the model learn which slots to activate without the gradient dead zone.
+    exist_target_count = int(weights.get('exist_target', 4))
+    exist_target = torch.ones(S, device=device)
+    exist_target[exist_target_count:] = 0.0  # first N slots should exist
+    if 'exist_logits' in model_output:
+        exist_probs = torch.sigmoid(model_output['exist_logits'])  # (B, S)
+        loss_exist = F.binary_cross_entropy(exist_probs, exist_target.unsqueeze(0).expand(B, -1))
+    else:
+        # Fallback for pretrain (no exist_logits)
+        loss_exist = torch.tensor(0.0, device=device)
 
     total = (weights.get('canvas_mse', 1.0) * loss_canvas +
              weights.get('smoothness', 0.0) * loss_smooth +
@@ -771,7 +781,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
              weights.get('hires_mse', 0.0) * loss_hires +
              weights.get('overlap', 0.0) * loss_overlap +
              weights.get('parallel', 0.0) * loss_parallel +
-             weights.get('exist_decay', 0.1) * loss_exist)
+             weights.get('exist_bce', 0.1) * loss_exist)
 
     loss_dict = {
         'total': total.item(),
@@ -786,7 +796,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
         'hires_mse': loss_hires.item(),
         'overlap': loss_overlap.item(),
         'parallel': loss_parallel.item(),
-        'exist_decay': loss_exist.item(),
+        'exist_bce': loss_exist.item(),
     }
 
     return total, loss_dict
