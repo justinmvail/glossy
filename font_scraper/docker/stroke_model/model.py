@@ -240,12 +240,8 @@ class StrokePredictor(nn.Module):
             stroke_feat = self.decoder(features, state_tokens, step)  # (B, 256)
 
             # Predict stroke parameters
-            # STE binary existence: hard 0/1 forward, smooth sigmoid backward.
-            # Eliminates the gradient dead zone where soft existence < 0.2 causes
-            # irreversible stroke collapse (canvas_mse can't see nearly-dead strokes).
             exist_logit = self.existence_head(stroke_feat).squeeze(-1)  # (B,)
-            exist_prob = torch.sigmoid(exist_logit)
-            existence = (exist_logit >= 0).float() - exist_prob.detach() + exist_prob  # (B,)
+            existence = torch.sigmoid(exist_logit)  # (B,) soft 0-1
             points_raw = self.points_head(stroke_feat)  # (B, 80)
             points = torch.sigmoid(points_raw.reshape(B, MAX_POINTS, 2))  # (B, 40, 2)
             widths = F.softplus(self.width_head(stroke_feat)) + 1.0  # (B, 40) per-point
@@ -274,7 +270,7 @@ class StrokePredictor(nn.Module):
             all_stroke_renders.append(stroke_render)
 
         return {
-            'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES) hard 0/1 via STE
+            'existence': torch.stack(all_existence, dim=1),         # (B, MAX_STROKES)
             'exist_logits': torch.stack(all_exist_logits, dim=1),  # (B, MAX_STROKES) raw logits for BCE
             'points': torch.stack(all_points, dim=1),               # (B, MAX_STROKES, 40, 2)
             'widths': torch.stack(all_widths, dim=1),               # (B, MAX_STROKES, 40)

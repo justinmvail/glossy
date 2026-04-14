@@ -910,8 +910,10 @@ def pretrain_loss(model_output: dict, gt_strokes: dict,
         target_exist = torch.zeros(S, device=device)
         for i in used_pred:
             target_exist[i] = 1.0
+        # Use sigmoid(logits) for BCE, not existence directly (which may be STE hard 0/1)
+        exist_probs_b = torch.sigmoid(model_output['exist_logits'][b]) if 'exist_logits' in model_output else pred_exist[b]
         loss_exist_bce = loss_exist_bce + F.binary_cross_entropy(
-            pred_exist[b], target_exist)
+            exist_probs_b, target_exist)
 
     loss_chamfer = loss_chamfer / max(n_matched, 1)
     loss_width = loss_width / max(n_matched, 1)
