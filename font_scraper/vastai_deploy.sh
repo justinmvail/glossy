@@ -34,7 +34,7 @@ LR="4e-4"
 RENDER_EVERY=2   # render_every=1 causes collapse without overlap annealing
 NUM_WORKERS=8
 SAVE_EVERY=5
-LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 2.0, "stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_bce": 0.1, "exist_target": 4}'
+LOSS_WEIGHTS='{"canvas_mse": 1.0, "merge": 0,"stroke_length": 0.01, "sinuosity": 0.01, "smoothness": 0.001, "width_smooth": 0.01, "hires_mse": 1.0, "overlap": 0.3, "parallel": 1.0, "exist_bce": 0.1, "exist_target": 4}'
 
 # Colors
 RED='\033[0;31m'
@@ -623,8 +623,16 @@ except: print('unknown')
                 exit 0
             fi
 
-            # Check if training finished or crashed via Vast.ai API (no SSH needed)
-            LOG_TAIL=$(vastai logs "$INSTANCE_ID" --tail 20 2>/dev/null || true)
+            # Check if training finished or crashed via SSH to train.log
+            # (vastai logs only shows container stdout, not train.log)
+            # Inline SSH config — don't call _load_ssh which has exit calls that kill the monitor
+            SSH_URL=$(sed -n '2p' "$STATE_FILE" 2>/dev/null || true)
+            MON_HOST=$(echo "$SSH_URL" | sed 's|ssh://||' | sed 's|root@||' | cut -d: -f1)
+            MON_PORT=$(echo "$SSH_URL" | sed 's|ssh://||' | cut -d: -f2)
+            LOG_TAIL=""
+            if [ -n "$MON_HOST" ] && [ -n "$MON_PORT" ]; then
+                LOG_TAIL=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p "$MON_PORT" "root@$MON_HOST" "tail -20 /workspace/train.log 2>/dev/null" 2>/dev/null || true)
+            fi
             if echo "$LOG_TAIL" | grep -q "Training complete"; then
                 echo "[monitor] Training complete! Syncing and destroying..."
                 "$SCRIPT_PATH" --sync 2>/dev/null || true
