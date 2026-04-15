@@ -236,6 +236,10 @@ print(data.get('new_contract', data.get('id', '')))
     echo "$INSTANCE_ID" > "$STATE_FILE"
     log "Instance $INSTANCE_ID created."
 
+    # Start background monitor early — catches stuck loading, crashes, and
+    # completion even if the user closes the terminal during the wait below.
+    _start_bg_monitor
+
     # Wait for instance to be running
     # Hosts with cached Docker layers start in 1-3 min. If still "loading"
     # after 10 min, the host is pulling the full base image (~23GB). Kill
@@ -614,6 +618,21 @@ except: print('unknown')
                 rm -f "$MONITOR_PID_FILE"
                 exit 0
             fi
+
+            # If still loading (pulling Docker image), track how long
+            if [ "$STATUS" = "loading" ]; then
+                LOADING_CHECKS=$((${LOADING_CHECKS:-0} + 1))
+                # 2 checks * 5 min = 10 min of loading → kill
+                if [ "$LOADING_CHECKS" -ge 2 ]; then
+                    echo "[monitor] Instance stuck loading for 10+ min. Destroying..."
+                    vastai destroy instance "$INSTANCE_ID" 2>/dev/null
+                    rm -f "$STATE_FILE"
+                    rm -f "$MONITOR_PID_FILE"
+                    exit 1
+                fi
+                continue
+            fi
+            LOADING_CHECKS=0
 
             # Check if training finished or crashed via SSH to train.log
             # (vastai logs only shows container stdout, not train.log)
