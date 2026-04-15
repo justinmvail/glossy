@@ -589,19 +589,29 @@ _start_bg_monitor() {
     local MONITOR_PID_FILE="$STROKE_DIR/.monitor.pid"
     local SCRIPT_PATH="$(readlink -f "$0")"
 
+    # Capture the instance ID at monitor start — only act on THIS instance,
+    # not whatever might be in the state file later (avoids race with redeploys)
+    local MONITOR_INSTANCE_ID=$(head -1 "$STATE_FILE" 2>/dev/null)
+    if [ -z "$MONITOR_INSTANCE_ID" ]; then
+        return
+    fi
+
     # Kill any existing monitor
     _kill_bg_monitor
 
     (
+        INSTANCE_ID="$MONITOR_INSTANCE_ID"
         while true; do
             sleep 300  # Check every 5 minutes
 
-            # Reload SSH config in case state file changed
+            # If state file is gone or points to a different instance, exit
             if [ ! -f "$STATE_FILE" ]; then
-                exit 0  # Instance already destroyed
+                exit 0
             fi
-
-            INSTANCE_ID=$(head -1 "$STATE_FILE")
+            CURRENT_ID=$(head -1 "$STATE_FILE" 2>/dev/null)
+            if [ "$CURRENT_ID" != "$INSTANCE_ID" ]; then
+                exit 0  # A new deploy replaced us
+            fi
             STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | python3 -c "
 import json, sys
 try:
