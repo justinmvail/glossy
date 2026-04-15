@@ -641,7 +641,7 @@ def autoregressive_loss(model_output: dict, canvas_size: int = CANVAS_SIZE,
     endpoint_dist = (last_point - first_point).norm(dim=-1).clamp(min=1e-6)  # (B, S)
 
     sinuosity = path_length / endpoint_dist  # >= 1.0
-    excess_sinuosity = (sinuosity - 2.5).clamp(min=0)
+    excess_sinuosity = (sinuosity - 1.0).clamp(min=0)
     active = (existence > 0.3).float()
     loss_sinuosity = (excess_sinuosity * active).sum(dim=1).mean()
 
