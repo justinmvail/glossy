@@ -333,6 +333,61 @@ class StrokePredictor(nn.Module):
             stroke_w = [float(widths[i, j].item()) for j in range(n_pts)]
             stroke_widths.append(stroke_w)
 
+        # Post-process: merge strokes with close, aligned, width-compatible endpoints.
+        # The merge penalty during training pushes the model to produce mergeable pairs;
+        # this completes the loop by actually concatenating them at inference time.
+        strokes, stroke_widths = self._merge_strokes(strokes, stroke_widths)
+
+        return strokes, stroke_widths
+
+    @staticmethod
+    def _merge_strokes(strokes, stroke_widths, gap_thresh=15.0,
+                       cos_thresh=0.5, width_thresh=5.0):
+        """Merge stroke pairs with close, aligned, width-compatible endpoints."""
+        import math
+
+        def _endpoint_dir(stroke, end):
+            """Unit direction at start or end of a stroke."""
+            if end == 'start' and len(stroke) >= 2:
+                dx, dy = stroke[1][0] - stroke[0][0], stroke[1][1] - stroke[0][1]
+            elif end == 'end' and len(stroke) >= 2:
+                dx, dy = stroke[-1][0] - stroke[-2][0], stroke[-1][1] - stroke[-2][1]
+            else:
+                return (0, 0)
+            mag = math.hypot(dx, dy)
+            return (dx / mag, dy / mag) if mag > 1e-6 else (0, 0)
+
+        def _try_merge(strokes, stroke_widths):
+            """Single pass: find and execute one merge. Returns True if merged."""
+            for i in range(len(strokes)):
+                for j in range(len(strokes)):
+                    if i == j:
+                        continue
+                    # Check end(i) → start(j)
+                    ei = strokes[i][-1]
+                    sj = strokes[j][0]
+                    gap = math.hypot(ei[0] - sj[0], ei[1] - sj[1])
+                    if gap > gap_thresh:
+                        continue
+                    di = _endpoint_dir(strokes[i], 'end')
+                    dj = _endpoint_dir(strokes[j], 'start')
+                    cos_sim = di[0] * dj[0] + di[1] * dj[1]
+                    if cos_sim < cos_thresh:
+                        continue
+                    w_end = stroke_widths[i][-1]
+                    w_start = stroke_widths[j][0]
+                    if abs(w_end - w_start) > width_thresh:
+                        continue
+                    # Merge j into i (end-to-start)
+                    strokes[i] = strokes[i] + strokes[j]
+                    stroke_widths[i] = stroke_widths[i] + stroke_widths[j]
+                    strokes.pop(j)
+                    stroke_widths.pop(j)
+                    return True
+            return False
+
+        while _try_merge(strokes, stroke_widths):
+            pass
         return strokes, stroke_widths
 
 
