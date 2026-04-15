@@ -237,9 +237,12 @@ print(data.get('new_contract', data.get('id', '')))
     log "Instance $INSTANCE_ID created."
 
     # Wait for instance to be running
-    info "Waiting for instance to start (20 min timeout, tailing logs)..."
+    # Hosts with cached Docker layers start in 1-3 min. If still "loading"
+    # after 10 min, the host is pulling the full base image (~23GB). Kill
+    # and retry on a different host rather than wait 20+ min.
+    info "Waiting for instance to start (10 min timeout)..."
     LAST_LOG_COUNT=0
-    for i in $(seq 1 240); do
+    for i in $(seq 1 120); do
         INSTANCE_RAW=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null || true)
         STATUS=$(echo "$INSTANCE_RAW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
         STATUS_MSG=$(echo "$INSTANCE_RAW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status_msg',''))" 2>/dev/null || true)
@@ -281,29 +284,18 @@ print(data.get('new_contract', data.get('id', '')))
 
     if [ "$STATUS" != "running" ]; then
         if [ "$STATUS" = "loading" ]; then
-            warn "Still loading after 20 min (image pull in progress). Continuing to wait..."
-            while true; do
-                STATUS=$(vastai show instance "$INSTANCE_ID" --raw 2>/dev/null | \
-                    python3 -c "import json,sys; print(json.load(sys.stdin).get('actual_status',''))" 2>/dev/null || true)
-                if [ "$STATUS" = "running" ]; then
-                    log "Instance running!"
-                    break
-                elif [ "$STATUS" != "loading" ]; then
-                    err "Instance status changed to: $STATUS"
-                    dump_and_destroy "$INSTANCE_ID"
-                    rm -f "$STATE_FILE"
-                    CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
-                    if [ "$CREATE_RETRIES" -ge 3 ]; then
-                        err "Failed on 3 instances. Giving up."
-                        exit 1
-                    fi
-                    export CREATE_RETRIES
-                    create_instance
-                    return
-                fi
-                printf "."
-                sleep 10
-            done
+            warn "Still loading after 10 min — host likely pulling full base image."
+            warn "Killing and retrying on a different host..."
+            dump_and_destroy "$INSTANCE_ID"
+            rm -f "$STATE_FILE"
+            CREATE_RETRIES=$((${CREATE_RETRIES:-0} + 1))
+            if [ "$CREATE_RETRIES" -ge 5 ]; then
+                err "Failed on 5 instances. Giving up."
+                exit 1
+            fi
+            export CREATE_RETRIES
+            create_instance
+            return
         else
             err "Instance status: $STATUS (not loading or running)."
             dump_and_destroy "$INSTANCE_ID"
