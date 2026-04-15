@@ -186,6 +186,7 @@ class StrokePredictor(nn.Module):
 
         # Output heads (single stroke)
         self.existence_head = nn.Linear(feature_dim, 1)
+        self.existence_head.bias.data.fill_(2.0)  # sigmoid(2) ≈ 0.88 — start confidently "on"
         self.points_head = nn.Linear(feature_dim, MAX_POINTS * 2)
         self.width_head = nn.Linear(feature_dim, MAX_POINTS)  # per-point widths
         self.point_count_head = nn.Linear(feature_dim, MAX_POINTS)
